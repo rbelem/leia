@@ -11,11 +11,16 @@
   "background": {
     "service_worker": "background/index.js"
   },
+  "offscreen": {
+    "scripts": ["probes/offscreen.js"],
+    "reason": "AUDIO_PLAYBACK",
+    "creation": "PROBE"
+  },
   "content_scripts": [
     { "matches": ["<all_urls>"], "js": ["content/index.js"], "run_at": "document_idle" },
     { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
   ],
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "offscreen", "alarms"],
   "optional_host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",

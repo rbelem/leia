@@ -5,59 +5,96 @@ pages may be suspended after seconds of inactivity — including mid-read. This
 spike answers: can an event page read for 5 continuous minutes without
 suspension? If it suspends, the owner becomes a hidden persistent page.
 
-## Probe
+## What is implemented
 
-From the Firefox event page (`background/scripts` in the build), start a
-6-minute `speechSynthesis` utterance and log lifecycle markers. Drive it via
-`browser.runtime.onMessage` from the popup or a test page.
+| File | Role |
+|---|---|
+| `src/probes/ff-playback.ts` | Event-page probe: starts a ~5-7 min `speechSynthesis` utterance, writes a heartbeat to `storage.session` every 5s, logs lifecycle markers, and logs a watchdog note on the next wake if the page was suspended mid-playback. Optional 30s `alarms` keepalive (`leia:ff-playback-keepalive`) |
+| `src/background/index.ts` | Gated entry points `leia:ff-playback` / `leia:ff-playback-keepalive` (idle when unused; no product behavior) |
+| `src/manifest.json` | `alarms` permission added (needed by the optional keepalive; benign otherwise) |
 
-```ts
-import browser from "webextension-polyfill";
+The probe is part of the shared background bundle, so it exists in the Chrome
+build too — there it replies `{ok:false}` (the Chrome service worker has no
+`speechSynthesis`).
 
-const startedAt = Date.now();
+**Probe validity rule:** the `leia:ff-playback` handler returns immediately.
+A long-lived promise reply would keep the event page awake and fake the
+result — all evidence is streamed via console + `storage.session`, never held
+open as a reply.
 
-browser.runtime.onMessage.addListener((msg) => {
-  if (msg.type !== "leia:start-probe") return;
+## Running it
 
-  const u = new SpeechSynthesisUtterance(
-    `Leia probing continuous playback. ${"This is a long read. ".repeat(120)}`
-  );
-  u.onstart = () => log("start");
-  u.onboundary = () => log(`boundary@${(Date.now() - startedAt) / 1000}s`);
-  u.onend = () => log(`end@${(Date.now() - startedAt) / 1000}s`);
-  u.onerror = (e) => log(`error:${e.error}@${(Date.now() - startedAt) / 1000}s`);
-
-  // reset the idle timer: an event page stays alive while it has work or
-  // a fresh event; a pure read with no events may still be suspended
-  speechSynthesis.speak(u);
-});
-
-function log(line: string): void {
-  console.log(`[leia eventpage probe] ${line}`);
-  // persist so a restart can be detected: storage or an extra alarm
-  void browser.storage.local.set({ last: `${Date.now()}:${line}` });
-}
+```sh
+npm run build
 ```
 
-## Checklist
+1. Open `about:debugging#/runtime/this-firefox`, click **Load Temporary
+   Add-on…**, pick `dist/firefox/manifest.json`.
+2. On the extension card click **Inspect** to open the background-script
+   console (this is the event page's DevTools).
+3. Trigger the probe from that console (`browser` is a global in the
+   background context):
 
-- [ ] `onstart` fires
-- [ ] `onboundary` fires repeatedly across the whole utterance (continuous work)
-- [ ] **`onend` fires at ≥ 5 minutes** without an intervening `error:canceled` / `error:interrupted` / silent restart — this is the pass gate
-- [ ] No service-worker-style suspension visible: `browser.storage.local`
-      `last` timestamp does not jump by many seconds between boundaries
-- [ ] A second utterance immediately after the first also completes (idle timer reset check)
-- [ ] Document in docs/platform-floor.md whether a hidden persistent page is the owner
+```js
+browser.runtime.sendMessage({ type: "leia:ff-playback" })
+```
 
-## If it suspends mid-read (expected failure mode)
+4. Confirm the reply `{ok:true, data:{stage:"started"}}` and watch the
+   console. Check the persisted state any time with:
 
-- First try restarting the utterance from `browser.storage` state + an alarm
-  kick (`chrome.alarms` wakes the event page on schedule) — note audio gap
-- If resume latency or the suspension itself is unacceptable, **the owner
-  becomes a hidden persistent background page** (or `background.scripts` with
-  no event-page optimization) as the documented Firefox audio owner
+```js
+browser.storage.session.get("leia:ff-playback")
+```
+
+## The 5-minute observation protocol
+
+The utterance is ~1000 words (`"This is a long read. "` × 200) ≈ 5-7 min at
+normal TTS speed — comfortably past the 5-minute pass gate.
+
+1. **Start:** console shows `[leia ff-playback] start: …` then `onstart @ …s`
+   and the first `boundary #1..#5 @ …s` lines (after that, boundaries are
+   counted, not logged individually).
+2. **Alive:** every ~5s a `hb @ <N>s, boundaries=<M>` line appears and
+   `storage.session`'s `lastHb` keeps moving. Boundary count increasing proves
+   speech itself is progressing, not just timers.
+3. **End:** `end: end @ ≥300s, boundaries=…` clears `active` in storage.
+   A pass = `onend` fires at ≥ 5 minutes with no intervening
+   `error:canceled` / `error:interrupted` / silent restart, and `lastHb`
+   never jumps by many seconds.
+4. **Second utterance:** trigger `leia:ff-playback` again right after `end`
+   and confirm it also completes (idle-timer reset check).
+5. **If it suspends mid-read (expected failure mode):** the `hb` lines go
+   silent, audio stops, and the next wake (click the popup, send any message,
+   or wait for the keepalive alarm) logs:
+   `wake: previous run still active, heartbeat <N>s old … — event page WAS
+   suspended mid-playback` (plus a fresh-context `speechSynthesis.speaking`
+   note). `storage.session` still shows `active:true` with the frozen `lastHb`
+   — that gap is the suspension duration.
+6. **Keepalive (optional, only if 5 failed):** arm a 30s alarm that wakes the
+   event page on schedule and observe whether it prevents suspension
+   entirely (audio gap vs none):
+
+```js
+browser.runtime.sendMessage({ type: "leia:ff-playback-keepalive" })
+// each wake logs: [leia ff-playback] alarm kick — page woke at …
+```
+
+If resume latency or the suspension itself is unacceptable, **the owner
+becomes a hidden persistent background page** (or `background.scripts` with
+no event-page optimization) as the documented Firefox audio owner.
+
+## Result recording
+
+| Observation | Console line to capture | Verdict |
+|---|---|---|
+| start | `[leia ff-playback] start: 4400 chars (~5-7 min)…` | |
+| first events | `onstart @ Ns`, `boundary #1..#5 @ Ns` | |
+| heartbeat cadence | `hb @ Ns, boundaries=M` every ~5s, gap ≤ ~6s | |
+| completion | `end: end @ ≥300s, boundaries=M` | |
+| suspension | silence in `hb` lines + `wake: … WAS suspended …` on next wake, gap = suspension length | |
+| keepalive (if used) | `alarm kick — page woke at …` each cycle | |
 
 ## Decision output
 
-`event page survives 5 min?` → (yes / no). That answer fixes the Firefox audio
-owner in ADR-0002: event page as-is, or hidden persistent page.
+`event page survives 5 min?` → (yes / no). That answer fixes the Firefox
+audio owner in ADR-0002: event page as-is, or hidden persistent page.
