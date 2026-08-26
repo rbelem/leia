@@ -1,13 +1,14 @@
 /**
  * Floating bar (page context): "Read selection", Play/Pause, Stop, speed.
- * Captures the page selection itself (T2 item 6 — the bar lives in the
- * page), binds the sentence-token index to the session, and applies the
- * marching highlight from background events. `mousedown` is prevented on
- * the bar so clicking it never steals the page's selection or focus.
+ * Captures the page scope itself (T2 item 6 — the bar lives in the
+ * page — with the T3 article fallback), binds the sentence-token index to
+ * the session, and applies the marching highlight from background events.
+ * `mousedown` is prevented on the bar so clicking it never steals the
+ * page's selection or focus.
  */
 import browser from "webextension-polyfill";
 import { isRouterMessage, routeMessage, type RouterReply } from "../background/router";
-import { captureSelection, ScopeHighlighter } from "../content/scope";
+import { captureScope, ScopeHighlighter } from "../content/scope";
 import { ensureHighlightStyle } from "../content/highlight";
 import type { SessionStatus } from "../reader/session";
 
@@ -15,7 +16,9 @@ const BAR_ID = "leia-floating-bar";
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.5, 2, 2.5, 3];
 
 ensureHighlightStyle(document);
-const highlighter = new ScopeHighlighter();
+// A heavy mutation on the bound scope (SPA content swap) invalidates the
+// read: stop playback and surface the page-changed state.
+const highlighter = new ScopeHighlighter({ onStale: handleScopeStale });
 
 interface BarElements {
   root: HTMLElement;
@@ -28,6 +31,15 @@ interface BarElements {
 
 let els: BarElements | null = null;
 let status: SessionStatus = { sessionId: null, state: "stopped", tokenPos: 0, tokenCount: 0, settings: { voiceName: null, rate: 1 } };
+/** Set when the underlying page mutated away from the bound scope; persists
+ * until the next read click. */
+let staleNotice: string | null = null;
+
+function handleScopeStale(): void {
+  staleNotice = "page changed — select text";
+  render();
+  void browser.runtime.sendMessage({ type: "leia:reader:stop" }).catch(() => {});
+}
 
 function render(): void {
   if (!els) return;
@@ -36,9 +48,10 @@ function render(): void {
   els.toggle.textContent = stateLabel(status.state);
   els.speed.value = String(status.settings.rate);
   els.status.textContent =
-    status.state === "stopped"
+    staleNotice ??
+    (status.state === "stopped"
       ? "select text, then Read selection"
-      : `${status.state} · sentence ${Math.min(status.tokenPos + 1, status.tokenCount)}/${status.tokenCount}`;
+      : `${status.state} · sentence ${Math.min(status.tokenPos + 1, status.tokenCount)}/${status.tokenCount}`);
 }
 
 function stateLabel(s: SessionStatus["state"]): string {
@@ -106,9 +119,10 @@ function initBar(): void {
   els = ensureBar();
 
   els.read.addEventListener("click", () => {
-    const scope = captureSelection(window);
+    staleNotice = null;
+    const scope = captureScope(window);
     if (!scope) {
-      els!.status.textContent = "no text selected";
+      els!.status.textContent = "no readable article — select text";
       return;
     }
     void browser.runtime

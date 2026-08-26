@@ -1,12 +1,16 @@
 import browser from "webextension-polyfill";
 import { isRouterMessage, routeMessage, type RouterReply } from "../background/router";
 import { pageInfoFromDocument } from "./page-info";
-import { captureSelection, ScopeHighlighter, type CapturedScope } from "./scope";
+import { captureScope, ScopeHighlighter, type CapturedScope } from "./scope";
 import { ensureHighlightStyle } from "./highlight";
 
 // Marching-highlight stylesheet + capture state for the toolbar-action path.
 ensureHighlightStyle(document);
-const highlighter = new ScopeHighlighter();
+// A heavy mutation on the bound scope (SPA content swap) invalidates the
+// read: stop playback; the page is no longer what we tokenized.
+const highlighter = new ScopeHighlighter({
+  onStale: () => void browser.runtime.sendMessage({ type: "leia:reader:stop" }).catch(() => {}),
+});
 
 let captureSeq = 0;
 let pendingScope: CapturedScope | null = null;
@@ -16,13 +20,17 @@ browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined =>
   if (msg.type === "leia:page-info") {
     return { ok: true, replyType: "leia:page-info", data: pageInfoFromDocument(document) };
   }
-  // Toolbar-action fallback: capture the page selection on demand (T2 item 6).
-  // The selection lives in this page context, so the scope stays here; the
-  // background later binds the session id to it.
+  // Toolbar-action fallback: capture the page scope on demand (T2 item 6, T3
+  // article fallback). The scope lives in this page context, so it stays
+  // here; the background later binds the session id to it.
   if (msg.type === "leia:selection:capture") {
-    const scope = captureSelection(window);
+    const scope = captureScope(window);
     if (!scope) {
-      return { ok: false, replyType: "leia:selection:capture", error: "no text selected" };
+      return {
+        ok: false,
+        replyType: "leia:selection:capture",
+        error: "no selection and no readable article on this page",
+      };
     }
     captureSeq += 1;
     pendingScope = scope;
