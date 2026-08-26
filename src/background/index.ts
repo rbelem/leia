@@ -8,7 +8,7 @@ import {
 } from "../probes/ff-playback";
 import { chromeAudioEngine, resolveAudioEngine } from "../audio/owner";
 import { ReaderSession, type SessionEvent, type TokenText } from "../reader/session";
-import type { EngineEvent } from "../reader/contract";
+import type { EngineEvent, TextEngine } from "../reader/contract";
 
 // --- T2 spike probes: offscreen document bootstrap (Chrome only) ---
 let offscreenReady: Promise<void> | null = null;
@@ -166,6 +166,22 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
     if ("engine" in msg) prefs.engine = msg.engine as string | null;
     const status = await s.setPrefs(prefs);
     return { ok: true, replyType: "leia:reader:prefs", data: status };
+  }
+
+  // --- Settings (T14): per-family capability disclosure + theme relay ---
+  if (msg.type === "leia:audio:families") {
+    // ponytail: engines without families() answer as the single default
+    // family; EngineHub.families() and the Chrome proxy both implement it.
+    const withFamilies = engine as TextEngine & { families?: () => unknown };
+    const data =
+      typeof withFamilies.families === "function"
+        ? await withFamilies.families()
+        : [{ family: "web-speech", capabilities: engine.capabilities }];
+    return { ok: true, replyType: "leia:audio:families", data };
+  }
+  if (msg.type === "leia:theme:set") {
+    await broadcast({ type: "leia:theme:set", theme: msg.theme });
+    return { ok: true, replyType: "leia:theme:set" };
   }
 
   // --- Audio events from the Chrome offscreen document (ADR-0002) ---

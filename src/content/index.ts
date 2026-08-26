@@ -2,7 +2,17 @@ import browser from "webextension-polyfill";
 import { isRouterMessage, routeMessage, type RouterReply } from "../background/router";
 import { pageInfoFromDocument } from "./page-info";
 import { captureScope, ScopeHighlighter, type CapturedScope } from "./scope";
-import { ensureHighlightStyle } from "./highlight";
+import { ensureHighlightStyle, setTheme } from "./highlight";
+import { THEME_IDS, type ThemeId } from "./themes";
+
+// Honor the stored highlight theme (popup settings, T14) on page load.
+void browser.storage.local
+  .get("leia:settings:theme")
+  .then((got: Record<string, unknown>) => {
+    const t = got["leia:settings:theme"];
+    if (typeof t === "string" && (THEME_IDS as string[]).includes(t)) setTheme(t as ThemeId);
+  })
+  .catch(() => {});
 
 // Marching-highlight stylesheet + capture state for the toolbar-action path.
 ensureHighlightStyle(document);
@@ -57,6 +67,12 @@ browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined =>
   }
   if (msg.type === "leia:highlight:clear") {
     highlighter.clear((msg as unknown as { sessionId: string }).sessionId);
+    return undefined;
+  }
+  // Live theme swaps relayed from the popup settings (T14).
+  if (msg.type === "leia:theme:set") {
+    const t = (msg as unknown as { theme?: string }).theme;
+    if (t && (THEME_IDS as string[]).includes(t)) setTheme(t as ThemeId);
     return undefined;
   }
   return routeMessage(msg) ?? undefined;

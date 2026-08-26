@@ -4,27 +4,174 @@
   <meta charset="utf-8" />
   <title>Leia</title>
   <style>
-    body { font: 13px/1.5 system-ui, sans-serif; width: 280px; margin: 0; padding: 12px; }
-    h1 { font-size: 15px; margin: 0 0 2px; }
-    p.note { margin: 0 0 10px; color: #6b7280; font-size: 12px; }
-    label { display: block; margin: 8px 0 2px; color: #374151; }
-    select { width: 100%; padding: 4px 6px; font: inherit; }
-    button { width: 100%; margin: 4px 0; padding: 6px 8px; text-align: left; }
-    #status { margin-top: 8px; color: #6b7280; font-size: 12px; min-height: 1.2em; }
+    :root {
+      --bg: #faf9f7;
+      --panel: #ffffff;
+      --ink: #1c1917;
+      --muted: #78716c;
+      --line: #e7e5e4;
+      --accent: #b45309;
+      --accent-soft: rgba(180, 83, 9, 0.12);
+      --ok: #15803d;
+      --radius: 8px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1917;
+        --panel: #292524;
+        --ink: #f5f5f4;
+        --muted: #a8a29e;
+        --line: #44403c;
+        --accent: #fbbf24;
+        --accent-soft: rgba(251, 191, 36, 0.14);
+        --ok: #4ade80;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      width: 320px;
+      margin: 0;
+      padding: 14px 14px 18px;
+      font: 12.5px/1.45 system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    header.masthead { margin-bottom: 12px; }
+    header.masthead h1 { font-size: 17px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+    header.masthead .tagline { margin: 1px 0 0; color: var(--muted); font-size: 11.5px; }
+
+    section { border-top: 1px solid var(--line); padding: 10px 0 12px; }
+    section > h2 {
+      margin: 0 0 8px;
+      font-size: 10.5px;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .hint { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+
+    select, input {
+      width: 100%;
+      padding: 6px 8px;
+      font: inherit;
+      color: var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    select:focus, input:focus, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    optgroup { font-style: normal; }
+    optgroup[disabled] { color: var(--muted); }
+
+    button {
+      font: inherit;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    button.primary {
+      width: 100%;
+      background: var(--accent);
+      border-color: transparent;
+      color: #fff;
+      font-weight: 600;
+    }
+    @media (prefers-color-scheme: dark) { button.primary { color: #1c1917; } }
+    button.primary:hover { filter: brightness(1.06); }
+    button.ghost { padding: 5px 8px; font-size: 11.5px; color: var(--muted); }
+    button.ghost:hover { color: var(--ink); border-color: var(--muted); }
+
+    #status {
+      margin: 8px 0;
+      min-height: 1.2em;
+      font-size: 11.5px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .field { display: flex; align-items: center; gap: 8px; }
+    .field > span { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-height: 18px; }
+    .chip {
+      font-size: 10.5px;
+      line-height: 1;
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--panel);
+    }
+
+    .swatches { display: flex; gap: 8px; }
+    .swatch {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid transparent;
+      background: none;
+    }
+    .swatch-chip {
+      width: 34px;
+      height: 24px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+    }
+    .swatch-label { font-size: 10px; color: var(--muted); }
+    .swatch[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+    .swatch[aria-checked="true"] .swatch-label { color: var(--ink); font-weight: 600; }
+
+    .provider { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px; margin-bottom: 8px; }
+    .provider-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+    .provider-name { font-weight: 600; }
+    .provider-state { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .provider-state.ok { color: var(--ok); }
+    .provider-fields { display: flex; gap: 6px; }
+    .provider-fields .key-input { flex: 1; min-width: 0; }
+    .provider input.region { margin-top: 6px; }
   </style>
 </head>
 <body>
-  <h1>Leia</h1>
-  <p class="note">Select text on a page, then press <b>Read selection</b> in the floating bar (bottom-right).</p>
+  <header class="masthead">
+    <h1>Leia</h1>
+    <p class="tagline">Select text on a page, then read it aloud.</p>
+  </header>
 
-  <button id="read-selection">Read selection (active tab)</button>
-  <div id="status">—</div>
+  <section aria-label="Playback">
+    <h2>Playback</h2>
+    <button id="read-selection" class="primary">Read selection in active tab</button>
+    <div id="status" role="status">no active session</div>
+    <label class="field">
+      <span>Speed</span>
+      <select id="speed"></select>
+    </label>
+  </section>
 
-  <label for="voice">Voice (Web Speech)</label>
-  <select id="voice"><option value="">(default voice)</option></select>
+  <section aria-label="Voice">
+    <h2>Voice</h2>
+    <select id="voice"><option value="">(default voice)</option></select>
+    <div id="capabilities" class="chips" aria-label="Engine capabilities"></div>
+  </section>
 
-  <label for="speed">Speed</label>
-  <select id="speed"></select>
+  <section aria-label="Highlight theme">
+    <h2>Highlight theme</h2>
+    <div id="theme-swatches" class="swatches" role="radiogroup"></div>
+  </section>
+
+  <section aria-label="Providers">
+    <h2>Providers</h2>
+    <p class="hint">Add your own API key to enable a voice provider. Keys stay in this browser.</p>
+    <div id="providers"></div>
+  </section>
 
   <script src="popup.js"></script>
 </body>
