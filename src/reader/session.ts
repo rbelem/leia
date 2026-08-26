@@ -31,6 +31,18 @@ export interface SessionStatus {
   tokenPos: number;
   tokenCount: number;
   settings: SessionSettings;
+  /** URL the session was started for (T16 resume store key), null when unknown. */
+  url?: string | null;
+  /** Transient engine failure detail (T17); null unless a drive error parked the session. */
+  lastError?: string | null;
+}
+
+/** Live-session position view the background saves into the per-URL resume store. */
+export interface SessionSnapshot {
+  tokens: TokenText[];
+  tokenPos: number;
+  settings: SessionSettings;
+  url: string | null;
 }
 
 export type SessionEvent =
@@ -43,7 +55,15 @@ export type SessionEvent =
       /** Word-level march: char offsets relative to the chunk text. */
       word?: { begin: number; end: number };
     }
-  | { type: "clear"; sessionId: string };
+  | { type: "clear"; sessionId: string }
+  | { type: "error"; sessionId: string; message: string };
+
+/** start() options: session-settings overrides plus the T16 resume anchors. */
+export interface StartOptions extends Partial<SessionSettings> {
+  url?: string;
+  /** Restore playback from this token (0 = from the top); clamped into the scope. */
+  resumeAt?: number;
+}
 
 export interface SessionStorage {
   get(key: string): Promise<Record<string, unknown>>;
@@ -57,6 +77,7 @@ interface StoredSession {
   tokenPos: number;
   tokens: TokenText[];
   settings: SessionSettings;
+  url: string | null;
   updatedAt: number;
 }
 
@@ -79,6 +100,8 @@ export class ReaderSession {
   private tokenPos = 0;
   private settings: SessionSettings = { ...DEFAULT_PREFS };
   private prefs: StoredPrefs = { ...DEFAULT_PREFS };
+  private url: string | null = null;
+  private lastError: string | null = null;
   private currentChunk: ChunkSpan | null = null;
   private speakSeq = 0;
   private driveGen = 0;
@@ -105,6 +128,7 @@ export class ReaderSession {
     session.tokens = s.tokens;
     session.tokenPos = s.tokenPos;
     session.settings = { ...s.settings };
+    session.url = s.url ?? null;
     session.chunks = chunkTokens(s.tokens, await session.resolveChunkCap());
     session.state = "paused";
     if (s.state === "playing") {
@@ -123,22 +147,44 @@ export class ReaderSession {
       tokenPos: this.tokenPos,
       tokenCount: this.tokens.length,
       settings: { ...this.settings },
+      url: this.url,
+      lastError: this.lastError,
+    };
+  }
+
+  /**
+   * Live position view for the per-URL resume store (T16). Null when there
+   * is no active session (stopped). The background saves this on pause/stop
+   * and when a new start supersedes the current session.
+   */
+  snapshot(): SessionSnapshot | null {
+    if (this.sessionId === null) return null;
+    return {
+      tokens: this.tokens,
+      tokenPos: this.tokenPos,
+      settings: { ...this.settings },
+      url: this.url,
     };
   }
 
   /** Start a new session; supersedes any previous one (item 9). */
-  async start(tokens: TokenText[], overrides?: Partial<SessionSettings>): Promise<SessionStatus> {
+  async start(tokens: TokenText[], overrides?: StartOptions): Promise<SessionStatus> {
     if (this.state !== "stopped") {
       this.engine.cancel();
       this.currentChunk = null;
     }
     this.driveGen += 1; // invalidate any older drive loop
     if (tokens.length === 0) throw new Error("empty read scope");
+    // Resume anchors are start-only routing, not session settings — keep
+    // them out of settings (which persists + feeds the engine options).
+    const { url, resumeAt, ...settingsOverrides } = overrides ?? {};
     this.sessionId = newId();
     this.tokens = tokens;
-    this.settings = { ...this.prefs, ...overrides };
+    this.settings = { ...this.prefs, ...settingsOverrides };
+    this.url = url ?? null;
+    this.lastError = null;
     this.chunks = chunkTokens(tokens, await this.resolveChunkCap());
-    this.tokenPos = 0;
+    this.tokenPos = Math.max(0, Math.min(resumeAt ?? 0, tokens.length - 1));
     this.state = "playing";
     await this.persist();
     this.emitState();
@@ -148,6 +194,7 @@ export class ReaderSession {
 
   async pause(): Promise<SessionStatus> {
     if (this.state !== "playing") return this.status();
+    this.lastError = null;
     this.tokenPos = this.currentChunk?.from ?? this.tokenPos;
     this.state = "paused";
     this.driveGen += 1;
@@ -160,6 +207,7 @@ export class ReaderSession {
 
   async resume(): Promise<SessionStatus> {
     if (this.state !== "paused" || this.sessionId === null) return this.status();
+    this.lastError = null;
     this.state = "playing";
     this.driveGen += 1;
     await this.persist();
@@ -273,26 +321,34 @@ export class ReaderSession {
           }
           if (ev.type === "error") {
             outcome = "error";
+            this.lastError = ev.message;
             break;
           }
         }
         this.currentChunk = null;
         if (this.state !== "playing" || gen !== this.driveGen) return; // paused/stopped/superseded
         if (outcome === "error") {
-          // Transport/engine failure — park as paused so resume retries cleanly.
+          // Transport/engine failure — park as paused so resume retries cleanly,
+          // and surface the failure (T17) instead of failing silently. tokenPos
+          // still anchors the failed chunk: resume replays from it.
+          const id = this.sessionId;
           this.state = "paused";
           await this.persist();
           this.emitState();
+          if (id) this.emit({ type: "error", sessionId: id, message: this.lastError ?? "engine error" });
           return;
         }
         if (outcome === "end") this.tokenPos = chunk.to + 1;
         await this.persist();
       }
-    } catch {
+    } catch (err) {
       // Engine transport failure — park as paused so resume retries cleanly.
+      this.lastError = err instanceof Error ? err.message : String(err);
+      const id = this.sessionId;
       this.state = "paused";
       await this.persist();
       this.emitState();
+      if (id) this.emit({ type: "error", sessionId: id, message: this.lastError });
     }
     if (this.state === "playing" && this.tokenPos >= this.tokens.length) {
       this.state = "stopped";
@@ -343,6 +399,7 @@ export class ReaderSession {
       tokenPos: this.tokenPos,
       tokens: this.tokens,
       settings: { ...this.settings },
+      url: this.url,
       updatedAt: Date.now(),
     };
     await this.storage.set({ [SESSION_KEY]: record });

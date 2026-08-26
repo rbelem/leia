@@ -157,7 +157,13 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
 
 if (document.getElementById("voice")) {
   const statusEl = document.getElementById("status") as HTMLDivElement;
+  const readerErrorEl = document.getElementById("reader-error") as HTMLDivElement;
+  const resumeRow = document.getElementById("resume-row") as HTMLDivElement;
+  const resumeLabel = document.getElementById("resume-label") as HTMLSpanElement;
+  const resumeClearBtn = document.getElementById("resume-clear") as HTMLButtonElement;
   const voiceSelect = document.getElementById("voice") as HTMLSelectElement;
+  const previewBtn = document.getElementById("preview-voice") as HTMLButtonElement;
+  const previewNote = document.getElementById("preview-note") as HTMLDivElement;
   const speedSelect = document.getElementById("speed") as HTMLSelectElement;
   const capsEl = document.getElementById("capabilities") as HTMLDivElement;
   const swatchesEl = document.getElementById("theme-swatches") as HTMLDivElement;
@@ -193,6 +199,13 @@ if (document.getElementById("voice")) {
           : `${status.state} · ${Math.min(status.tokenPos + 1, status.tokenCount)}/${status.tokenCount}${famSuffix}`;
       speedSelect.value = String(status.settings.rate);
     }
+    // T17 — surface engine failures instead of a silent pause.
+    if (status?.lastError) {
+      readerErrorEl.textContent = `engine error — ${status.lastError}`;
+      readerErrorEl.hidden = false;
+    } else {
+      readerErrorEl.hidden = true;
+    }
 
     const voices = ((voicesReply as RouterReply | undefined)?.data as VoiceInfo[] | undefined) ?? [];
     voicesByFamily = new Map<string, VoiceInfo[]>();
@@ -215,6 +228,7 @@ if (document.getElementById("voice")) {
       for (const v of list) {
         const opt = document.createElement("option");
         opt.value = v.name;
+        opt.dataset.family = family;
         opt.textContent = `${v.name} (${v.lang})`;
         group.appendChild(opt);
       }
@@ -234,7 +248,36 @@ if (document.getElementById("voice")) {
       voiceSelect.appendChild(group);
     }
     voiceSelect.value = status?.settings.voiceName ?? "";
+    previewBtn.disabled = !voiceSelect.value;
     updateCapabilities();
+    void refreshResume();
+  }
+
+  /**
+   * T16 resume hint for the ACTIVE tab: "Continue from sentence N" + clear.
+   * Reads the record through the background relay (the store stays behind
+   * background). Skips silently when the tab URL is unavailable.
+   */
+  async function refreshResume(): Promise<void> {
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (typeof tab?.url !== "string") {
+        resumeRow.hidden = true;
+        return;
+      }
+      const reply = (await send({ type: "leia:reader:resume-info", url: tab.url })) as RouterReply | undefined;
+      const info = reply?.ok
+        ? (reply.data as { url: string; tokenPos: number; tokenCount: number } | null | undefined)
+        : null;
+      if (!info) {
+        resumeRow.hidden = true;
+        return;
+      }
+      resumeLabel.textContent = `Continue from sentence ${info.tokenPos + 1}`;
+      resumeRow.hidden = false;
+    } catch {
+      resumeRow.hidden = true;
+    }
   }
 
   function markTheme(selected: ThemeId): void {
@@ -321,7 +364,38 @@ if (document.getElementById("voice")) {
       if (chosen && chosen.family !== currentStatus?.settings.engine) prefs.engine = chosen.family;
     }
     void send({ type: "leia:reader:prefs", ...prefs });
+    previewBtn.disabled = !voiceName;
     updateCapabilities();
+  });
+
+  previewBtn.addEventListener("click", async () => {
+    const voiceName = voiceSelect.value || null;
+    if (!voiceName) return;
+    const opt = voiceSelect.selectedOptions[0] as HTMLOptionElement | undefined;
+    const reply = (await send({
+      type: "leia:reader:preview",
+      voiceName,
+      family: opt?.dataset.family,
+    })) as RouterReply | undefined;
+    if (!reply?.ok) {
+      // Keyless provider family (or engine failure): flash a grounded hint.
+      previewNote.textContent = "no key — add an API key in Providers below";
+      previewNote.hidden = false;
+      setTimeout(() => {
+        previewNote.hidden = true;
+      }, 4000);
+    }
+  });
+
+  resumeClearBtn.addEventListener("click", async () => {
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (typeof tab?.url === "string") {
+        await send({ type: "leia:reader:resume-clear", url: tab.url });
+      }
+    } finally {
+      resumeRow.hidden = true;
+    }
   });
 
   speedSelect.addEventListener("change", () => {

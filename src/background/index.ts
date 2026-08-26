@@ -9,6 +9,7 @@ import {
 import { chromeAudioEngine, resolveAudioEngine } from "../audio/owner";
 import { ReaderSession, type SessionEvent, type TokenText } from "../reader/session";
 import type { EngineEvent, TextEngine } from "../reader/contract";
+import { ResumeStore } from "./resume";
 
 // --- T2 spike probes: offscreen document bootstrap (Chrome only) ---
 let offscreenReady: Promise<void> | null = null;
@@ -44,6 +45,13 @@ const sessionStorage = {
 
 let sessionPromise: Promise<ReaderSession> | null = null;
 
+/** Per-URL reading positions (T16) — the only owner of resume.ts reads. */
+const resume = new ResumeStore();
+
+/** Preview id must never collide with session speakIds (which start at 1). */
+const PREVIEW_SPEAK_ID = -1;
+const PREVIEW_SAMPLE = "Hello, I am Leia.";
+
 async function getSession(): Promise<ReaderSession> {
   sessionPromise ??= ReaderSession.load(engine, sessionStorage, emitSessionEvent);
   return sessionPromise;
@@ -62,6 +70,10 @@ async function emitSessionEvent(ev: SessionEvent): Promise<void> {
       to: ev.to,
       ...(ev.word ? { word: ev.word } : {}),
     });
+    return;
+  }
+  if (ev.type === "error") {
+    await broadcast({ type: "leia:session:error", sessionId: ev.sessionId, message: ev.message });
     return;
   }
   await broadcast({ type: "leia:highlight:clear", sessionId: ev.sessionId });
@@ -94,9 +106,10 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
       let tokens = (msg as { tokens?: TokenText[] }).tokens;
       let captureTabId: number | undefined;
       let captureId: number | undefined;
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const tabUrl = typeof tab?.url === "string" ? tab.url : undefined;
       if (!tokens || tokens.length === 0) {
         // Toolbar-action fallback: capture the active tab's selection.
-        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
         if (!tab?.id) return { ok: false, replyType: "leia:reader:start", error: "no active tab" };
         captureTabId = tab.id;
         const reply = (await browser.tabs.sendMessage(captureTabId, { type: "leia:selection:capture" })) as
@@ -108,11 +121,33 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
         tokens = (reply.data as { tokens: TokenText[] }).tokens;
         captureId = (reply.data as { captureId?: number }).captureId;
       }
+      // T17 — starting elsewhere must not silently drop the current
+      // position: park the running session's record under its URL first.
+      // (The global session still switches; the position survives per-URL.)
+      const prior = s.snapshot();
+      if (prior) {
+        const priorUrl = prior.url ?? tabUrl;
+        if (priorUrl) await resume.save(priorUrl, prior);
+      }
+      // T16 — restore the saved position for the incoming URL when the
+      // freshly captured scope still matches at that point (strict one-token
+      // compare; mismatch degrades to the top and keeps the stored record).
+      let resumeAt = 0;
+      if (tabUrl) {
+        const saved = await resume.load(tabUrl);
+        if (
+          saved &&
+          saved.tokenPos < tokens.length &&
+          saved.tokens[saved.tokenPos]?.text === tokens[saved.tokenPos]?.text
+        ) {
+          resumeAt = saved.tokenPos;
+        }
+      }
       const overrides = {
         voiceName: msg.voiceName as string | null | undefined,
         rate: msg.rate as number | undefined,
       };
-      const status = await s.start(tokens, overrides);
+      const status = await s.start(tokens, { url: tabUrl, resumeAt, ...overrides });
       if (captureTabId !== undefined && captureId !== undefined) {
         const locale = (await s.voiceLang()) ?? navigator.language;
         void browser.tabs
@@ -130,25 +165,82 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
     }
   }
 
-  if (
-    msg.type === "leia:reader:pause" ||
-    msg.type === "leia:reader:resume" ||
-    msg.type === "leia:reader:stop" ||
-    msg.type === "leia:reader:seek"
-  ) {
+  // T16 — pause/stop park the reading position per-URL. The resume record
+  // survives stop; only the live session clears.
+  if (msg.type === "leia:reader:pause" || msg.type === "leia:reader:stop") {
     try {
       const s = await getSession();
-      const status =
-        msg.type === "leia:reader:pause"
-          ? await s.pause()
-          : msg.type === "leia:reader:resume"
-            ? await s.resume()
-            : msg.type === "leia:reader:seek"
-              ? await s.seek((msg as { token?: number }).token as number)
-              : await s.stop();
+      let prior = null;
+      let status;
+      if (msg.type === "leia:reader:stop") {
+        prior = s.snapshot(); // capture BEFORE stop clears the live session
+        status = await s.stop();
+      } else {
+        status = await s.pause();
+        prior = s.snapshot();
+      }
+      if (prior) {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+        const priorUrl = prior.url ?? (typeof tab?.url === "string" ? tab.url : undefined);
+        if (priorUrl) await resume.save(priorUrl, prior);
+      }
       return { ok: true, replyType: msg.type, data: status };
     } catch (err) {
       return { ok: false, replyType: msg.type, error: String(err) };
+    }
+  }
+
+  if (msg.type === "leia:reader:resume" || msg.type === "leia:reader:seek") {
+    try {
+      const s = await getSession();
+      const status = await (msg.type === "leia:reader:resume"
+        ? s.resume()
+        : s.seek((msg as { token?: number }).token as number));
+      return { ok: true, replyType: msg.type, data: status };
+    } catch (err) {
+      return { ok: false, replyType: msg.type, error: String(err) };
+    }
+  }
+
+  if (msg.type === "leia:reader:resume-clear") {
+    const s = await getSession();
+    const url = (msg as { url?: string }).url ?? s.snapshot()?.url;
+    if (url) await resume.clear(url);
+    return { ok: true, replyType: "leia:reader:resume-clear" };
+  }
+
+  if (msg.type === "leia:reader:resume-info") {
+    const url = (msg as { url?: string }).url;
+    if (!url) return { ok: true, replyType: "leia:reader:resume-info", data: null };
+    const rec = await resume.load(url);
+    return {
+      ok: true,
+      replyType: "leia:reader:resume-info",
+      data: rec ? { url: rec.url, tokenPos: rec.tokenPos, tokenCount: rec.tokens.length } : null,
+    };
+  }
+
+  if (msg.type === "leia:reader:preview") {
+    // Sample utterance through the SAME engine the session uses. Preemption
+    // contract: if a session is playing, its current chunk yields
+    // `cancelled` and the drive loop re-speaks it — no deadlock. Session
+    // state is never touched.
+    const { voiceName, family } = msg as { voiceName?: string | null; family?: string };
+    try {
+      if (family) engine.selectFamily?.(family);
+      for await (const ev of engine.speak(PREVIEW_SAMPLE, PREVIEW_SPEAK_ID, {
+        voiceName: voiceName ?? null,
+        rate: 1,
+      })) {
+        if (ev.type === "error") {
+          // Keyless family and similar: engines may report failure as an
+          // error event instead of throwing — surface it as a failed preview.
+          return { ok: false, replyType: "leia:reader:preview", error: ev.message || "engine error" };
+        }
+      }
+      return { ok: true, replyType: "leia:reader:preview" };
+    } catch (err) {
+      return { ok: false, replyType: "leia:reader:preview", error: String(err) };
     }
   }
   if (msg.type === "leia:reader:status") {

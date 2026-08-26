@@ -77,6 +77,15 @@ class FakeEngine implements TextEngine {
     c.stream.push({ type: "word", speakId, begin, end });
   }
 
+  /** Test helper: the current speak fails with the given message. */
+  failCurrent(message: string): void {
+    const c = this.current;
+    if (!c) return;
+    this.current = null;
+    c.stream.push({ type: "error", speakId: c.speakId, message });
+    c.stream.close();
+  }
+
   selectFamilyCalls(): string[] {
     return [...this.familyCalls];
   }
@@ -419,5 +428,141 @@ describe("ReaderSession (fake engine)", () => {
     await s.setPrefs({ engine: null });
     expect(engine.selectFamilyCalls()).toEqual([]);
     expect(s.status().settings.engine).toBeNull();
+  });
+
+  // --- T16: per-URL resume (start anchors, snapshot, url persistence) ---
+
+  it("start with resumeAt begins playback at the saved token", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    const status = await s.start(TOKENS, { resumeAt: 3 });
+    await tick();
+    expect(status).toMatchObject({ state: "playing", tokenPos: 3 });
+    expect(engine.speaks[0].text).toBe("Fourth sentence."); // speaks from the anchor
+
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+    expect(s.status().state).toBe("stopped");
+  });
+
+  it("start defaults resumeAt to 0 and clamps out-of-range anchors", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS, { resumeAt: 999 });
+    await tick();
+    expect(s.status().tokenPos).toBe(3);
+    expect(engine.speaks[0].text).toBe("Fourth sentence.");
+
+    await s.stop();
+    await tick();
+    await s.start(TOKENS, {});
+    await tick();
+    expect(s.status().tokenPos).toBe(0);
+
+    engine.finishCurrent(); // drain
+    await tick();
+  });
+
+  it("snapshot exposes tokens/position/settings/url and is null when stopped", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+    expect(s.snapshot()).toBeNull(); // stopped
+
+    await s.start(TOKENS, { url: "https://example.com/a?q=1", resumeAt: 1 });
+    await tick();
+    const snap = s.snapshot();
+    expect(snap).toMatchObject({ tokens: TOKENS, tokenPos: 1, url: "https://example.com/a?q=1" });
+    expect(snap!.settings).toEqual({ voiceName: null, rate: 1, engine: null });
+
+    await s.pause();
+    const paused = s.snapshot();
+    // Pause rewinds to the chunk anchor (chunk [0..2] was speaking).
+    expect(paused).toMatchObject({ tokenPos: 0, url: "https://example.com/a?q=1" });
+
+    await s.stop();
+    await tick();
+    expect(s.snapshot()).toBeNull();
+  });
+
+  it("persists the session url through storage.session and hydrates it", async () => {
+    const { engine, storage } = makeSession();
+    const s1 = await ReaderSession.load(engine, storage, () => {});
+    await s1.start(TOKENS, { url: "https://example.com/a?q=1" });
+    expect((storage.read(SESSION_KEY) as { url: string | null }).url).toBe("https://example.com/a?q=1");
+
+    // Owner-vanished hydrate: the url rides along with the stored session.
+    const s2 = await ReaderSession.load(engine, storage, () => {});
+    expect(s2.status()).toMatchObject({ state: "paused", url: "https://example.com/a?q=1" });
+    await s1.pause(); // silence the old instance's drive loop (shared engine)
+  });
+
+  // --- T17: actionable engine errors ---
+
+  it("parks paused with lastError + a session error event on engine failure", async () => {
+    const { engine, storage, events, emit } = makeSession();
+    const s = await ReaderSession.load(engine, storage, emit);
+    await s.start(TOKENS);
+    await tick();
+    const id = s.status().sessionId;
+
+    engine.failCurrent("voice quota exhausted");
+    await tick();
+
+    const status = s.status();
+    expect(status).toMatchObject({ state: "paused", tokenPos: 0, lastError: "voice quota exhausted" });
+    // The persisted record keeps the failed chunk as the safe resume anchor.
+    expect(storage.read(SESSION_KEY)).toMatchObject({ state: "paused", tokenPos: 0 });
+    expect(events).toContainEqual({ type: "error", sessionId: id, message: "voice quota exhausted" });
+
+    // resume clears the transient error and retries from the anchor.
+    await s.resume();
+    await tick();
+    expect(s.status()).toMatchObject({ state: "playing", lastError: null });
+    expect(engine.speaks.at(-1)?.text).toBe("First sentence.Second sentence.Third sentence.");
+
+    engine.finishCurrent(); // drain
+    await tick();
+    await s.stop();
+  });
+
+  it("start clears lastError from a previous failure", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+    await s.start(TOKENS);
+    await tick();
+    engine.failCurrent("boom");
+    await tick();
+    expect(s.status().lastError).toBe("boom");
+
+    await s.start(TOKENS); // new session, fresh error state
+    await tick();
+    expect(s.status().lastError).toBeNull();
+    engine.finishCurrent(); // drain
+    await tick();
+    await s.stop();
+  });
+
+  it("catches a throwing engine and surfaces lastError + error event", async () => {
+    const { engine, events, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+    const originalSpeak = engine.speak;
+    engine.speak = () => {
+      throw new Error("transport down");
+    };
+
+    await s.start(TOKENS);
+    await tick();
+    expect(s.status()).toMatchObject({ state: "paused", lastError: "transport down" });
+    expect(events).toContainEqual({ type: "error", sessionId: expect.any(String), message: "transport down" });
+
+    engine.speak = originalSpeak; // restore so the next start runs normally
+    await s.start(TOKENS);
+    await tick();
+    expect(s.status()).toMatchObject({ state: "playing", lastError: null });
+    engine.finishCurrent(); // drain
+    await tick();
+    await s.stop();
   });
 });
