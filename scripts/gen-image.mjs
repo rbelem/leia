@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * Leia image generation for impeccable comp-first work (and anything else).
- * Lane 1: alibaba-token-plan wan2.7-image-pro (chat-completions image_object).
- * Lane 2: minimax image-01 (image_generation). Both direct, no gateway.
- * Usage: node scripts/gen-image.mjs --prompt "..." --out /tmp/x.png [--model wan2.7-image|wan2.7-image-pro|minimax/image-01]
+ * Lane 1: qwen-image-3.0-pro (alibaba token-plan, native multimodal-generation API).
+ * Lane 2: wan2.7-image-pro (alibaba token-plan, chat-completions image_object).
+ * Lane 3: minimax image-01 (image_generation). All direct, no gateway.
+ * Usage: node scripts/gen-image.mjs --prompt "..." --out /tmp/x.png [--model qwen-image-3.0-pro|wan2.7-image-pro|minimax/image-01]
  */
 const args = Object.fromEntries(
   process.argv.slice(2).map((a, i, arr) =>
@@ -14,15 +15,35 @@ const args = Object.fromEntries(
 const prompt = args.prompt;
 const out = args.out;
 if (!prompt || !out) {
-  console.error("usage: gen-image.mjs --prompt <text> --out <file.png> [--model wan2.7-image-pro]");
+  console.error("usage: gen-image.mjs --prompt <text> --out <file.png> [--model qwen-image-3.0-pro]");
   process.exit(2);
 }
-let model = args.model ?? "wan2.7-image-pro";
+let model = args.model ?? "qwen-image-3.0-pro";
+
+const TOKEN_PLAN = "https://token-plan.ap-southeast-1.maas.aliyuncs.com";
+
+async function qwenImage() {
+  const key = process.env.ALIBABA_TOKEN_PLAN_API_KEY;
+  if (!key) throw new Error("ALIBABA_TOKEN_PLAN_API_KEY not set");
+  const r = await fetch(`${TOKEN_PLAN}/api/v1/services/aigc/multimodal-generation/generation`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      input: { messages: [{ role: "user", content: [{ text: prompt }] }] },
+      parameters: { size: "1024*1024", n: 1 },
+    }),
+  });
+  const d = await r.json();
+  const img = d?.output?.choices?.[0]?.message?.content?.[0]?.image;
+  if (!img) throw new Error(`qwen-image failed: ${JSON.stringify(d).slice(0, 300)}`);
+  return img;
+}
 
 async function wanImage() {
   const key = process.env.ALIBABA_TOKEN_PLAN_API_KEY;
   if (!key) throw new Error("ALIBABA_TOKEN_PLAN_API_KEY not set");
-  const r = await fetch("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions", {
+  const r = await fetch(`${TOKEN_PLAN}/compatible-mode/v1/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -52,7 +73,10 @@ async function minimaxImage() {
   return url;
 }
 
-const url = model.startsWith("minimax") ? await minimaxImage() : await wanImage();
+const url =
+  model.startsWith("minimax") ? await minimaxImage()
+  : model.startsWith("qwen") ? await qwenImage()
+  : await wanImage();
 const img = await (await fetch(url)).arrayBuffer();
 const { writeFileSync } = await import("node:fs");
 writeFileSync(out, Buffer.from(img));
