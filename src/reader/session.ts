@@ -11,6 +11,7 @@
  */
 import { chunkText, chunkTokens, type ChunkSpan } from "./chunker";
 import type { TextEngine } from "./contract";
+import { CJK_TOKEN_CHARS, isCjkLocale, MAX_TOKEN_CHARS } from "./sentences";
 
 export type ReaderState = "stopped" | "playing" | "paused";
 
@@ -94,7 +95,7 @@ export class ReaderSession {
     session.tokens = s.tokens;
     session.tokenPos = s.tokenPos;
     session.settings = { ...s.settings };
-    session.chunks = chunkTokens(s.tokens);
+    session.chunks = chunkTokens(s.tokens, await session.resolveChunkCap());
     session.state = "paused";
     if (s.state === "playing") {
       // Owner died mid-play: the platform audio may still be running in the
@@ -125,9 +126,9 @@ export class ReaderSession {
     if (tokens.length === 0) throw new Error("empty read scope");
     this.sessionId = newId();
     this.tokens = tokens;
-    this.chunks = chunkTokens(tokens);
-    this.tokenPos = 0;
     this.settings = { ...this.prefs, ...overrides };
+    this.chunks = chunkTokens(tokens, await this.resolveChunkCap());
+    this.tokenPos = 0;
     this.state = "playing";
     await this.persist();
     this.emitState();
@@ -246,6 +247,20 @@ export class ReaderSession {
 
   private findChunkAt(tokenIndex: number): ChunkSpan | null {
     return this.chunks.find((c) => tokenIndex >= c.from && tokenIndex <= c.to) ?? null;
+  }
+
+  /**
+   * CJK voices (voice lang signals the scope's script) speak shorter
+   * utterances: cap chunks at CJK_TOKEN_CHARS instead of the Latin 250.
+   */
+  private async resolveChunkCap(): Promise<number> {
+    try {
+      const voices = await this.engine.getVoices();
+      const voice = voices.find((v) => v.name === this.settings.voiceName);
+      return voice && isCjkLocale(voice.lang) ? CJK_TOKEN_CHARS : MAX_TOKEN_CHARS;
+    } catch {
+      return MAX_TOKEN_CHARS;
+    }
   }
 
   private async persist(): Promise<void> {

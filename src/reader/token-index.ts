@@ -1,18 +1,34 @@
 /**
- * Token → DOM-range index over a selection (T2 item 6). Maps the sentence
- * tokenization of the selected text back onto live Range objects, one per
- * token, so the floating bar / content script can re-highlight any token
- * index without touching the page's DOM.
+ * Token → DOM-range index over a selection (T2 item 6, T4 word map). Maps
+ * the sentence or word tokenization of the selected text back onto live
+ * Range objects, one per token, so the floating bar / content script can
+ * re-highlight any token index without touching the page's DOM.
  *
- * token.text === token.range.toString() always holds (round-trip invariant),
- * because tokens keep the exact source text between split points, including
- * inter-sentence whitespace.
+ * Ranges are live DOM Range objects: they track layout natively (inserts,
+ * removals, and re-wrapping outside the selection text do not invalidate
+ * them). Only TEXT mutation inside the selection desynchronizes the index;
+ * an external content-side observer owns that (scope staleness is not this
+ * layer's concern).
+ *
+ * token.text === token.range.toString() always holds (round-trip
+ * invariant), because tokens keep the exact source text between split
+ * points, including inter-sentence whitespace.
  */
-import { splitTokens, type TokenSpan } from "./sentences";
+import { splitTokens, wordParentIndex, wordSpans, type TokenSpan } from "./sentences";
 
 export interface Token {
   text: string;
   range: Range;
+}
+
+/** Locale-scoped word granularity index over a selection. */
+export interface WordIndex {
+  locale: string;
+  words: Token[];
+  /** Word token i → sentence token index — sentence marching when an engine lacks word timing. */
+  parent: Int32Array;
+  /** Sentence token j → word count. */
+  counts: Int32Array;
 }
 
 interface TextPart {
@@ -74,16 +90,12 @@ function locate(parts: TextPart[], abs: number): { node: Text; offset: number } 
   return { node: last.node, offset: last.nodeStart + (last.end - last.start) };
 }
 
-/** Build the sentence-token index for the given DOM range. */
-export function tokenIndexFromRange(range: Range): Token[] {
-  const parts = textParts(range);
-  if (parts.length === 0) return [];
+function joinedText(parts: TextPart[]): string {
+  return parts.map((p) => p.node.data.slice(p.nodeStart, p.nodeStart + (p.end - p.start))).join("");
+}
 
-  const fullText = parts.map((p) => p.node.data.slice(p.nodeStart, p.nodeStart + (p.end - p.start))).join("");
-  const spans: TokenSpan[] = splitTokens(fullText);
-  const doc = range.startContainer.ownerDocument;
-  if (!doc) return [];
-
+/** Lay spans onto live ranges over the text parts. */
+function buildTokens(parts: TextPart[], spans: TokenSpan[], doc: Document): Token[] {
   const tokens: Token[] = [];
   for (const span of spans) {
     const r = doc.createRange();
@@ -96,10 +108,42 @@ export function tokenIndexFromRange(range: Range): Token[] {
   return tokens;
 }
 
+/** Build the sentence-token index for the given DOM range. */
+export function tokenIndexFromRange(range: Range): Token[] {
+  const parts = textParts(range);
+  if (parts.length === 0) return [];
+  const doc = range.startContainer.ownerDocument;
+  if (!doc) return [];
+  return buildTokens(parts, splitTokens(joinedText(parts)), doc);
+}
+
+/** Build the word-token index (plus word→sentence parent map) for the range. */
+export function wordIndexFromRange(range: Range, locale: string): WordIndex | null {
+  const parts = textParts(range);
+  if (parts.length === 0) return null;
+  const doc = range.startContainer.ownerDocument;
+  if (!doc) return null;
+  const fullText = joinedText(parts);
+  const spans = wordSpans(fullText, locale);
+  if (spans.length === 0) return null;
+  return {
+    locale,
+    words: buildTokens(parts, spans, doc),
+    ...wordParentIndex(splitTokens(fullText), spans),
+  };
+}
+
 /** Capture the current page selection as tokens; null when nothing selected. */
 export function tokenIndexFromSelection(win: Window): Token[] | null {
   const selection = win.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
   const tokens = tokenIndexFromRange(selection.getRangeAt(0));
   return tokens.length > 0 ? tokens : null;
+}
+
+/** Capture the current page selection at word granularity; null when empty. */
+export function wordIndexFromSelection(win: Window, locale: string): WordIndex | null {
+  const selection = win.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  return wordIndexFromRange(selection.getRangeAt(0), locale);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitTokens } from "../src/reader/sentences";
+import { splitTokens, sentenceSpans, CJK_TOKEN_CHARS } from "../src/reader/sentences";
 import { chunkTokens, MAX_TOKENS_PER_CHUNK } from "../src/reader/chunker";
 import { MAX_TOKEN_CHARS } from "../src/reader/sentences";
 
@@ -9,22 +9,28 @@ const toTokens = (lines: string[]): Array<{ text: string }> => lines.map((text) 
 describe("sentence tokenizer (en + CJK)", () => {
   it("splits Latin sentences at . ! ? and keeps punctuation attached", () => {
     const tokens = splitTokens("Hello world. How are you? Fine!");
-    expect(texts(tokens)).toEqual(["Hello world.", " How are you?", " Fine!"]);
+    expect(texts(tokens)).toEqual(["Hello world. ", "How are you? ", "Fine!"]);
   });
 
-  it("splits CJK sentences at 。 ！ ？", () => {
+  it("splits CJK sentences at 。 ！ ？ (Intl.Segmenter script rules)", () => {
     const tokens = splitTokens("你好，世界。今天好吗？很好！");
     expect(texts(tokens)).toEqual(["你好，世界。", "今天好吗？", "很好！"]);
   });
 
+  it("keeps abbreviations and ellipsis runs whole (char-set splitters broke these)", () => {
+    expect(texts(splitTokens("Use e.g. this. "))).toEqual(["Use e.g. this. "]);
+    expect(texts(splitTokens("The U.S. is big. "))).toEqual(["The U.S. is big. "]);
+    expect(texts(splitTokens("Hello... world."))).toEqual(["Hello... world."]);
+  });
+
   it("splits on blank lines (paragraph breaks)", () => {
     const tokens = splitTokens("First paragraph.\n\nSecond paragraph.");
-    expect(texts(tokens)).toEqual(["First paragraph.", "\n\nSecond paragraph."]);
+    expect(texts(tokens)).toEqual(["First paragraph.\n", "Second paragraph."]);
   });
 
   it("drops whitespace-only spans", () => {
     const tokens = splitTokens("Done.   \n\n   ");
-    expect(texts(tokens)).toEqual(["Done."]);
+    expect(texts(tokens)).toEqual(["Done.   \n"]);
   });
 
   it("never emits a token longer than the cap, splitting at word boundaries", () => {
@@ -37,6 +43,16 @@ describe("sentence tokenizer (en + CJK)", () => {
     expect(tokens.reduce((n, t) => n + t.text.length, 0)).toBe(long.length);
     // Pieces align to word boundaries (they all start/end at spaces except edges).
     for (const t of tokens.slice(1)) expect(t.text[0]).toBe(" ");
+  });
+
+  it("hard-cuts an unbroken CJK run at the CJK cap", () => {
+    const long = "这是一个没有标点符号的超级长句子".repeat(20); // 360 chars, no punct
+    const tokens = sentenceSpans(long, "zh-CN", CJK_TOKEN_CHARS);
+    for (const t of tokens) {
+      expect(t.text.length).toBeLessThanOrEqual(CJK_TOKEN_CHARS);
+      expect(t.text.length).toBeGreaterThan(0);
+    }
+    expect(tokens.reduce((n, t) => n + t.text.length, 0)).toBe(long.length);
   });
 });
 
@@ -60,6 +76,17 @@ describe("chunker", () => {
       { from: 1, to: 1 }, // the 250-char token stands alone
       { from: 2, to: 2 }, // 250 + 6 > 250 → alone
     ]);
+  });
+
+  it("caps CJK chunks at CJK_TOKEN_CHARS so utterances stay ~100 chars", () => {
+    const tokens = toTokens(["你好，世界。", "今天好吗？", "很好！", "再见。"]);
+    const chunks = chunkTokens(tokens, CJK_TOKEN_CHARS); // 17 chars ≤ 100 → capped by token count
+    expect(chunks).toEqual([{ from: 0, to: 2 }, { from: 3, to: 3 }]);
+    // A 40-char sentence token already saturates the CJK cap: stands alone.
+    const big = "这是一句很长的但没有标点的话".repeat(10); // 160 chars
+    const bigTokens = toTokens([big, "短句。"]);
+    const bigChunks = chunkTokens(bigTokens, CJK_TOKEN_CHARS);
+    expect(bigChunks).toEqual([{ from: 0, to: 0 }, { from: 1, to: 1 }]);
   });
 
   it("nothing >300 chars, ever: token cap ≤250 forces chunks ≤250", () => {

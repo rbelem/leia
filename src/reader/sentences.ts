@@ -1,16 +1,27 @@
 /**
- * Sentence tokenization (pure text). One token = one sentence (≤ MAX_TOKEN
- * chars) — the unit the reader speaks and the marching highlight tracks at
- * T2's sentence granularity (word map is T4, per-token timing is T5).
+ * Locale-parameterized sentence + word tokenization (pure text).
  *
- * Boundaries: `. ! ? …` (Latin) and `。！？` (CJK), plus blank-line runs
- * (paragraph breaks inside a selection). A sentence longer than MAX_TOKEN
- * is split at the last space within the cap, else hard-cut — never emitted
- * longer than MAX_TOKEN, so chunker output can never approach the 300-char
- * ceiling the Chrome silent-stop bug demands.
+ * Sentences use Intl.Segmenter (locale-aware; CJK text splits at 。！？) —
+ * strictly better than the old char-set splitter: handles abbreviations
+ * ("Mrs."), quote runs, and per-script rules. One sentence token stays
+ * ≤ MAX_TOKEN_CHARS (Latin) / CJK_TOKEN_CHARS (CJK scripts): a long
+ * sentence is split at the last space within the cap, else hard-cut —
+ * never emitted longer than the cap, so chunker output can never approach
+ * the 300-char ceiling the Chrome silent-stop bug demands.
+ *
+ * Words use Intl.Segmenter granularity "word": CJK scripts produce real
+ * word tokens (你好 / 世界), not bigrams. Punctuation merges into the
+ * preceding word ("world." / "世界。"), whitespace runs are dropped, so
+ * word tokens never carry inter-word whitespace.
+ *
+ * `splitTokens` keeps the working sentence contract (English default —
+ * its segmentation already splits CJK 。！？ correctly); locale-aware
+ * callers use `sentenceSpans` / `wordSpans` directly.
  */
 
 export const MAX_TOKEN_CHARS = 250;
+/** CJK chunk/sentence ceiling — short utterances age better in TTS. */
+export const CJK_TOKEN_CHARS = 100;
 
 export interface TokenSpan {
   text: string;
@@ -18,71 +29,110 @@ export interface TokenSpan {
   end: number;
 }
 
-const BOUNDARY_CHARS = new Set([".", "!", "?", "…", "。", "！", "？"]);
+const segmenters = new Map<string, Intl.Segmenter>();
 
-/** Absolute split points: index right AFTER which a sentence ends. */
-export function sentenceSplitPoints(text: string): number[] {
-  const points: number[] = [];
-  const n = text.length;
-  let i = 0;
-  while (i < n) {
-    const ch = text[i];
-    if (BOUNDARY_CHARS.has(ch)) {
-      points.push(i + 1);
-      i += 1;
-    } else if (ch === "\n") {
-      // Blank line (two+ newlines, ignoring inline whitespace) ends a sentence.
-      let j = i;
-      while (j < n && (text[j] === "\n" || text[j] === " " || text[j] === "\t" || text[j] === "\r")) j += 1;
-      if (j < n && text[j] === "\n") {
-        points.push(j);
-        i = j;
-      } else {
-        i += 1;
-      }
-    } else {
-      i += 1;
-    }
+function segmenter(locale: string, granularity: "word" | "sentence"): Intl.Segmenter {
+  const key = `${locale}|${granularity}`;
+  let s = segmenters.get(key);
+  if (!s) {
+    s = new Intl.Segmenter(locale, { granularity });
+    segmenters.set(key, s);
   }
-  return points;
+  return s;
 }
 
-/** Split text into sentence tokens, enforcing MAX_TOKEN_CHARS per token. */
-export function splitTokens(text: string): TokenSpan[] {
-  const raw: Array<{ start: number; end: number }> = [];
-  const points = sentenceSplitPoints(text);
-  let start = 0;
-  for (const p of points) {
-    raw.push({ start, end: p });
-    start = p;
-  }
-  raw.push({ start, end: text.length });
+/** zh / ja / ko / yue — scripts where Intl word segmentation is the correct granularity. */
+export function isCjkLocale(locale: string): boolean {
+  return /^(zh|ja|ko|yue)(-|$)/i.test(locale);
+}
 
+/**
+ * Sentence spans over `text` for `locale`. Whitespace-only spans are
+ * dropped (blank lines between paragraphs); trailing whitespace attaches
+ * to the preceding sentence, exactly as Intl.Segmenter emits it.
+ */
+export function sentenceSpans(text: string, locale: string, cap: number = MAX_TOKEN_CHARS): TokenSpan[] {
+  const seg = segmenter(locale, "sentence");
   const out: TokenSpan[] = [];
-  for (const seg of raw) {
-    if (seg.end - seg.start <= MAX_TOKEN_CHARS) {
-      pushSegment(out, text, seg.start, seg.end);
-      continue;
-    }
-    // Long sentence: split at the last space within the cap, else hard-cut.
-    let s = seg.start;
-    while (seg.end - s > MAX_TOKEN_CHARS) {
-      const limit = s + MAX_TOKEN_CHARS;
+  const push = (start: number, end: number): void => {
+    if (end <= start) return;
+    while (end - start > cap) {
+      // Long sentence: split at the last space within the cap, else hard-cut.
+      const limit = start + cap;
       let cut = text.lastIndexOf(" ", limit);
-      if (cut <= s || text[cut - 1] === "\n") cut = text.lastIndexOf("\n", limit);
-      if (cut <= s) cut = limit; // CJK / unbroken run: hard cut
-      pushSegment(out, text, s, cut);
-      s = cut;
+      if (cut <= start || text[cut - 1] === "\n") cut = text.lastIndexOf("\n", limit);
+      if (cut <= start) cut = limit; // CJK / unbroken run: hard cut
+      const t = text.slice(start, cut);
+      if (t.trim().length > 0) out.push({ text: t, start, end: cut });
+      start = cut;
     }
-    pushSegment(out, text, s, seg.end);
+    const t = text.slice(start, end);
+    if (t.trim().length > 0) out.push({ text: t, start, end });
+  };
+  for (const { segment, index } of seg.segment(text)) {
+    if (segment.trim().length === 0) continue; // blank-line separator — drop
+    push(index, index + segment.length);
   }
   return out;
 }
 
-/** Whitespace-only spans carry no text — drop them. */
-function pushSegment(out: TokenSpan[], text: string, start: number, end: number): void {
-  if (end <= start) return;
-  const t = text.slice(start, end);
-  if (t.trim().length === 0) return;
-  out.push({ text: t, start, end });
+/** Sentence tokens, English default — the working reader contract. */
+export function splitTokens(text: string): TokenSpan[] {
+  return sentenceSpans(text, "en");
+}
+
+/**
+ * Word spans over `text` for `locale`. Every character of the input is
+ * covered exactly once (round-trip safe); whitespace never appears inside
+ * a word token. Segments are exactly Intl.Segmenter's dictionary words
+ * (zh "今天" + "好" + "吗" stay separate — adjacent wordlike segments
+ * never merge, so ja particles don't glue whole sentences together);
+ * punctuation merges into the preceding word (a bare punctuation run
+ * stands alone when nothing precedes it).
+ */
+export function wordSpans(text: string, locale: string): TokenSpan[] {
+  const seg = segmenter(locale, "word");
+  const out: TokenSpan[] = [];
+  let buf = "";
+  let bufStart = 0;
+  const flush = (): void => {
+    if (buf.length > 0) {
+      out.push({ text: buf, start: bufStart, end: bufStart + buf.length });
+      buf = "";
+    }
+  };
+  for (const { segment, index, isWordLike } of seg.segment(text)) {
+    if (isWordLike) {
+      flush(); // each dictionary word stands alone
+      bufStart = index;
+      buf = segment;
+    } else if (segment.trim().length === 0) {
+      flush(); // whitespace run
+    } else {
+      buf += segment; // punctuation: merges into the trailing word or stands alone
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Word token i → sentence token index (parent), plus words-per-sentence counts. */
+export interface WordParentIndex {
+  parent: Int32Array;
+  counts: Int32Array;
+}
+
+export function wordParentIndex(
+  sentences: Array<{ start: number; end: number }>,
+  words: Array<{ start: number; end: number }>,
+): WordParentIndex {
+  const parent = new Int32Array(words.length);
+  const counts = new Int32Array(sentences.length);
+  let s = 0;
+  for (let w = 0; w < words.length; w += 1) {
+    while (s + 1 < sentences.length && sentences[s + 1].start <= words[w].start) s += 1;
+    parent[w] = s;
+    counts[s] += 1;
+  }
+  return { parent, counts };
 }
