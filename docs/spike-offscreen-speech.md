@@ -110,6 +110,16 @@ watch the SW console for the streamed `[leia probe]` lines.
 **Default engine:** (fill in) → one becomes the Web Speech Chrome default;
 the other stays as an engine capability variant behind the adapter seam.
 Amend ADR-0002 with the winner and the concrete `charIndex` evidence.
+## T2 note (product offscreen document)
+
+T2 moved the manifest `offscreen` declaration to the product audio owner
+(`offscreen/audio.html`, creation `ALL` — see `src/audio/owner.ts`). Only one
+offscreen document may exist per extension, so probe runs and product
+sessions are mutually exclusive in a profile: while a product session holds
+the offscreen slot, `leia:probe-voices` etc. reply `{ok:false, error:
+"receiving end does not exist"}` (the creation error itself is swallowed).
+Run probes in a fresh profile (or before the first product session).
+
 ## Headless run (2026-08-26, Chrome for Testing 149, headless=new)
 
 Executed via `scripts/spike-drive.mjs` (CDP: open popup tab → `chrome.runtime.sendMessage`). Verdict:

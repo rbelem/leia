@@ -4,20 +4,28 @@
   <meta charset="utf-8" />
   <title>Leia</title>
   <style>
-    body { font: 13px/1.5 system-ui, sans-serif; width: 260px; margin: 0; padding: 12px; }
+    body { font: 13px/1.5 system-ui, sans-serif; width: 280px; margin: 0; padding: 12px; }
     h1 { font-size: 15px; margin: 0 0 2px; }
-    p { margin: 0 0 8px; color: #6b7280; }
+    p.note { margin: 0 0 10px; color: #6b7280; font-size: 12px; }
+    label { display: block; margin: 8px 0 2px; color: #374151; }
+    select { width: 100%; padding: 4px 6px; font: inherit; }
     button { width: 100%; margin: 4px 0; padding: 6px 8px; text-align: left; }
-    pre { white-space: pre-wrap; background: #f3f4f6; border-radius: 4px;
-          padding: 6px; margin: 8px 0 0; font-size: 11px; min-height: 2em; }
+    #status { margin-top: 8px; color: #6b7280; font-size: 12px; min-height: 1.2em; }
   </style>
 </head>
 <body>
   <h1>Leia</h1>
-  <p>Skeleton — messaging probe</p>
-  <button id="ping">Ping background router</button>
-  <button id="page-info">Ask active tab for page info</button>
-  <pre id="output">(no messages yet)</pre>
+  <p class="note">Select text on a page, then press <b>Read selection</b> in the floating bar (bottom-right).</p>
+
+  <button id="read-selection">Read selection (active tab)</button>
+  <div id="status">—</div>
+
+  <label for="voice">Voice (Web Speech)</label>
+  <select id="voice"><option value="">(default voice)</option></select>
+
+  <label for="speed">Speed</label>
+  <select id="speed"></select>
+
   <script src="popup.js"></script>
 </body>
 </html>

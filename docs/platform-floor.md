@@ -6,7 +6,7 @@ browsers without it.
 
 | Browser | Floor | Why |
 |---|---|---|
-| Chrome | ≥ 105 | Custom Highlight API shipped in Chrome 105 (2022-08); enforced via `minimum_chrome_version` in the manifest |
+| Chrome | ≥ 109 | offscreen document API (`chrome.offscreen`, Chrome 109) is the audio owner for Chrome (ADR-0002); Custom Highlight API (105) is older — 109 covers both; enforced via `minimum_chrome_version` in the manifest |
 | Firefox | ≥ 140 | 2026 stable line; enforced via `browser_specific_settings.gecko.strict_min_version` in the Firefox build |
 
 - The floor is enforced in the **manifest**, not just documented:
