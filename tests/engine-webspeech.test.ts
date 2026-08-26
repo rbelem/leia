@@ -9,6 +9,7 @@ class FakeUtterance {
   onstart: ((ev: Event) => void) | null = null;
   onend: ((ev: Event) => void) | null = null;
   onerror: ((ev: { error: string }) => void) | null = null;
+  onboundary: ((ev: { charIndex: number; charLength: number }) => void) | null = null;
   constructor(text: string) {
     this.text = text;
   }
@@ -60,8 +61,11 @@ describe("WebSpeechEngine", () => {
 
     u.onstart!(new Event("start"));
     u.onend!(new Event("end"));
+    // "Hello world." is 2 words → word 0 fires immediately on start ("Hello",
+    // chunk offsets 0–5); word 1's timer is cleared by end.
     expect(await events).toEqual([
       { type: "start", speakId: 7 },
+      { type: "word", speakId: 7, begin: 0, end: 5 },
       { type: "end", speakId: 7 },
     ]);
   });
@@ -118,9 +122,9 @@ describe("WebSpeechEngine", () => {
     ]);
   });
 
-  it("advertises sentence-granularity local/free capabilities", () => {
+  it("advertises word-granularity local/free capabilities", () => {
     expect(engine.capabilities).toEqual({
-      wordTiming: false,
+      wordTiming: true,
       streaming: false,
       costClass: "free",
       privacyClass: "local",
