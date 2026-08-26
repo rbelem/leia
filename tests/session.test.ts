@@ -278,6 +278,84 @@ describe("ReaderSession (fake engine)", () => {
     expect(events.filter((e) => e.type === "highlight" && "word" in e)).toEqual([]);
   });
 
+  it("seek while playing cancels the current chunk and continues from the target", async () => {
+    const { engine, events, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+    await s.start(TOKENS); // speaking chunk [0..2]
+    await tick();
+    const id = s.status().sessionId;
+
+    const status = await s.seek(3);
+    await tick();
+    expect(status).toMatchObject({ state: "playing", tokenPos: 3 });
+    expect(engine.cancels).toBe(1);
+    // The drive loop saw `cancelled`, left tokenPos alone, and re-spoke.
+    expect(engine.speaks).toHaveLength(2);
+    expect(engine.speaks[1].text).toBe("Fourth sentence.");
+    expect(events).toContainEqual({ type: "highlight", sessionId: id, from: 3, to: 3 });
+
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+    expect(s.status().state).toBe("stopped");
+  });
+
+  it("seek while paused moves the anchor and jumps the highlight without playback", async () => {
+    const { engine, storage, events, emit } = makeSession();
+    const s = await ReaderSession.load(engine, storage, emit);
+    await s.start(TOKENS);
+    await tick();
+    engine.finishCurrent();
+    await tick();
+    await s.pause();
+    await tick();
+
+    const status = await s.seek(0);
+    await tick();
+    expect(status).toMatchObject({ state: "paused", tokenPos: 0 });
+    expect(engine.speaks).toHaveLength(2); // no new speak started
+    expect(engine.cancels).toBe(1); // only pause's cancel
+    expect(events).toContainEqual({ type: "highlight", sessionId: expect.any(String), from: 0, to: 2 });
+    expect(events).toContainEqual({
+      type: "state",
+      status: expect.objectContaining({ state: "paused", tokenPos: 0 }),
+    });
+    const stored = storage.read(SESSION_KEY) as { state: string; tokenPos: number };
+    expect(stored).toMatchObject({ state: "paused", tokenPos: 0 });
+  });
+
+  it("seek while stopped is a no-op", async () => {
+    const { engine, events, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    const status = await s.seek(2);
+    expect(status).toMatchObject({ state: "stopped", tokenPos: 0 });
+    expect(engine.cancels).toBe(0);
+    expect(engine.speaks).toHaveLength(0);
+    expect(events).toEqual([]);
+  });
+
+  it("seek clamps out-of-range tokens into the scope", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+    await s.start(TOKENS);
+    await tick();
+
+    await s.seek(999);
+    await tick();
+    expect(s.status().tokenPos).toBe(3);
+    expect(engine.speaks.at(-1)?.text).toBe("Fourth sentence.");
+
+    await s.seek(-10);
+    await tick();
+    expect(s.status().tokenPos).toBe(0);
+    expect(engine.speaks.at(-1)?.text).toBe("First sentence.Second sentence.Third sentence.");
+
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+    engine.finishCurrent();
+    await tick();
+  });
+
   it("setPrefs engine change calls selectFamily and persists the setting", async () => {
     const { engine, storage, emit } = makeSession();
     const s = await ReaderSession.load(engine, storage, emit);

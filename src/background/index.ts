@@ -130,7 +130,12 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
     }
   }
 
-  if (msg.type === "leia:reader:pause" || msg.type === "leia:reader:resume" || msg.type === "leia:reader:stop") {
+  if (
+    msg.type === "leia:reader:pause" ||
+    msg.type === "leia:reader:resume" ||
+    msg.type === "leia:reader:stop" ||
+    msg.type === "leia:reader:seek"
+  ) {
     try {
       const s = await getSession();
       const status =
@@ -138,7 +143,9 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
           ? await s.pause()
           : msg.type === "leia:reader:resume"
             ? await s.resume()
-            : await s.stop();
+            : msg.type === "leia:reader:seek"
+              ? await s.seek((msg as { token?: number }).token as number)
+              : await s.stop();
       return { ok: true, replyType: msg.type, data: status };
     } catch (err) {
       return { ok: false, replyType: msg.type, error: String(err) };

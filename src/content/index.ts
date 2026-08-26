@@ -10,6 +10,7 @@ ensureHighlightStyle(document);
 // read: stop playback; the page is no longer what we tokenized.
 const highlighter = new ScopeHighlighter({
   onStale: () => void browser.runtime.sendMessage({ type: "leia:reader:stop" }).catch(() => {}),
+  onSeek: (token) => void browser.runtime.sendMessage({ type: "leia:reader:seek", token }).catch(() => {}),
 });
 
 let captureSeq = 0;

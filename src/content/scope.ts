@@ -93,15 +93,51 @@ export const STALE_CHAR_THRESHOLD = 120;
 export interface ScopeHighlighterOptions {
   /** Fired once when the bound scope is invalidated by heavy page mutation. */
   onStale?: () => void;
+  /** Fired when a click inside the live scope maps to a token (T7 seek). */
+  onSeek?: (token: number) => void;
+}
+
+/**
+ * Map a viewport point to the sentence-token index whose range covers it
+ * (T7 click-to-seek). Pure: callers resolve the caret and pass it in.
+ */
+export function tokenIndexAtPoint(ranges: Range[], x: number, y: number, doc: Document): number | null {
+  const caret = caretRangeAtPoint(doc, x, y);
+  if (caret === null || ranges.length === 0) return null;
+  // Ranges are in document order and contiguous: the containing token is the
+  // last whose start <= caret start; confirm the caret hasn't passed its end.
+  let index = -1;
+  for (let i = 0; i < ranges.length; i += 1) {
+    if (ranges[i].compareBoundaryPoints(Range.START_TO_START, caret) <= 0) index = i;
+    else break;
+  }
+  if (index < 0) return null;
+  // Caret is collapsed, so caret.end <= token.end is the same containment
+  // check as the spec's token.end >= caret.start — but END_TO_END is used
+  // because jsdom inverts END_TO_START (this.start vs source.end).
+  return caret.compareBoundaryPoints(Range.END_TO_END, ranges[index]) <= 0 ? index : null;
+}
+
+/** Collapsed caret range at a viewport point; null when unresolvable. */
+function caretRangeAtPoint(doc: Document, x: number, y: number): Range | null {
+  if (typeof doc.caretRangeFromPoint === "function") return doc.caretRangeFromPoint(x, y);
+  const caret = doc.caretPositionFromPoint?.(x, y);
+  if (!caret) return null;
+  const range = doc.createRange();
+  range.setStart(caret.offsetNode, caret.offset);
+  range.collapse(true);
+  return range;
 }
 
 /** One live binding per content-script context; the newest capture wins. */
 export class ScopeHighlighter {
   private sessionId: string | null = null;
   private ranges: Range[] = [];
+  private doc: Document | null = null;
   private observer: MutationObserver | null = null;
   private stale = false;
   private readonly onStale?: () => void;
+  private readonly onSeek?: (token: number) => void;
   /** Word-level index (T4) over the full scope + parallel char spans, built when a locale is given. */
   private wordMap: { words: Token[]; spans: TokenSpan[] } | null = null;
   /** Sentence token i → char offset of its start in the full scope text. */
@@ -109,11 +145,13 @@ export class ScopeHighlighter {
 
   constructor(options: ScopeHighlighterOptions = {}) {
     this.onStale = options.onStale;
+    this.onSeek = options.onSeek;
   }
 
   bind(sessionId: string, scope: CapturedScope, locale?: string | null): void {
     this.sessionId = sessionId;
     this.ranges = scope.ranges;
+    this.doc = scope.ranges[0]?.startContainer.ownerDocument ?? null;
     this.stale = false;
     this.wordMap = null;
     this.prefix = null;
@@ -131,6 +169,7 @@ export class ScopeHighlighter {
       }
     }
     this.startObserving(scopeRangesRoot(scope.ranges));
+    this.doc?.addEventListener("click", this.onClick);
   }
 
   /** Apply the highlight for token indices [from..to]; word-level span when given. */
@@ -157,6 +196,8 @@ export class ScopeHighlighter {
     if (sessionId !== this.sessionId) return;
     this.sessionId = null;
     this.ranges = [];
+    this.doc?.removeEventListener("click", this.onClick);
+    this.doc = null;
     this.wordMap = null;
     this.prefix = null;
     this.stale = false;
@@ -165,6 +206,20 @@ export class ScopeHighlighter {
   }
 
   // --- internals ---
+
+  /**
+   * T7 click-to-seek: while bound, map a click inside the live scope to a
+   * token index and fire onSeek. Extension chrome (id starting "leia-", e.g.
+   * the floating bar) and stale scopes are ignored; page clicks keep their
+   * default behavior (the listener never stops propagation).
+   */
+  private readonly onClick = (ev: MouseEvent): void => {
+    if (this.sessionId === null || this.stale || this.onSeek === undefined || this.doc === null) return;
+    if (ev.target instanceof Element && ev.target.closest("[id^='leia-']")) return;
+    const token = tokenIndexAtPoint(this.ranges, ev.clientX, ev.clientY, this.doc);
+    if (token === null) return;
+    this.onSeek(token);
+  };
 
   private isLive(): boolean {
     return this.ranges.every((r) => r.startContainer.isConnected);

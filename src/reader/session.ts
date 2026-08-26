@@ -167,6 +167,29 @@ export class ReaderSession {
     return this.status();
   }
 
+  /**
+   * Jump playback (or the paused anchor) to a token (T7). While playing,
+   * cancels the current utterance — the drive loop sees `cancelled`, leaves
+   * tokenPos untouched, and re-speaks from the new position. While paused,
+   * only moves the anchor + highlight; never starts playback.
+   */
+  async seek(token: number): Promise<SessionStatus> {
+    if (this.state === "stopped" || this.tokens.length === 0) return this.status();
+    const target = Math.trunc(token);
+    if (!Number.isFinite(target)) return this.status();
+    this.tokenPos = Math.max(0, Math.min(target, this.tokens.length - 1));
+    const chunk = this.findChunkAt(this.tokenPos) ?? { from: this.tokenPos, to: this.tokenPos };
+    if (this.state === "playing") {
+      this.engine.cancel();
+    }
+    await this.persist();
+    this.emitState();
+    // Jump the marching highlight immediately; the drive loop re-emits the
+    // same chunk highlight when it re-speaks (idempotent on the content side).
+    this.emit({ type: "highlight", sessionId: this.sessionId as string, from: chunk.from, to: chunk.to });
+    return this.status();
+  }
+
   async stop(): Promise<SessionStatus> {
     if (this.state === "stopped") return this.status();
     this.engine.cancel();
