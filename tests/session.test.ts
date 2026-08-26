@@ -15,6 +15,7 @@ class FakeEngine implements TextEngine {
   readonly capabilities: EngineCapabilities;
   speaks: Array<{ text: string; speakId: number; options: SpeakOptions }> = [];
   cancels = 0;
+  prefetches: Array<{ text: string; options: SpeakOptions }> = [];
   private familyCalls: string[] = [];
   private current: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
 
@@ -25,6 +26,10 @@ class FakeEngine implements TextEngine {
       costClass: "free",
       privacyClass: "local",
       ...capabilities,
+    };
+    this.prefetch = (text, options) => {
+      this.prefetches.push({ text, options });
+      return Promise.resolve();
     };
   }
 
@@ -52,6 +57,9 @@ class FakeEngine implements TextEngine {
     this.current = null;
     if (c) c.stream.closeCancelled({ type: "cancelled", speakId: c.speakId });
   }
+
+  /** Optional per contract; tests may set to undefined to simulate absence. */
+  prefetch: ((text: string, options: SpeakOptions) => Promise<void>) | undefined;
 
   /** Test helper: current chunk reached its natural end. */
   finishCurrent(): void {
@@ -130,6 +138,42 @@ describe("ReaderSession (fake engine)", () => {
     const final = s.status();
     expect(final.state).toBe("stopped");
     expect(storage.read(SESSION_KEY)).toBeUndefined(); // cleanup
+  });
+
+  it("prefetches the next chunk while the current one plays (pipelining)", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    // chunk [0..2] is speaking; the engine should synthesize chunk [3..3] ahead.
+    expect(engine.prefetches).toEqual([{ text: "Fourth sentence.", options: { voiceName: null, rate: 1 } }]);
+
+    engine.finishCurrent();
+    await tick();
+    // Last chunk: nothing further to prefetch.
+    expect(engine.prefetches).toHaveLength(1);
+    expect(engine.speaks[1].text).toBe("Fourth sentence.");
+
+    engine.finishCurrent();
+    await tick();
+    expect(s.status().state).toBe("stopped");
+  });
+
+  it("skips prefetch when the engine has no prefetch method", async () => {
+    const { engine, emit } = makeSession();
+    engine.prefetch = undefined;
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    expect(engine.prefetches).toHaveLength(0);
+
+    engine.finishCurrent();
+    await tick();
+    engine.finishCurrent();
+    await tick();
+    expect(s.status().state).toBe("stopped");
   });
 
   it("pause records the token position and cancels the engine", async () => {

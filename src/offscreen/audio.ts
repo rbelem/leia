@@ -10,25 +10,27 @@
 import browser from "webextension-polyfill";
 import { WebSpeechEngine } from "../audio/engine-webspeech";
 import { MiniMaxEngine } from "../audio/engine-minimax";
+import { ElevenLabsEngine } from "../audio/engine-elevenlabs";
 import { EngineHub } from "../audio/hub";
 import type { EngineCapabilities } from "../reader/contract";
 
+/** Provider key from storage.local (T14 providers settings shape). */
+function readProviderKey(storageKey: string): () => Promise<string | null> {
+  return async (): Promise<string | null> => {
+    try {
+      const got = (await browser.storage.local.get(storageKey)) as Record<string, unknown>;
+      const v = got[storageKey];
+      return typeof v === "string" && v.length > 0 ? v : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 const engine = new EngineHub();
 engine.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
-engine.register(
-  "minimax",
-  new MiniMaxEngine({
-    getKey: async (): Promise<string | null> => {
-      try {
-        const got = (await browser.storage.local.get("leia:settings:minimaxKey")) as Record<string, unknown>;
-        const v = got["leia:settings:minimaxKey"];
-        return typeof v === "string" && v.length > 0 ? v : null;
-      } catch {
-        return null;
-      }
-    },
-  }),
-);
+engine.register("minimax", new MiniMaxEngine({ getKey: readProviderKey("leia:settings:minimaxKey") }));
+engine.register("elevenlabs", new ElevenLabsEngine({ getKey: readProviderKey("leia:settings:elevenlabsKey") }));
 
 async function speakAndStream(msg: {
   speakId: number;

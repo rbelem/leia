@@ -63,6 +63,12 @@ export interface TextEngine {
   /** Interrupt the current chunk; its stream yields `cancelled` and closes. */
   cancel(): void;
   /**
+   * Synthesize ahead for a FUTURE speak() with identical text+options
+   * (pipelining, ADR-0003). Implementers may cache; cancel() discards
+   * caches. Absent = no pipelining.
+   */
+  prefetch?(text: string, options: SpeakOptions): Promise<void>;
+  /**
    * Engine-family switch hook (provider engines / hubs). `family` is the
    * target family name; unknown families are a no-op. Absent = single-family.
    */

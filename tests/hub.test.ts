@@ -121,6 +121,25 @@ describe("EngineHub", () => {
     expect(mx.cancelCount).toBe(0);
   });
 
+  it("elevenlabs registers as a family; keyless (empty voices) contributes nothing to the merged list", async () => {
+    const ws = new StubEngine("web-speech", [voice("Local A", "web-speech")]);
+    const mx = new StubEngine("minimax", [voice("Provider B", "minimax")]);
+    const el = new StubEngine("elevenlabs", []); // keyless → no voices
+    const hub = new EngineHub();
+    hub.register("web-speech", ws, { default: true });
+    hub.register("minimax", mx);
+    hub.register("elevenlabs", el);
+
+    expect(await hub.getVoices()).toEqual([voice("Local A", "web-speech"), voice("Provider B", "minimax")]);
+
+    hub.select("elevenlabs");
+    expect(hub.currentFamily).toBe("elevenlabs");
+    hub.speak("Hi.", 1, { voiceName: null, rate: 1 });
+    hub.cancel();
+    expect(el.speakCalls).toBe(1);
+    expect(el.cancelCount).toBe(1);
+  });
+
   it("registering without a default picks the first engine", async () => {
     const ws = new StubEngine("web-speech", []);
     const hub = new EngineHub();

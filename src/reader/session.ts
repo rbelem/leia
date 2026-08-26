@@ -236,6 +236,17 @@ export class ReaderSession {
         this.currentChunk = chunk;
         this.emit({ type: "highlight", sessionId: this.sessionId as string, from: chunk.from, to: chunk.to });
 
+        // Pipelining (ADR-0003): have the engine synthesize chunk N+1 while N plays.
+        const nextChunk = this.findChunkAt(chunk.to + 1);
+        if (nextChunk && typeof this.engine.prefetch === "function") {
+          void this.engine
+            .prefetch(chunkText(this.tokens, nextChunk), {
+              voiceName: this.settings.voiceName,
+              rate: this.settings.rate,
+            })
+            .catch(() => {}); // prefetch is an optimization; failures fall back to non-cached speak
+        }
+
         const speakId = ++this.speakSeq;
         const iterable = this.engine.speak(chunkText(this.tokens, chunk), speakId, {
           voiceName: this.settings.voiceName,

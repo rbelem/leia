@@ -28,6 +28,7 @@ import type {
 import { isEngineEventTerminal } from "../reader/contract";
 import { WebSpeechEngine } from "./engine-webspeech";
 import { MiniMaxEngine } from "./engine-minimax";
+import { ElevenLabsEngine } from "./engine-elevenlabs";
 import { EngineHub } from "./hub";
 
 // Minimal typing for chrome.offscreen (polyfill types don't cover it).
@@ -167,11 +168,11 @@ const DEFAULT_CAPABILITIES: EngineCapabilities = {
   privacyClass: "local",
 };
 
-/** Read the MiniMax key from storage.local (T14 providers settings shape). */
-async function readMiniMaxKey(): Promise<string | null> {
+/** Read a provider key from storage.local (T14 providers settings shape). */
+async function readProviderKey(storageKey: string): Promise<string | null> {
   try {
-    const got = (await browser.storage.local.get("leia:settings:minimaxKey")) as Record<string, unknown>;
-    const v = got["leia:settings:minimaxKey"];
+    const got = (await browser.storage.local.get(storageKey)) as Record<string, unknown>;
+    const v = got[storageKey];
     return typeof v === "string" && v.length > 0 ? v : null;
   } catch {
     return null;
@@ -186,7 +187,8 @@ export function resolveAudioEngine(): TextEngine {
   }
   const hub = new EngineHub();
   hub.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
-  hub.register("minimax", new MiniMaxEngine({ getKey: readMiniMaxKey }));
+  hub.register("minimax", new MiniMaxEngine({ getKey: () => readProviderKey("leia:settings:minimaxKey") }));
+  hub.register("elevenlabs", new ElevenLabsEngine({ getKey: () => readProviderKey("leia:settings:elevenlabsKey") }));
   return hub;
 }
 
