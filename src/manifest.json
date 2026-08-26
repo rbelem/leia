@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Leia",
+  "version": "0.1.0",
+  "description": "Reads webpages aloud with pluggable AI voices and a highlight that follows the speech (skeleton build).",
+  "minimum_chrome_version": "105",
+  "action": {
+    "default_title": "Leia",
+    "default_popup": "popup/popup.html"
+  },
+  "background": {
+    "service_worker": "background/index.js"
+  },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content/index.js"], "run_at": "document_idle" },
+    { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
+  ],
+  "permissions": ["activeTab", "storage"],
+  "optional_host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://api.openai.com/*",
+    "https://api.elevenlabs.io/*",
+    "https://*.speech.microsoft.com/*"
+  ]
+}

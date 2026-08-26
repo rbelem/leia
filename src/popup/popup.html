@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Leia</title>
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; width: 260px; margin: 0; padding: 12px; }
+    h1 { font-size: 15px; margin: 0 0 2px; }
+    p { margin: 0 0 8px; color: #6b7280; }
+    button { width: 100%; margin: 4px 0; padding: 6px 8px; text-align: left; }
+    pre { white-space: pre-wrap; background: #f3f4f6; border-radius: 4px;
+          padding: 6px; margin: 8px 0 0; font-size: 11px; min-height: 2em; }
+  </style>
+</head>
+<body>
+  <h1>Leia</h1>
+  <p>Skeleton — messaging probe</p>
+  <button id="ping">Ping background router</button>
+  <button id="page-info">Ask active tab for page info</button>
+  <pre id="output">(no messages yet)</pre>
+  <script src="popup.js"></script>
+</body>
+</html>
