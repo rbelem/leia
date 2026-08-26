@@ -18,6 +18,8 @@ export type ReaderState = "stopped" | "playing" | "paused";
 export interface SessionSettings {
   voiceName: string | null;
   rate: number;
+  /** Engine family; null = the engine's default family. */
+  engine: string | null;
 }
 
 export const MIN_RATE = 0.5;
@@ -33,7 +35,14 @@ export interface SessionStatus {
 
 export type SessionEvent =
   | { type: "state"; status: SessionStatus }
-  | { type: "highlight"; sessionId: string; from: number; to: number }
+  | {
+      type: "highlight";
+      sessionId: string;
+      from: number;
+      to: number;
+      /** Word-level march: char offsets relative to the chunk text. */
+      word?: { begin: number; end: number };
+    }
   | { type: "clear"; sessionId: string };
 
 export interface SessionStorage {
@@ -54,12 +63,13 @@ interface StoredSession {
 interface StoredPrefs {
   voiceName: string | null;
   rate: number;
+  engine: string | null;
 }
 
 export const SESSION_KEY = "leia:reader:session";
 export const PREFS_KEY = "leia:reader:prefs";
 
-const DEFAULT_PREFS: StoredPrefs = { voiceName: null, rate: 1 };
+const DEFAULT_PREFS: StoredPrefs = { voiceName: null, rate: 1, engine: null };
 
 export class ReaderSession {
   private sessionId: string | null = null;
@@ -174,11 +184,16 @@ export class ReaderSession {
     return this.status();
   }
 
-  /** Persist user preferences (voice, speed) across sessions; live for the next chunk. */
+  /** Persist user preferences (voice, speed, engine) across sessions; live for the next chunk. */
   async setPrefs(prefs: Partial<SessionSettings>): Promise<SessionStatus> {
     this.prefs = { ...this.prefs, ...prefs };
     this.settings = { ...this.settings, ...this.prefs };
     await this.storage.set({ [PREFS_KEY]: this.prefs });
+    if ("engine" in prefs && prefs.engine) {
+      // Family switch takes effect from the next chunk (current playback
+      // keeps its engine). null = engine default — leave the current one.
+      this.engine.selectFamily?.(prefs.engine);
+    }
     if (this.state === "playing" || this.state === "paused") {
       // Live-apply to the persisted session so a resumed session keeps them.
       await this.persist();
@@ -204,7 +219,20 @@ export class ReaderSession {
           rate: this.settings.rate,
         });
         let outcome: "end" | "cancelled" | "error" = "end";
+        const wordTiming = this.engine.capabilities.wordTiming;
         for await (const ev of iterable) {
+          if (ev.type === "word") {
+            if (wordTiming && outcome === "end") {
+              this.emit({
+                type: "highlight",
+                sessionId: this.sessionId as string,
+                from: chunk.from,
+                to: chunk.to,
+                word: { begin: ev.begin, end: ev.end },
+              });
+            }
+            continue;
+          }
           if (ev.type === "cancelled") {
             outcome = "cancelled";
             break;
@@ -250,17 +278,27 @@ export class ReaderSession {
   }
 
   /**
+   * Selected voice's language tag, or null when no voice is selected / the
+   * engine hides it. Drives the CJK chunk cap and the content-side locale
+   * for word-level highlighting.
+   */
+  async voiceLang(): Promise<string | null> {
+    try {
+      const voices = await this.engine.getVoices();
+      const voice = voices.find((v) => v.name === this.settings.voiceName);
+      return voice?.lang ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * CJK voices (voice lang signals the scope's script) speak shorter
    * utterances: cap chunks at CJK_TOKEN_CHARS instead of the Latin 250.
    */
   private async resolveChunkCap(): Promise<number> {
-    try {
-      const voices = await this.engine.getVoices();
-      const voice = voices.find((v) => v.name === this.settings.voiceName);
-      return voice && isCjkLocale(voice.lang) ? CJK_TOKEN_CHARS : MAX_TOKEN_CHARS;
-    } catch {
-      return MAX_TOKEN_CHARS;
-    }
+    const lang = await this.voiceLang();
+    return lang && isCjkLocale(lang) ? CJK_TOKEN_CHARS : MAX_TOKEN_CHARS;
   }
 
   private async persist(): Promise<void> {

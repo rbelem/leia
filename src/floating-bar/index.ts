@@ -30,7 +30,13 @@ interface BarElements {
 }
 
 let els: BarElements | null = null;
-let status: SessionStatus = { sessionId: null, state: "stopped", tokenPos: 0, tokenCount: 0, settings: { voiceName: null, rate: 1 } };
+let status: SessionStatus = {
+  sessionId: null,
+  state: "stopped",
+  tokenPos: 0,
+  tokenCount: 0,
+  settings: { voiceName: null, rate: 1, engine: null },
+};
 /** Set when the underlying page mutated away from the bound scope; persists
  * until the next read click. */
 let staleNotice: string | null = null;

@@ -16,12 +16,16 @@ const speedSelect = document.getElementById("speed") as HTMLSelectElement;
 
 const send = (msg: RouterMessage): Promise<unknown> => browser.runtime.sendMessage(msg).catch((err) => ({ error: String(err) }));
 
+let currentStatus: SessionStatus | null = null;
+let voicesByFamily = new Map<string, VoiceInfo[]>();
+
 async function refresh(): Promise<void> {
   const [statusReply, voicesReply] = await Promise.all([
     send({ type: "leia:reader:status" }),
     send({ type: "leia:reader:voices" }),
   ]);
   const status = (statusReply as RouterReply | undefined)?.data as SessionStatus | undefined;
+  currentStatus = status ?? null;
   if (status) {
     statusEl.textContent =
       status.state === "stopped"
@@ -31,12 +35,23 @@ async function refresh(): Promise<void> {
   }
 
   const voices = ((voicesReply as RouterReply | undefined)?.data as VoiceInfo[] | undefined) ?? [];
-  voiceSelect.innerHTML = '<option value="">(default voice)</option>';
+  voicesByFamily = new Map<string, VoiceInfo[]>();
   for (const v of voices) {
-    const opt = document.createElement("option");
-    opt.value = v.name;
-    opt.textContent = `${v.name} (${v.lang})`;
-    voiceSelect.appendChild(opt);
+    const list = voicesByFamily.get(v.family) ?? [];
+    list.push(v);
+    voicesByFamily.set(v.family, list);
+  }
+  voiceSelect.innerHTML = '<option value="">(default voice)</option>';
+  for (const [family, list] of voicesByFamily) {
+    const group = document.createElement("optgroup");
+    group.label = family;
+    for (const v of list) {
+      const opt = document.createElement("option");
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.lang})`;
+      group.appendChild(opt);
+    }
+    voiceSelect.appendChild(group);
   }
   voiceSelect.value = status?.settings.voiceName ?? "";
 }
@@ -49,7 +64,15 @@ document.getElementById("read-selection")!.addEventListener("click", async () =>
 });
 
 voiceSelect.addEventListener("change", () => {
-  void send({ type: "leia:reader:prefs", voiceName: voiceSelect.value || null });
+  const voiceName = voiceSelect.value || null;
+  const prefs: { voiceName: string | null; engine?: string | null } = { voiceName };
+  if (voiceName) {
+    // Switching families requires routing prefs: send the voice's family
+    // when it differs from the session's current engine setting.
+    const chosen = [...voicesByFamily.values()].flat().find((v) => v.name === voiceName);
+    if (chosen && chosen.family !== currentStatus?.settings.engine) prefs.engine = chosen.family;
+  }
+  void send({ type: "leia:reader:prefs", ...prefs });
 });
 
 speedSelect.addEventListener("change", () => {

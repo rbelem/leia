@@ -6,6 +6,7 @@ import { ReaderSession, type SessionEvent, type SessionStorage } from "../src/re
 /** Minimal engine double: voices with a selectable lang; speak never ends on its own. */
 class LangEngine implements TextEngine {
   readonly family = "web-speech";
+  readonly capabilities = { wordTiming: false, streaming: false, costClass: "free", privacyClass: "local" } as const;
   readonly voices: VoiceInfo[];
   constructor(voices: VoiceInfo[]) {
     this.voices = voices;
@@ -49,7 +50,7 @@ describe("ReaderSession locale-aware chunk cap", () => {
       ["Leia-zh", "zh-CN", { from: 0, to: 0 }],
       ["Leia-en", "en-US", { from: 0, to: 2 }],
     ] as const) {
-      const engine = new LangEngine([{ name, lang, localService: true }]);
+      const engine = new LangEngine([{ name, lang, localService: true, family: "web-speech" }]);
       const events: SessionEvent[] = [];
       const s = await ReaderSession.load(engine, new MemoryStorage(), (ev) => events.push(ev));
       await s.start(cjkTokens, { voiceName: name });

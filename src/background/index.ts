@@ -55,7 +55,13 @@ async function emitSessionEvent(ev: SessionEvent): Promise<void> {
     return;
   }
   if (ev.type === "highlight") {
-    await broadcast({ type: "leia:highlight:set", sessionId: ev.sessionId, from: ev.from, to: ev.to });
+    await broadcast({
+      type: "leia:highlight:set",
+      sessionId: ev.sessionId,
+      from: ev.from,
+      to: ev.to,
+      ...(ev.word ? { word: ev.word } : {}),
+    });
     return;
   }
   await broadcast({ type: "leia:highlight:clear", sessionId: ev.sessionId });
@@ -108,8 +114,14 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
       };
       const status = await s.start(tokens, overrides);
       if (captureTabId !== undefined && captureId !== undefined) {
+        const locale = (await s.voiceLang()) ?? navigator.language;
         void browser.tabs
-          .sendMessage(captureTabId, { type: "leia:selection:bind", sessionId: status.sessionId, captureId })
+          .sendMessage(captureTabId, {
+            type: "leia:selection:bind",
+            sessionId: status.sessionId,
+            captureId,
+            locale,
+          })
           .catch(() => {});
       }
       return { ok: true, replyType: "leia:reader:start", data: status };
@@ -141,9 +153,10 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
   }
   if (msg.type === "leia:reader:prefs") {
     const s = await getSession();
-    const prefs: Partial<{ voiceName: string | null; rate: number }> = {};
+    const prefs: Partial<{ voiceName: string | null; rate: number; engine: string | null }> = {};
     if ("voiceName" in msg) prefs.voiceName = msg.voiceName as string | null;
     if ("rate" in msg) prefs.rate = msg.rate as number;
+    if ("engine" in msg) prefs.engine = msg.engine as string | null;
     const status = await s.setPrefs(prefs);
     return { ok: true, replyType: "leia:reader:prefs", data: status };
   }

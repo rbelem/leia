@@ -26,6 +26,8 @@
     "http://127.0.0.1/*",
     "https://api.openai.com/*",
     "https://api.elevenlabs.io/*",
-    "https://*.speech.microsoft.com/*"
+    "https://*.speech.microsoft.com/*",
+    "https://api.minimax.io/*",
+    "https://*.aliyuncs.com/*"
   ]
 }

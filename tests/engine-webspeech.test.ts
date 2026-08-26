@@ -112,7 +112,18 @@ describe("WebSpeechEngine", () => {
     ]);
   });
 
-  it("getVoices resolves from the synth", async () => {
-    expect(await engine.getVoices()).toEqual([{ name: "Zira", lang: "en-US", localService: true }]);
+  it("getVoices resolves from the synth with the family tag", async () => {
+    expect(await engine.getVoices()).toEqual([
+      { name: "Zira", lang: "en-US", localService: true, family: "web-speech" },
+    ]);
+  });
+
+  it("advertises sentence-granularity local/free capabilities", () => {
+    expect(engine.capabilities).toEqual({
+      wordTiming: false,
+      streaming: false,
+      costClass: "free",
+      privacyClass: "local",
+    });
   });
 });

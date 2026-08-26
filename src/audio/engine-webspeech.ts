@@ -21,6 +21,7 @@ const VOICES_WAIT_MS = 1500;
 
 export class WebSpeechEngine implements TextEngine {
   readonly family = "web-speech";
+  readonly capabilities = { wordTiming: false, streaming: false, costClass: "free", privacyClass: "local" } as const;
   private active: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
 
   constructor(private readonly synth: SpeechSynthesisLike) {}
@@ -89,5 +90,5 @@ export class WebSpeechEngine implements TextEngine {
 }
 
 function mapVoices(voices: SpeechSynthesisVoice[]): VoiceInfo[] {
-  return voices.map((v) => ({ name: v.name, lang: v.lang, localService: v.localService }));
+  return voices.map((v) => ({ name: v.name, lang: v.lang, localService: v.localService, family: "web-speech" }));
 }

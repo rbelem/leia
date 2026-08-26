@@ -9,6 +9,8 @@ export interface VoiceInfo {
   name: string;
   lang: string;
   localService: boolean;
+  /** Engine family the voice belongs to (popup groups by it; engines route by it). */
+  family: string;
 }
 
 export interface SpeakOptions {
@@ -27,11 +29,30 @@ export type EngineEvent =
   | { type: "start"; speakId: number }
   | { type: "end"; speakId: number }
   | { type: "error"; speakId: number; message: string }
-  | { type: "cancelled"; speakId: number };
+  | { type: "cancelled"; speakId: number }
+  | {
+      /** Word-level timing (engines with wordTiming capability). Char offsets
+       * are relative to the chunk text the engine received — the march layer
+       * maps them onto the page word index. Not terminal. */
+      type: "word";
+      speakId: number;
+      begin: number;
+      end: number;
+    };
+
+export interface EngineCapabilities {
+  /** Engine emits word events with chunk-relative char offsets. */
+  wordTiming: boolean;
+  /** Engine can stream audio as it is generated (unused by v0 consumers). */
+  streaming: boolean;
+  costClass: "free" | "paid";
+  privacyClass: "local" | "provider";
+}
 
 export interface TextEngine {
   /** Engine family identifier — capability disclosure per ADR-0003 later. */
   readonly family: string;
+  readonly capabilities: EngineCapabilities;
   getVoices(): Promise<VoiceInfo[]>;
   /**
    * Speak one chunk. Yields events until the chunk ends; the iterable
@@ -41,8 +62,13 @@ export interface TextEngine {
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent>;
   /** Interrupt the current chunk; its stream yields `cancelled` and closes. */
   cancel(): void;
+  /**
+   * Engine-family switch hook (provider engines / hubs). `family` is the
+   * target family name; unknown families are a no-op. Absent = single-family.
+   */
+  selectFamily?(family: string): void;
 }
 
 export function isEngineEventTerminal(ev: EngineEvent): boolean {
-  return ev.type !== "start";
+  return ev.type !== "start" && ev.type !== "word";
 }

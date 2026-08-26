@@ -6,6 +6,7 @@ import {
   captureArticle,
   type CapturedScope,
 } from "../src/content/scope";
+import { tokenIndexFromRange } from "../src/reader/token-index";
 
 const PROSE =
   "The quick brown fox jumps over the lazy dog and keeps on reading. ".repeat(5) +
@@ -104,5 +105,89 @@ describe("freeze-scope staleness (T3)", () => {
     root.appendChild(frag);
     await flush();
     expect(staleCalls).toBe(0);
+  });
+});
+
+/** Highlight shim that records the exact ranges setHighlight receives. */
+function installCaptureShim(): { last: Range[]; applied: number } {
+  const state = { last: [] as Range[], applied: 0 };
+  Object.defineProperty(globalThis, "CSS", {
+    configurable: true,
+    value: { highlights: { set: () => void (state.applied += 1), delete: () => {} } },
+  });
+  (globalThis as unknown as { Highlight: unknown }).Highlight = class Highlight {
+    constructor(...ranges: Range[]) {
+      state.last = ranges;
+    }
+  };
+  return state;
+}
+
+function textScope(text: string): CapturedScope {
+  document.body.innerHTML = `<p id='t'>${text}</p>`;
+  const node = document.getElementById("t")!.firstChild as Text;
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(node, node.data.length);
+  const tokens = tokenIndexFromRange(range);
+  if (tokens.length === 0) throw new Error("fixture must tokenize");
+  return { tokens, ranges: tokens.map((t) => t.range) };
+}
+
+describe("word-level highlight (T20)", () => {
+  // "The quick fox reads pages aloud. Hello world."
+  // words (en): The[0,3) quick[4,9) fox[10,13) reads[14,19) pages[20,25) aloud.[26,32) Hello[33,38) world.[39,45)
+  // tokens: "The quick fox reads pages aloud. " (0..33) and "Hello world." (33..45)
+  const TEXT = "The quick fox reads pages aloud. Hello world.";
+
+  it("highlights the single page word range a chunk-relative word event points at", () => {
+    const state = installCaptureShim();
+    const highlighter = new ScopeHighlighter();
+    const scope = textScope(TEXT);
+    highlighter.bind("s1", scope, "en");
+
+    // Chunk [0..0]: its text starts at scope offset 0; word "reads" = chunk offsets 14..19.
+    highlighter.show("s1", 0, 0, { begin: 14, end: 19 });
+    expect(state.applied).toBe(1);
+    expect(state.last).toHaveLength(1);
+    expect(state.last[0].toString()).toBe("reads");
+
+    // Chunk [1..1]: chunk text starts at scope offset 33 ("Hello world."); word [0..5) → "Hello".
+    highlighter.show("s1", 1, 1, { begin: 0, end: 5 });
+    expect(state.last).toHaveLength(1);
+    expect(state.last[0].toString()).toBe("Hello");
+  });
+
+  it("falls back to the sentence chunk highlight when the word offset maps between words (whitespace)", () => {
+    const state = installCaptureShim();
+    const highlighter = new ScopeHighlighter();
+    const scope = textScope(TEXT);
+    highlighter.bind("s1", scope, "en");
+
+    // Offset 3 is the space after "The" — inside no word span.
+    highlighter.show("s1", 0, 1, { begin: 3, end: 3 });
+    expect(state.last).toHaveLength(2);
+    expect(state.last.map((r) => r.toString()).join("")).toBe(TEXT);
+  });
+
+  it("uses sentence-range behavior when bound without a locale", () => {
+    const state = installCaptureShim();
+    const highlighter = new ScopeHighlighter();
+    const scope = textScope(TEXT);
+    highlighter.bind("s1", scope); // no locale → no word map
+
+    highlighter.show("s1", 0, 1, { begin: 14, end: 19 });
+    expect(state.last).toHaveLength(2);
+  });
+
+  it("clear() drops the word index with the binding", () => {
+    const state = installCaptureShim();
+    const highlighter = new ScopeHighlighter();
+    const scope = textScope(TEXT);
+    highlighter.bind("s1", scope, "en");
+    highlighter.clear("s1");
+
+    highlighter.show("s1", 0, 0, { begin: 14, end: 19 });
+    expect(state.applied).toBe(0); // binding gone — no highlight applied
   });
 });

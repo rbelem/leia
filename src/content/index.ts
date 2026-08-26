@@ -37,16 +37,21 @@ browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined =>
     return { ok: true, replyType: "leia:selection:capture", data: { captureId: captureSeq, tokens: scope.tokens } };
   }
   if (msg.type === "leia:selection:bind") {
-    const m = msg as unknown as { sessionId: string; captureId?: number };
+    const m = msg as unknown as { sessionId: string; captureId?: number; locale?: string | null };
     if (m.captureId === undefined || m.captureId === captureSeq) {
-      if (pendingScope) highlighter.bind(m.sessionId, pendingScope);
+      if (pendingScope) highlighter.bind(m.sessionId, pendingScope, m.locale ?? null);
       pendingScope = null;
     }
     return { ok: true, replyType: "leia:selection:bind" };
   }
   if (msg.type === "leia:highlight:set") {
-    const m = msg as unknown as { sessionId: string; from: number; to: number };
-    highlighter.show(m.sessionId, m.from, m.to);
+    const m = msg as unknown as {
+      sessionId: string;
+      from: number;
+      to: number;
+      word?: { begin: number; end: number };
+    };
+    highlighter.show(m.sessionId, m.from, m.to, m.word);
     return undefined;
   }
   if (msg.type === "leia:highlight:clear") {

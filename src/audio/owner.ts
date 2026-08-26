@@ -18,8 +18,17 @@
  */
 import browser from "webextension-polyfill";
 import { EventStream } from "../reader/event-stream";
-import type { EngineEvent, SpeakOptions, TextEngine, VoiceInfo } from "../reader/contract";
+import type {
+  EngineCapabilities,
+  EngineEvent,
+  SpeakOptions,
+  TextEngine,
+  VoiceInfo,
+} from "../reader/contract";
+import { isEngineEventTerminal } from "../reader/contract";
 import { WebSpeechEngine } from "./engine-webspeech";
+import { MiniMaxEngine } from "./engine-minimax";
+import { EngineHub } from "./hub";
 
 // Minimal typing for chrome.offscreen (polyfill types don't cover it).
 interface ChromeOffscreen {
@@ -67,10 +76,39 @@ async function ensureOffscreen(): Promise<void> {
 export class ProxyEngine implements TextEngine {
   readonly family = "web-speech";
   private current: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
+  private capsPromise: Promise<EngineCapabilities> | null = null;
+  private caps: EngineCapabilities | null = null;
 
   async getVoices(): Promise<VoiceInfo[]> {
     await ensureOffscreen();
     return (await browser.runtime.sendMessage({ type: "leia:audio:voices" })) as VoiceInfo[];
+  }
+
+  /**
+   * Offscreen's current-family capabilities. Sync getter: returns the cached
+   * value (or a conservative default while the first round trip is in
+   * flight); the offscreen reply refreshes the cache.
+   */
+  get capabilities(): EngineCapabilities {
+    if (!this.capsPromise) {
+      this.capsPromise = ensureOffscreen()
+        .then(
+          () => browser.runtime.sendMessage({ type: "leia:audio:capabilities" }) as Promise<EngineCapabilities>,
+        )
+        .then((c) => {
+          this.caps = c;
+          return c;
+        })
+        .catch(() => this.caps ?? DEFAULT_CAPABILITIES);
+    }
+    return this.caps ?? DEFAULT_CAPABILITIES;
+  }
+
+  /** Switch the offscreen engine family; next capabilities read re-queries. */
+  selectFamily(family: string): void {
+    this.caps = null;
+    this.capsPromise = null;
+    void browser.runtime.sendMessage({ type: "leia:audio:family", family }).catch(() => {});
   }
 
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
@@ -113,7 +151,7 @@ export class ProxyEngine implements TextEngine {
     if (!this.current || ev.speakId !== this.current.speakId) return;
     const stream = this.current.stream;
     stream.push(ev);
-    if (ev.type !== "start") {
+    if (isEngineEventTerminal(ev)) {
       this.current = null;
       stream.close();
     }
@@ -122,13 +160,34 @@ export class ProxyEngine implements TextEngine {
 
 const proxy = new ProxyEngine();
 
+const DEFAULT_CAPABILITIES: EngineCapabilities = {
+  wordTiming: false,
+  streaming: false,
+  costClass: "free",
+  privacyClass: "local",
+};
+
+/** Read the MiniMax key from storage.local (T14 providers settings shape). */
+async function readMiniMaxKey(): Promise<string | null> {
+  try {
+    const got = (await browser.storage.local.get("leia:settings:minimaxKey")) as Record<string, unknown>;
+    const v = got["leia:settings:minimaxKey"];
+    return typeof v === "string" && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve the platform's engine. Chrome uses the offscreen proxy; Firefox speaks directly. */
 export function resolveAudioEngine(): TextEngine {
   if (isChrome()) return proxy;
   if (typeof speechSynthesis === "undefined") {
     throw new Error("speechSynthesis unavailable — Firefox background page only");
   }
-  return new WebSpeechEngine(speechSynthesis);
+  const hub = new EngineHub();
+  hub.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
+  hub.register("minimax", new MiniMaxEngine({ getKey: readMiniMaxKey }));
+  return hub;
 }
 
 /** Singleton — every context wiring (background router) uses the same proxy. */

@@ -8,7 +8,8 @@
  */
 import type { TokenText } from "../reader/session";
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
-import { tokenIndexFromRange, tokenIndexFromSelection } from "../reader/token-index";
+import { tokenIndexFromRange, tokenIndexFromSelection, wordIndexFromRange, type Token } from "../reader/token-index";
+import { wordSpans, type TokenSpan } from "../reader/sentences";
 import { clearHighlight, setHighlight } from "./highlight";
 
 export interface CapturedScope {
@@ -101,24 +102,53 @@ export class ScopeHighlighter {
   private observer: MutationObserver | null = null;
   private stale = false;
   private readonly onStale?: () => void;
+  /** Word-level index (T4) over the full scope + parallel char spans, built when a locale is given. */
+  private wordMap: { words: Token[]; spans: TokenSpan[] } | null = null;
+  /** Sentence token i → char offset of its start in the full scope text. */
+  private prefix: Int32Array | null = null;
 
   constructor(options: ScopeHighlighterOptions = {}) {
     this.onStale = options.onStale;
   }
 
-  bind(sessionId: string, scope: CapturedScope): void {
+  bind(sessionId: string, scope: CapturedScope, locale?: string | null): void {
     this.sessionId = sessionId;
     this.ranges = scope.ranges;
     this.stale = false;
+    this.wordMap = null;
+    this.prefix = null;
+    if (locale) {
+      const full = fullScopeRange(scope.ranges);
+      if (full) {
+        const idx = wordIndexFromRange(full, locale);
+        if (idx && idx.words.length > 0) {
+          // Offsets derive from the same text + segmenter the index used;
+          // the round-trip invariant makes scope.tokens.join("") === range text.
+          const spans = wordSpans(scope.tokens.map((t) => t.text).join(""), locale);
+          this.wordMap = { words: idx.words, spans };
+          this.prefix = sentenceCharPrefixes(scope.tokens);
+        }
+      }
+    }
     this.startObserving(scopeRangesRoot(scope.ranges));
   }
 
-  /** Apply the highlight for token indices [from..to] when bound and live. */
-  show(sessionId: string, from: number, to: number): void {
+  /** Apply the highlight for token indices [from..to]; word-level span when given. */
+  show(sessionId: string, from: number, to: number, word?: { begin: number; end: number }): void {
     if (sessionId !== this.sessionId || this.stale) return;
     if (!this.isLive()) {
       this.markStale(); // observer missed it, but the ranges are dead
       return;
+    }
+    if (word && word.end > word.begin && this.wordMap && this.prefix && from < this.prefix.length) {
+      // Engine offsets are chunk-relative; map onto the full-scope word map.
+      const global = this.prefix[from] + word.begin;
+      const i = findWordIndex(this.wordMap.spans, global);
+      if (i >= 0) {
+        setHighlight([this.wordMap.words[i].range]);
+        return;
+      }
+      // Word not in the map (whitespace boundary / split mismatch) — fall back.
     }
     setHighlight(this.ranges.slice(from, to + 1));
   }
@@ -127,6 +157,8 @@ export class ScopeHighlighter {
     if (sessionId !== this.sessionId) return;
     this.sessionId = null;
     this.ranges = [];
+    this.wordMap = null;
+    this.prefix = null;
     this.stale = false;
     this.stopObserving();
     clearHighlight();
@@ -199,4 +231,38 @@ function scopeRangesRoot(ranges: Range[]): Node | null {
   r.setEnd(last.endContainer, last.endOffset);
   const root = r.commonAncestorContainer;
   return root.nodeType === Node.ELEMENT_NODE ? root : (root.parentElement ?? root);
+}
+
+/** Full-scope range (first token start → last token end); null when empty. */
+function fullScopeRange(ranges: Range[]): Range | null {
+  const first = ranges[0];
+  const last = ranges[ranges.length - 1];
+  if (!first || !last) return null;
+  const doc = first.startContainer.ownerDocument;
+  if (!doc) return null;
+  const r = doc.createRange();
+  r.setStart(first.startContainer, first.startOffset);
+  r.setEnd(last.endContainer, last.endOffset);
+  return r;
+}
+
+/** prefix[i] = char offset of token i's start in the concatenated token text. */
+function sentenceCharPrefixes(tokens: Array<{ text: string }>): Int32Array {
+  const prefix = new Int32Array(tokens.length + 1);
+  for (let i = 0; i < tokens.length; i += 1) prefix[i + 1] = prefix[i] + tokens[i].text.length;
+  return prefix;
+}
+
+/** Binary search the word span containing `pos` (spans are [start, end)). */
+function findWordIndex(spans: TokenSpan[], pos: number): number {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const s = spans[mid];
+    if (pos < s.start) hi = mid - 1;
+    else if (pos >= s.end) lo = mid + 1;
+    else return mid;
+  }
+  return -1;
 }

@@ -1,14 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { EventStream } from "../src/reader/event-stream";
-import type { EngineEvent, SpeakOptions, TextEngine, VoiceInfo } from "../src/reader/contract";
+import type {
+  EngineCapabilities,
+  EngineEvent,
+  SpeakOptions,
+  TextEngine,
+  VoiceInfo,
+} from "../src/reader/contract";
 import { PREFS_KEY, ReaderSession, SESSION_KEY, type SessionEvent, type SessionStorage } from "../src/reader/session";
 
 /** Test double for the TextEngine contract. */
 class FakeEngine implements TextEngine {
   readonly family = "web-speech";
+  readonly capabilities: EngineCapabilities;
   speaks: Array<{ text: string; speakId: number; options: SpeakOptions }> = [];
   cancels = 0;
+  private familyCalls: string[] = [];
   private current: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
+
+  constructor(capabilities: Partial<EngineCapabilities> = {}) {
+    this.capabilities = {
+      wordTiming: false,
+      streaming: false,
+      costClass: "free",
+      privacyClass: "local",
+      ...capabilities,
+    };
+  }
+
+  selectFamily(family: string): void {
+    this.familyCalls.push(family);
+  }
 
   getVoices(): Promise<VoiceInfo[]> {
     return Promise.resolve([]);
@@ -39,6 +61,17 @@ class FakeEngine implements TextEngine {
     c.stream.push({ type: "end", speakId: c.speakId });
     c.stream.close();
   }
+
+  /** Test helper: push a word-timing event for the current speak. */
+  pushWord(speakId: number, begin: number, end: number): void {
+    const c = this.current;
+    if (!c || c.speakId !== speakId) return;
+    c.stream.push({ type: "word", speakId, begin, end });
+  }
+
+  selectFamilyCalls(): string[] {
+    return [...this.familyCalls];
+  }
 }
 
 /** In-memory SessionStorage double backed by the same semantics as storage.session. */
@@ -68,8 +101,7 @@ const TOKENS: Array<{ text: string }> = [
   "Fourth sentence.",
 ].map((text) => ({ text }));
 
-function makeSession() {
-  const engine = new FakeEngine();
+function makeSession(engine: FakeEngine = new FakeEngine()) {
   const storage = new MemoryStorage();
   const events: SessionEvent[] = [];
   return { engine, storage, events, emit: (ev: SessionEvent) => events.push(ev) };
@@ -194,10 +226,76 @@ describe("ReaderSession (fake engine)", () => {
     await tick();
     expect(engine.speaks[0].options).toEqual({ voiceName: "Zira", rate: 2 });
 
-    const prefs = storage.read(PREFS_KEY) as { voiceName: string; rate: number };
-    expect(prefs).toEqual({ voiceName: "Zira", rate: 2 });
+    const prefs = storage.read(PREFS_KEY) as { voiceName: string; rate: number; engine: string | null };
+    expect(prefs).toEqual({ voiceName: "Zira", rate: 2, engine: null });
 
     const s2 = await ReaderSession.load(new FakeEngine(), storage, () => {});
-    expect(s2.status().settings).toEqual({ voiceName: "Zira", rate: 2 });
+    expect(s2.status().settings).toEqual({ voiceName: "Zira", rate: 2, engine: null });
+  });
+
+  it("relays word events as word-level highlights when the engine has wordTiming", async () => {
+    const { engine, events, emit } = makeSession(new FakeEngine({ wordTiming: true }));
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    const id = s.status().sessionId;
+
+    engine.pushWord(1, 3, 8);
+    await tick();
+    expect(events).toContainEqual({
+      type: "highlight",
+      sessionId: id,
+      from: 0,
+      to: 2,
+      word: { begin: 3, end: 8 },
+    });
+
+    engine.pushWord(1, 9, 16);
+    engine.finishCurrent();
+    await tick();
+    expect(events.filter((e) => e.type === "highlight" && "word" in e)).toEqual([
+      { type: "highlight", sessionId: id, from: 0, to: 2, word: { begin: 3, end: 8 } },
+      { type: "highlight", sessionId: id, from: 0, to: 2, word: { begin: 9, end: 16 } },
+    ]);
+    // The sentence-level chunk highlight still precedes the word march.
+    const firstHighlight = events.find((e) => e.type === "highlight");
+    expect(firstHighlight).toMatchObject({ type: "highlight", from: 0, to: 2 });
+    expect(firstHighlight).not.toHaveProperty("word");
+  });
+
+  it("does not relay word events from engines without wordTiming", async () => {
+    const { engine, events, emit } = makeSession(); // wordTiming: false
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    engine.pushWord(1, 0, 5);
+    await tick();
+    engine.finishCurrent();
+    await tick();
+
+    expect(events.filter((e) => e.type === "highlight" && "word" in e)).toEqual([]);
+  });
+
+  it("setPrefs engine change calls selectFamily and persists the setting", async () => {
+    const { engine, storage, emit } = makeSession();
+    const s = await ReaderSession.load(engine, storage, emit);
+
+    await s.setPrefs({ engine: "minimax" });
+    expect(engine.selectFamilyCalls()).toEqual(["minimax"]);
+
+    const prefs = storage.read(PREFS_KEY) as { engine: string | null };
+    expect(prefs.engine).toBe("minimax");
+    expect(s.status().settings.engine).toBe("minimax");
+  });
+
+  it("setPrefs with engine null persists the default without calling selectFamily", async () => {
+    const { engine, storage, emit } = makeSession();
+    const s = await ReaderSession.load(engine, storage, emit);
+
+    await s.setPrefs({ engine: null });
+    expect(engine.selectFamilyCalls()).toEqual([]);
+    expect(s.status().settings.engine).toBeNull();
   });
 });
