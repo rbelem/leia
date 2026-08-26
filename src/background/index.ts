@@ -86,6 +86,81 @@ async function broadcast(msg: Record<string, unknown>): Promise<void> {
   );
 }
 
+/**
+ * Reader start, shared by the message handler and the keyboard shortcut
+ * (T18): toolbar/shortcut fallback captures the active tab's scope when no
+ * tokens are passed; T17 preserve-position and T16 restore run here too so
+ * every entry point gets identical semantics.
+ */
+async function handleReaderStart(msg: {
+  tokens?: TokenText[];
+  voiceName?: string | null;
+  rate?: number;
+}): Promise<RouterReply> {
+  try {
+    const s = await getSession();
+    let tokens = msg.tokens;
+    let captureTabId: number | undefined;
+    let captureId: number | undefined;
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    const tabUrl = typeof tab?.url === "string" ? tab.url : undefined;
+    if (!tokens || tokens.length === 0) {
+      // Toolbar-action fallback: capture the active tab's selection.
+      if (!tab?.id) return { ok: false, replyType: "leia:reader:start", error: "no active tab" };
+      captureTabId = tab.id;
+      const reply = (await browser.tabs.sendMessage(captureTabId, { type: "leia:selection:capture" })) as
+        | RouterReply
+        | undefined;
+      if (!reply?.ok) {
+        return { ok: false, replyType: "leia:reader:start", error: (reply as RouterReply | undefined)?.error ?? "no selection" };
+      }
+      tokens = (reply.data as { tokens: TokenText[] }).tokens;
+      captureId = (reply.data as { captureId?: number }).captureId;
+    }
+    // T17 — starting elsewhere must not silently drop the current
+    // position: park the running session's record under its URL first.
+    // (The global session still switches; the position survives per-URL.)
+    const prior = s.snapshot();
+    if (prior) {
+      const priorUrl = prior.url ?? tabUrl;
+      if (priorUrl) await resume.save(priorUrl, prior);
+    }
+    // T16 — restore the saved position for the incoming URL when the
+    // freshly captured scope still matches at that point (strict one-token
+    // compare; mismatch degrades to the top and keeps the stored record).
+    let resumeAt = 0;
+    if (tabUrl) {
+      const saved = await resume.load(tabUrl);
+      if (
+        saved &&
+        saved.tokenPos < tokens.length &&
+        saved.tokens[saved.tokenPos]?.text === tokens[saved.tokenPos]?.text
+      ) {
+        resumeAt = saved.tokenPos;
+      }
+    }
+    const overrides = {
+      voiceName: msg.voiceName,
+      rate: msg.rate,
+    };
+    const status = await s.start(tokens, { url: tabUrl, resumeAt, ...overrides });
+    if (captureTabId !== undefined && captureId !== undefined) {
+      const locale = (await s.voiceLang()) ?? navigator.language;
+      void browser.tabs
+        .sendMessage(captureTabId, {
+          type: "leia:selection:bind",
+          sessionId: status.sessionId,
+          captureId,
+          locale,
+        })
+        .catch(() => {});
+    }
+    return { ok: true, replyType: "leia:reader:start", data: status };
+  } catch (err) {
+    return { ok: false, replyType: "leia:reader:start", error: String(err) };
+  }
+}
+
 browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply | undefined> => {
   if (!isRouterMessage(msg)) return;
   if (msg.type === "leia:page-info") {
@@ -101,68 +176,7 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
 
   // --- Reader control (T2) ---
   if (msg.type === "leia:reader:start") {
-    try {
-      const s = await getSession();
-      let tokens = (msg as { tokens?: TokenText[] }).tokens;
-      let captureTabId: number | undefined;
-      let captureId: number | undefined;
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      const tabUrl = typeof tab?.url === "string" ? tab.url : undefined;
-      if (!tokens || tokens.length === 0) {
-        // Toolbar-action fallback: capture the active tab's selection.
-        if (!tab?.id) return { ok: false, replyType: "leia:reader:start", error: "no active tab" };
-        captureTabId = tab.id;
-        const reply = (await browser.tabs.sendMessage(captureTabId, { type: "leia:selection:capture" })) as
-          | RouterReply
-          | undefined;
-        if (!reply?.ok) {
-          return { ok: false, replyType: "leia:reader:start", error: (reply as RouterReply | undefined)?.error ?? "no selection" };
-        }
-        tokens = (reply.data as { tokens: TokenText[] }).tokens;
-        captureId = (reply.data as { captureId?: number }).captureId;
-      }
-      // T17 — starting elsewhere must not silently drop the current
-      // position: park the running session's record under its URL first.
-      // (The global session still switches; the position survives per-URL.)
-      const prior = s.snapshot();
-      if (prior) {
-        const priorUrl = prior.url ?? tabUrl;
-        if (priorUrl) await resume.save(priorUrl, prior);
-      }
-      // T16 — restore the saved position for the incoming URL when the
-      // freshly captured scope still matches at that point (strict one-token
-      // compare; mismatch degrades to the top and keeps the stored record).
-      let resumeAt = 0;
-      if (tabUrl) {
-        const saved = await resume.load(tabUrl);
-        if (
-          saved &&
-          saved.tokenPos < tokens.length &&
-          saved.tokens[saved.tokenPos]?.text === tokens[saved.tokenPos]?.text
-        ) {
-          resumeAt = saved.tokenPos;
-        }
-      }
-      const overrides = {
-        voiceName: msg.voiceName as string | null | undefined,
-        rate: msg.rate as number | undefined,
-      };
-      const status = await s.start(tokens, { url: tabUrl, resumeAt, ...overrides });
-      if (captureTabId !== undefined && captureId !== undefined) {
-        const locale = (await s.voiceLang()) ?? navigator.language;
-        void browser.tabs
-          .sendMessage(captureTabId, {
-            type: "leia:selection:bind",
-            sessionId: status.sessionId,
-            captureId,
-            locale,
-          })
-          .catch(() => {});
-      }
-      return { ok: true, replyType: "leia:reader:start", data: status };
-    } catch (err) {
-      return { ok: false, replyType: "leia:reader:start", error: String(err) };
-    }
+    return handleReaderStart(msg as { tokens?: TokenText[]; voiceName?: string | null; rate?: number });
   }
 
   // T16 — pause/stop park the reading position per-URL. The resume record
@@ -313,4 +327,25 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
   }
 
   return routeMessage(msg) ?? undefined;
+});
+
+// --- Keyboard shortcut (T18): toggle reading. Configurable in
+// chrome://extensions/shortcuts / about:addons → Manage Shortcuts. ---
+browser.commands.onCommand.addListener((command: string) => {
+  if (command !== "toggle-read") return;
+  void (async () => {
+    const s = await getSession();
+    const { state } = s.status();
+    if (state === "playing") {
+      await s.pause();
+      return;
+    }
+    if (state === "paused") {
+      await s.resume();
+      return;
+    }
+    // Stopped: same capture fallback as the toolbar action — missing
+    // selection stays a silent no-op.
+    await handleReaderStart({ type: "leia:reader:start" } as never);
+  })().catch(() => {});
 });

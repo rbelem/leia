@@ -21,6 +21,12 @@
     { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
   ],
   "permissions": ["activeTab", "storage", "offscreen", "alarms"],
+  "commands": {
+    "toggle-read": {
+      "suggested_key": { "default": "Alt+Shift+L" },
+      "description": "Toggle reading"
+    }
+  },
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "optional_host_permissions": [
     "https://api.openai.com/*",
