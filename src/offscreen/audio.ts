@@ -11,7 +11,9 @@ import browser from "webextension-polyfill";
 import { WebSpeechEngine } from "../audio/engine-webspeech";
 import { MiniMaxEngine } from "../audio/engine-minimax";
 import { ElevenLabsEngine } from "../audio/engine-elevenlabs";
-import { EngineHub } from "../audio/hub";
+import { AzureEngine } from "../audio/engine-azure";
+import { OpenAIEngine } from "../audio/engine-openai";
+import { EngineHub, type EngineFamilyInfo } from "../audio/hub";
 import type { EngineCapabilities } from "../reader/contract";
 
 /** Provider key from storage.local (T14 providers settings shape). */
@@ -31,6 +33,11 @@ const engine = new EngineHub();
 engine.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
 engine.register("minimax", new MiniMaxEngine({ getKey: readProviderKey("leia:settings:minimaxKey") }));
 engine.register("elevenlabs", new ElevenLabsEngine({ getKey: readProviderKey("leia:settings:elevenlabsKey") }));
+engine.register("azure", new AzureEngine({
+  getKey: readProviderKey("leia:settings:azureKey"),
+  getRegion: readProviderKey("leia:settings:azureRegion"),
+}));
+engine.register("openai", new OpenAIEngine({ getKey: readProviderKey("leia:settings:openaiKey") }));
 
 async function speakAndStream(msg: {
   speakId: number;
@@ -54,6 +61,8 @@ browser.runtime.onMessage.addListener((msg: unknown) => {
       return engine.getVoices();
     case "leia:audio:capabilities":
       return engine.capabilities as EngineCapabilities;
+    case "leia:audio:families":
+      return engine.families() as EngineFamilyInfo[];
     case "leia:audio:family": {
       const m = msg as unknown as { family?: string };
       if (typeof m.family === "string") engine.select(m.family);

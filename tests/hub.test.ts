@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { EngineHub } from "../src/audio/hub";
 import { EventStream } from "../src/reader/event-stream";
 import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceInfo } from "../src/reader/contract";
+import { AzureEngine, AZURE_CAPABILITIES } from "../src/audio/engine-azure";
+import { OpenAIEngine, OPENAI_CAPABILITIES } from "../src/audio/engine-openai";
 
 const FREE_CAPS: EngineCapabilities = { wordTiming: false, streaming: false, costClass: "free", privacyClass: "local" };
 const PAID_CAPS: EngineCapabilities = { wordTiming: true, streaming: false, costClass: "paid", privacyClass: "provider" };
@@ -145,5 +147,42 @@ describe("EngineHub", () => {
     const hub = new EngineHub();
     hub.register("web-speech", ws);
     expect(hub.currentFamily).toBe("web-speech");
+  });
+
+  it("azure and openai register as families with their real capabilities; keyless they contribute no voices", async () => {
+    const neverFetch = (async () => {
+      throw new Error("keyless engines must not fetch");
+    }) as typeof fetch;
+    const hub = new EngineHub();
+    hub.register("web-speech", new StubEngine("web-speech", [voice("Local A", "web-speech")]), { default: true });
+    hub.register("azure", new AzureEngine({
+      getKey: async () => null,
+      getRegion: async () => null,
+      fetchImpl: neverFetch,
+    }));
+    hub.register("openai", new OpenAIEngine({ getKey: async () => null, fetchImpl: neverFetch }));
+
+    expect(await hub.getVoices()).toEqual([voice("Local A", "web-speech")]); // keyless skip
+
+    expect(hub.families()).toEqual([
+      { family: "web-speech", capabilities: FREE_CAPS },
+      { family: "azure", capabilities: AZURE_CAPABILITIES },
+      { family: "openai", capabilities: OPENAI_CAPABILITIES },
+    ]);
+
+    hub.select("azure");
+    expect(hub.currentFamily).toBe("azure");
+    expect(hub.capabilities).toEqual(AZURE_CAPABILITIES);
+    hub.select("openai");
+    expect(hub.capabilities).toEqual(OPENAI_CAPABILITIES);
+  });
+
+  it("families() reflects registration order, including late registrations", () => {
+    const hub = new EngineHub();
+    hub.register("openai", new StubEngine("openai", [], OPENAI_CAPABILITIES));
+    hub.register("web-speech", new StubEngine("web-speech", []), { default: true });
+    expect(hub.families().map((f) => f.family)).toEqual(["openai", "web-speech"]); // registration order, not default-first
+    hub.register("azure", new StubEngine("azure", [], AZURE_CAPABILITIES));
+    expect(hub.families().map((f) => f.family)).toEqual(["openai", "web-speech", "azure"]);
   });
 });

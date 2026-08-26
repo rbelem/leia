@@ -29,7 +29,9 @@ import { isEngineEventTerminal } from "../reader/contract";
 import { WebSpeechEngine } from "./engine-webspeech";
 import { MiniMaxEngine } from "./engine-minimax";
 import { ElevenLabsEngine } from "./engine-elevenlabs";
-import { EngineHub } from "./hub";
+import { AzureEngine } from "./engine-azure";
+import { OpenAIEngine } from "./engine-openai";
+import { EngineHub, type EngineFamilyInfo } from "./hub";
 
 // Minimal typing for chrome.offscreen (polyfill types don't cover it).
 interface ChromeOffscreen {
@@ -79,6 +81,8 @@ export class ProxyEngine implements TextEngine {
   private current: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
   private capsPromise: Promise<EngineCapabilities> | null = null;
   private caps: EngineCapabilities | null = null;
+  private famsPromise: Promise<EngineFamilyInfo[]> | null = null;
+  private fams: EngineFamilyInfo[] | null = null;
 
   async getVoices(): Promise<VoiceInfo[]> {
     await ensureOffscreen();
@@ -105,11 +109,32 @@ export class ProxyEngine implements TextEngine {
     return this.caps ?? DEFAULT_CAPABILITIES;
   }
 
-  /** Switch the offscreen engine family; next capabilities read re-queries. */
+  /** Switch the offscreen engine family; next capabilities/families read re-queries. */
   selectFamily(family: string): void {
     this.caps = null;
     this.capsPromise = null;
+    this.fams = null;
+    this.famsPromise = null;
     void browser.runtime.sendMessage({ type: "leia:audio:family", family }).catch(() => {});
+  }
+
+  /**
+   * Offscreen's registered families (sync getter like capabilities: cached,
+   * refreshed on the first read after a selectFamily / cache miss).
+   */
+  families(): EngineFamilyInfo[] {
+    if (!this.famsPromise) {
+      this.famsPromise = ensureOffscreen()
+        .then(
+          () => browser.runtime.sendMessage({ type: "leia:audio:families" }) as Promise<EngineFamilyInfo[]>,
+        )
+        .then((f) => {
+          this.fams = f;
+          return f;
+        })
+        .catch(() => this.fams ?? []);
+    }
+    return this.fams ?? [];
   }
 
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
@@ -189,6 +214,11 @@ export function resolveAudioEngine(): TextEngine {
   hub.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
   hub.register("minimax", new MiniMaxEngine({ getKey: () => readProviderKey("leia:settings:minimaxKey") }));
   hub.register("elevenlabs", new ElevenLabsEngine({ getKey: () => readProviderKey("leia:settings:elevenlabsKey") }));
+  hub.register("azure", new AzureEngine({
+    getKey: () => readProviderKey("leia:settings:azureKey"),
+    getRegion: () => readProviderKey("leia:settings:azureRegion"),
+  }));
+  hub.register("openai", new OpenAIEngine({ getKey: () => readProviderKey("leia:settings:openaiKey") }));
   return hub;
 }
 

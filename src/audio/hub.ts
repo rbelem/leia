@@ -7,6 +7,11 @@
  */
 import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceInfo } from "../reader/contract";
 
+export interface EngineFamilyInfo {
+  family: string;
+  capabilities: EngineCapabilities;
+}
+
 const NO_CAPABILITIES: EngineCapabilities = {
   wordTiming: false,
   streaming: false,
@@ -48,6 +53,11 @@ export class EngineHub implements TextEngine {
 
   selectFamily(family: string): void {
     this.select(family);
+  }
+
+  /** Registered families with their capabilities, in registration order (settings UI). */
+  families(): EngineFamilyInfo[] {
+    return this.order.map((family) => ({ family, capabilities: this.engines.get(family)!.capabilities }));
   }
 
   async getVoices(): Promise<VoiceInfo[]> {
