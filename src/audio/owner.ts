@@ -31,6 +31,7 @@ import { MiniMaxEngine } from "./engine-minimax";
 import { ElevenLabsEngine } from "./engine-elevenlabs";
 import { AzureEngine } from "./engine-azure";
 import { OpenAIEngine } from "./engine-openai";
+import { registerLocalEngines } from "./engine-local";
 import { EngineHub, type EngineFamilyInfo } from "./hub";
 
 // Minimal typing for chrome.offscreen (polyfill types don't cover it).
@@ -219,6 +220,7 @@ export function resolveAudioEngine(): TextEngine {
     getRegion: () => readProviderKey("leia:settings:azureRegion"),
   }));
   hub.register("openai", new OpenAIEngine({ getKey: () => readProviderKey("leia:settings:openaiKey") }));
+  void registerLocalEngines(hub); // lazy boot probe (ADR-0006) — never blocks web-speech
   return hub;
 }
 

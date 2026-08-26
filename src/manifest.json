@@ -21,9 +21,8 @@
     { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
   ],
   "permissions": ["activeTab", "storage", "offscreen", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "optional_host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*",
     "https://api.openai.com/*",
     "https://api.elevenlabs.io/*",
     "https://*.speech.microsoft.com/*",
