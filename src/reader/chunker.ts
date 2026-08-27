@@ -1,25 +1,32 @@
 /**
  * Chunking: group consecutive sentence tokens into utterance chunks.
- * Constraints (T2 Web Speech specifics):
- *  - chunks never cross sentence boundaries (highlight advances per
- *    utterance start; sentence granularity)
- *  - ≤ cap total chars (default MAX_TOKEN_CHARS; CJK sessions pass
+ * Constraints:
+ *  - chunks never cross DOM block boundaries (TokenText.blockStart from the
+ *    capture walk): a paragraph, list item, or table cell is the reading
+ *    unit; headings (heading) read alone.
+ *  - ≤ cap chars (default MAX_TOKEN_CHARS; CJK sessions pass
  *    CJK_TOKEN_CHARS so CJK utterances stay ~100 chars — never one long
- *    utterance, Chrome silent-stop bug); tokens are already ≤ cap, so no
- *    chunk can exceed it and the 300-char ceiling holds by construction
- *  - ≤ MAX_TOKENS_PER_CHUNK sentences per chunk: the marching highlight
- *    renders one range per sentence and caps at 3 ranges.
+ *    utterance, Chrome silent-stop bug): tokens are already ≤ cap, so no
+ *    chunk can exceed it and the 300-char ceiling holds by construction.
+ *    Long paragraphs split into several utterances; the content-side wash
+ *    still covers the whole block.
+ *
+ * Tokens without flags (old stored sessions) degrade to char-cap grouping,
+ * which for ≤250-char tokens approximates the old 3-sentence behavior.
  */
 import { MAX_TOKEN_CHARS } from "./sentences";
-
-export const MAX_TOKENS_PER_CHUNK = 3;
+import type { TokenText } from "./session";
 
 export interface ChunkSpan {
   from: number; // first token index (inclusive)
   to: number; // last token index (inclusive)
 }
 
-export function chunkTokens(tokens: Array<{ text: string }>, cap: number = MAX_TOKEN_CHARS): ChunkSpan[] {
+function startsUnit(t: TokenText | undefined): boolean {
+  return !!t && (t.blockStart === true || t.heading === true);
+}
+
+export function chunkTokens(tokens: TokenText[], cap: number = MAX_TOKEN_CHARS): ChunkSpan[] {
   const chunks: ChunkSpan[] = [];
   let from = 0;
   while (from < tokens.length) {
@@ -27,7 +34,8 @@ export function chunkTokens(tokens: Array<{ text: string }>, cap: number = MAX_T
     let chars = tokens[from].text.length;
     while (
       to + 1 < tokens.length &&
-      to + 1 - from < MAX_TOKENS_PER_CHUNK &&
+      !startsUnit(tokens[to + 1]) &&
+      !tokens[to].heading && // a heading never absorbs following text
       chars + tokens[to + 1].text.length <= cap
     ) {
       to += 1;

@@ -6,7 +6,7 @@ import {
   handleFfPlaybackKeepalive,
   handleFfPlaybackProbe,
 } from "../probes/ff-playback";
-import { chromeAudioEngine, resolveAudioEngine } from "../audio/owner";
+import { chromeAudioEngine, audioClockMs, resolveAudioEngine } from "../audio/owner";
 import { ReaderSession, type SessionEvent, type TokenText } from "../reader/session";
 import type { EngineEvent, TextEngine } from "../reader/contract";
 import { ResumeStore } from "./resume";
@@ -42,6 +42,13 @@ const sessionStorage = {
   set: (items: Record<string, unknown>) => browser.storage.session.set(items),
   remove: (key: string) => browser.storage.session.remove(key),
 };
+// Voice/engine/rate are durable user prefs: session storage is wiped on
+// every browser restart, local survives it (same reasoning as resume.ts).
+const prefsStorage = {
+  get: (key: string) => browser.storage.local.get(key) as Promise<Record<string, unknown>>,
+  set: (items: Record<string, unknown>) => browser.storage.local.set(items),
+  remove: (key: string) => browser.storage.local.remove(key),
+};
 
 let sessionPromise: Promise<ReaderSession> | null = null;
 
@@ -53,30 +60,33 @@ const PREVIEW_SPEAK_ID = -1;
 const PREVIEW_SAMPLE = "Hello, I am Leia.";
 
 async function getSession(): Promise<ReaderSession> {
-  sessionPromise ??= ReaderSession.load(engine, sessionStorage, emitSessionEvent);
+  sessionPromise ??= ReaderSession.load(engine, sessionStorage, emitSessionEvent, prefsStorage);
   return sessionPromise;
 }
 
 async function emitSessionEvent(ev: SessionEvent): Promise<void> {
+  let msg: Record<string, unknown>;
   if (ev.type === "state") {
-    await broadcast({ type: "leia:session:state", status: ev.status });
-    return;
-  }
-  if (ev.type === "highlight") {
-    await broadcast({
+    msg = { type: "leia:session:state", status: ev.status };
+  } else if (ev.type === "highlight") {
+    msg = {
       type: "leia:highlight:set",
       sessionId: ev.sessionId,
       from: ev.from,
       to: ev.to,
       ...(ev.word ? { word: ev.word } : {}),
-    });
-    return;
+      ...(ev.timeline ? { timeline: ev.timeline } : {}),
+    };
+  } else if (ev.type === "error") {
+    msg = { type: "leia:session:error", sessionId: ev.sessionId, message: ev.message };
+  } else {
+    msg = { type: "leia:highlight:clear", sessionId: ev.sessionId };
   }
-  if (ev.type === "error") {
-    await broadcast({ type: "leia:session:error", sessionId: ev.sessionId, message: ev.message });
-    return;
-  }
-  await broadcast({ type: "leia:highlight:clear", sessionId: ev.sessionId });
+  // Mirror to extension pages (the popup): tabs.sendMessage only reaches
+  // content scripts, but the popup needs the same signals — the first
+  // highlight is its only truthful "audio actually started" event.
+  void browser.runtime.sendMessage(msg).catch(() => {});
+  await broadcast(msg);
 }
 
 async function broadcast(msg: Record<string, unknown>): Promise<void> {
@@ -145,7 +155,7 @@ async function handleReaderStart(msg: {
     };
     const status = await s.start(tokens, { url: tabUrl, resumeAt, ...overrides });
     if (captureTabId !== undefined && captureId !== undefined) {
-      const locale = (await s.voiceLang()) ?? navigator.language;
+      const locale = (await s.voiceLang()) ?? navigator.language ?? "en";
       void browser.tabs
         .sendMessage(captureTabId, {
           type: "leia:selection:bind",
@@ -155,7 +165,10 @@ async function handleReaderStart(msg: {
         })
         .catch(() => {});
     }
-    return { ok: true, replyType: "leia:reader:start", data: status };
+    // The bar-captured path binds its own highlighter from this reply —
+    // hand it the voice locale so word-granular marching works there too.
+    const locale = (await s.voiceLang()) ?? navigator.language ?? "en";
+    return { ok: true, replyType: "leia:reader:start", data: { ...status, locale } };
   } catch (err) {
     return { ok: false, replyType: "leia:reader:start", error: String(err) };
   }
@@ -324,6 +337,16 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
   }
   if (msg.type === "leia:ff-playback-keepalive") {
     return handleFfPlaybackKeepalive();
+  }
+
+  // Firefox: the hidden background page idles into timer/media-event
+  // throttling mid-read (chunk-end events then arrive minutes late, stalling
+  // the session; per-word pushes lag the voice). While a read plays, every
+  // content page polls the media clock at 250ms — the message traffic keeps
+  // the page active AND each synchronous currentTime read re-anchors the
+  // visible tab's word march.
+  if (msg.type === "leia:audio:clock") {
+    return { ok: true, replyType: "leia:audio:clock", data: { clock: audioClockMs() } };
   }
 
   return routeMessage(msg) ?? undefined;

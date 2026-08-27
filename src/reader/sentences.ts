@@ -35,10 +35,26 @@ function segmenter(locale: string, granularity: "word" | "sentence"): Intl.Segme
   const key = `${locale}|${granularity}`;
   let s = segmenters.get(key);
   if (!s) {
-    s = new Intl.Segmenter(locale, { granularity });
+    s = makeSegmenter(locale, granularity);
     segmenters.set(key, s);
   }
   return s;
+}
+
+/**
+ * Intl.Segmenter throws RangeError on a malformed locale tag (a voice with
+ * lang "" or a stray non-BCP47 string crashes every subsequent speak —
+ * found live on Firefox: invalid tag → hard error-park). Segmenters are
+ * locale-suggestion inputs for the unicode rules; falling back to "en"
+ * keeps segmentation working for any input.
+ */
+function makeSegmenter(locale: string, granularity: "word" | "sentence"): Intl.Segmenter {
+  try {
+    return new Intl.Segmenter(locale, { granularity });
+  } catch {
+    console.error(`[leia] invalid segmenter locale "${locale}" — falling back to "en"`);
+    return new Intl.Segmenter("en", { granularity });
+  }
 }
 
 /** zh / ja / ko / yue — scripts where Intl word segmentation is the correct granularity. */

@@ -58,9 +58,17 @@ export class WebSpeechEngine implements TextEngine {
     const stream = new EventStream<EngineEvent>();
     const wasActive = this.active;
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = options.rate;
-    let locale = navigator.language;
+    let utterance: SpeechSynthesisUtterance;
+    try {
+      utterance = new SpeechSynthesisUtterance(text);
+    } catch (err) {
+      console.error("[leia-debug] SpeechSynthesisUtterance ctor threw:", err);
+      throw err;
+    }
+    console.error(`[leia-debug] speak #${speakId} len=${text.length} voice=${options.voiceName ?? "default"}`);
+    // Trust boundary: Firefox's rate setter throws on non-finite values.
+    utterance.rate = Number.isFinite(options.rate) ? options.rate : 1;
+    let locale = navigator.language || "en";
     if (options.voiceName) {
       const voice = this.synth.getVoices().find((v) => v.name === options.voiceName);
       if (voice) {
@@ -134,6 +142,7 @@ export class WebSpeechEngine implements TextEngine {
     };
 
     utterance.onstart = () => {
+      console.error(`[leia-debug] utterance #${speakId} START`);
       stream.push({ type: "start", speakId });
       if (words.length < 2) return; // sentence marching, silently
       baseAt = Date.now();
@@ -143,12 +152,14 @@ export class WebSpeechEngine implements TextEngine {
     };
     utterance.onboundary = (e) => boundary(e.charIndex);
     utterance.onend = () => {
+      console.error(`[leia-debug] utterance #${speakId} END`);
       stopMarch();
       stream.push({ type: "end", speakId });
       stream.close();
       if (this.active?.speakId === speakId) this.active = null;
     };
     utterance.onerror = (e) => {
+      console.error(`[leia-debug] utterance #${speakId} ERROR: ${e.error}`);
       stopMarch();
       if (e.error === "canceled" || e.error === "interrupted") {
         stream.closeCancelled({ type: "cancelled", speakId });

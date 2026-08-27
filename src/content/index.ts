@@ -3,6 +3,7 @@ import { isRouterMessage, routeMessage, type RouterReply } from "../background/r
 import { pageInfoFromDocument } from "./page-info";
 import { captureScope, ScopeHighlighter, type CapturedScope } from "./scope";
 import { ensureHighlightStyle, setTheme } from "./highlight";
+import { createMarch } from "./march";
 import { THEME_IDS, type ThemeId } from "./themes";
 
 // Honor the stored highlight theme (popup settings, T14) on page load.
@@ -21,6 +22,15 @@ ensureHighlightStyle(document);
 const highlighter = new ScopeHighlighter({
   onStale: () => void browser.runtime.sendMessage({ type: "leia:reader:stop" }).catch(() => {}),
   onSeek: (token) => void browser.runtime.sendMessage({ type: "leia:reader:seek", token }).catch(() => {}),
+});
+
+// Local word march (visible tab = unthrottled rAF; the engine ships the
+// chunk timeline once). Only meaningful when THIS script's highlighter is
+// the bound renderer (toolbar-selection path); the floating-bar path runs
+// its own march for the scope it captured.
+const march = createMarch({
+  apply: (sessionId, from, to, word) => highlighter.show(sessionId, from, to, word),
+  owns: (sessionId) => highlighter.hasSession(sessionId),
 });
 
 let captureSeq = 0;
@@ -61,12 +71,21 @@ browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined =>
       from: number;
       to: number;
       word?: { begin: number; end: number };
+      timeline?: Parameters<typeof march.arm>[3];
     };
     highlighter.show(m.sessionId, m.from, m.to, m.word);
+    if (m.timeline) march.arm(m.sessionId, m.from, m.to, m.timeline);
     return undefined;
   }
   if (msg.type === "leia:highlight:clear") {
+    march.disarm();
     highlighter.clear((msg as unknown as { sessionId: string }).sessionId);
+    return undefined;
+  }
+  // Pause/stop/seek must halt the local march (no further words arrive).
+  if (msg.type === "leia:session:state") {
+    const st = (msg as unknown as { status?: { state?: string } }).status;
+    if (st?.state !== "playing") march.disarm();
     return undefined;
   }
   // Live theme swaps relayed from the popup settings (T14).

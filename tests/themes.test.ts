@@ -178,14 +178,16 @@ describe("highlight.ts theme engine (jsdom)", () => {
     const range = document.createRange();
     range.selectNodeContents(p);
     setHighlight([range]); // jsdom has no CSS.highlights; ranges still tracked
-    expect(styleRule()).toContain("#ffd98c"); // re-sampled: dark ground
+    expect(styleRule()).toMatch(/leia-sentence[^}]*#ffd98c/); // re-sampled: dark ground
   });
 
   it("writes the underline fallback rule on a dead-zone background", () => {
     document.body.style.backgroundColor = "#808080";
     ensureHighlightStyle(document);
     const rule = styleRule();
-    expect(rule).toContain("text-decoration: underline");
+    expect(rule).toMatch(/::highlight\(leia-sentence\)[^}]*text-decoration: underline/);
     expect(rule).not.toContain("background-color");
+    // The word layer always carries its emphasis, independent of the theme wash.
+    expect(rule).toContain("::highlight(leia-word)");
   });
 });

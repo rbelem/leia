@@ -78,7 +78,9 @@
       color: var(--ink);
       padding: 6px 10px;
       cursor: pointer;
+      transition: background-color 0.12s ease, border-color 0.12s ease, filter 0.12s ease, transform 0.06s ease;
     }
+    button:not(:disabled):active { transform: scale(0.96); }
     button.primary {
       width: 100%;
       background: var(--accent);
@@ -87,14 +89,41 @@
       font-weight: 600;
     }
     @media (prefers-color-scheme: dark) { button.primary { color: #1c1917; } }
-    button.primary:hover { filter: brightness(1.06); }
+    button.primary:hover:not(:disabled) { filter: brightness(1.06); }
+    button.primary:not(:disabled):active { filter: brightness(0.94); transform: scale(0.98); }
     button.ghost { padding: 5px 8px; font-size: 11.5px; color: var(--muted); }
-    button.ghost:hover { color: var(--ink); border-color: var(--muted); }
+    button.ghost:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
     button:disabled { opacity: 0.5; cursor: default; }
     button:disabled:hover { color: var(--muted); border-color: var(--line); }
 
+    .transport button:not(.primary):hover:not(:disabled) {
+      color: var(--ink);
+      border-color: var(--muted);
+      background: var(--accent-soft);
+    }
+    button.loading { cursor: progress; }
+    .pp-spin {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 5px;
+      vertical-align: -1px;
+      border: 2px solid rgba(255, 255, 255, 0.45);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: leia-spin 0.8s linear infinite;
+    }
+    @media (prefers-color-scheme: dark) {
+      .pp-spin { border-color: rgba(28, 25, 23, 0.35); border-top-color: #1c1917; }
+    }
+    @keyframes leia-spin { to { transform: rotate(360deg); } }
+
     .voice-row { display: flex; align-items: center; gap: 8px; }
     .voice-row select { flex: 1; min-width: 0; }
+
+    .transport { display: flex; gap: 6px; margin-bottom: 6px; }
+    .transport .primary { flex: 1; width: auto; }
+    #open-in-page { margin-bottom: 6px; }
 
     .reader-error {
       margin: 4px 0 0;
@@ -172,7 +201,15 @@
 
   <section aria-label="Playback">
     <h2>Playback</h2>
-    <button id="read-selection" class="primary">Read selection in active tab</button>
+    <div id="playback-controls" hidden>
+      <div class="transport">
+        <button id="pp-back" type="button" title="Previous sentence" aria-label="Previous sentence" disabled>⏮</button>
+        <button id="pp-play" type="button" class="primary">▶ Play</button>
+        <button id="pp-fwd" type="button" title="Next sentence" aria-label="Next sentence" disabled>⏭</button>
+        <button id="pp-stop" type="button" title="Stop" aria-label="Stop" disabled>⏹</button>
+      </div>
+      <button id="open-in-page" type="button" class="ghost">Open controls in page</button>
+    </div>
     <div id="status" role="status">no active session</div>
     <div id="reader-error" class="reader-error" hidden></div>
     <div id="resume-row" class="resume-row" hidden>

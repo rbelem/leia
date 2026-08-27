@@ -129,3 +129,10 @@ describe("word → sentence parent index", () => {
     expect(counts.length).toBe(0);
   });
 });
+describe("segmenter locale hardening (live Firefox bug)", () => {
+  it("does not throw on malformed locale tags", () => {
+    expect(() => wordSpans("Hello world testing", "undefined" as unknown as string)).not.toThrow();
+    expect(() => wordSpans("Hello world testing", "")).not.toThrow();
+    expect(wordSpans("Hello world testing", "not a locale!!").length).toBeGreaterThan(0);
+  });
+});

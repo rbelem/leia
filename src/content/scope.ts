@@ -7,10 +7,14 @@
  * background are applied locally.
  */
 import type { TokenText } from "../reader/session";
-import { Readability, isProbablyReaderable } from "@mozilla/readability";
-import { tokenIndexFromRange, tokenIndexFromSelection, wordIndexFromRange, type Token } from "../reader/token-index";
+import { Readability, isProbablyReaderable } from "@mozilla/readability";import { tokenIndexFromRange, tokenIndexFromSelection, wordIndexFromRange, type Token } from "../reader/token-index";
 import { wordSpans, type TokenSpan } from "../reader/sentences";
-import { clearHighlight, setHighlight } from "./highlight";
+import { clearHighlight, setHighlight, setWordHighlight } from "./highlight";
+
+/** Token begins its own reading unit (block start or heading). */
+function startsUnit(t: TokenText | undefined): boolean {
+  return !!t && (t.blockStart === true || t.heading === true);
+}
 
 export interface CapturedScope {
   tokens: TokenText[];
@@ -21,7 +25,12 @@ export interface CapturedScope {
 export function captureSelection(win: Window): CapturedScope | null {
   const tokens = tokenIndexFromSelection(win);
   if (!tokens) return null;
-  return { tokens: tokens.map((t) => ({ text: t.text })), ranges: tokens.map((t) => t.range) };
+  return {
+    tokens: tokens.map(({ text, blockStart, heading }) =>
+      blockStart || heading ? { text, ...(blockStart && { blockStart }), ...(heading && { heading }) } : { text },
+    ),
+    ranges: tokens.map((t) => t.range),
+  };
 }
 
 /**
@@ -53,7 +62,12 @@ export function captureArticle(win: Window): CapturedScope | null {
   range.selectNodeContents(root);
   const tokens = tokenIndexFromRange(range);
   if (tokens.length === 0) return null;
-  return { tokens: tokens.map((t) => ({ text: t.text })), ranges: tokens.map((t) => t.range) };
+  return {
+    tokens: tokens.map(({ text, blockStart, heading }) =>
+      blockStart || heading ? { text, ...(blockStart && { blockStart }), ...(heading && { heading }) } : { text },
+    ),
+    ranges: tokens.map((t) => t.range),
+  };
 }
 
 /** Scope decision: explicit selection first, else the article (T3), else null. */
@@ -142,6 +156,10 @@ export class ScopeHighlighter {
   private wordMap: { words: Token[]; spans: TokenSpan[] } | null = null;
   /** Sentence token i → char offset of its start in the full scope text. */
   private prefix: Int32Array | null = null;
+  /** Scope carries block structure (blockStart/heading flags) — enables whole-block washes. */
+  private hasBlocks = false;
+  /** Raw token texts+flags of the bound scope (block wash expansion). */
+  private scopeTokens: TokenText[] | null = null;
 
   constructor(options: ScopeHighlighterOptions = {}) {
     this.onStale = options.onStale;
@@ -151,10 +169,12 @@ export class ScopeHighlighter {
   bind(sessionId: string, scope: CapturedScope, locale?: string | null): void {
     this.sessionId = sessionId;
     this.ranges = scope.ranges;
+    this.scopeTokens = scope.tokens;
     this.doc = scope.ranges[0]?.startContainer.ownerDocument ?? null;
     this.stale = false;
     this.wordMap = null;
     this.prefix = null;
+    this.hasBlocks = scope.tokens.some((t) => t.blockStart === true || t.heading === true);
     if (locale) {
       const full = fullScopeRange(scope.ranges);
       if (full) {
@@ -172,30 +192,94 @@ export class ScopeHighlighter {
     this.doc?.addEventListener("click", this.onClick);
   }
 
-  /** Apply the highlight for token indices [from..to]; word-level span when given. */
+  /**
+   * Apply the highlight for token indices [from..to]. Two layers: the
+   * sentence wash always covers the chunk; a word span (when the engine
+   * has word timing) adds the spoken-word emphasis on top of it.
+   * The sentence start also re-centers the viewport on the reading
+   * position (deadzone-smoothed — see followReading).
+   */
   show(sessionId: string, from: number, to: number, word?: { begin: number; end: number }): void {
     if (sessionId !== this.sessionId || this.stale) return;
     if (!this.isLive()) {
       this.markStale(); // observer missed it, but the ranges are dead
       return;
     }
-    if (word && word.end > word.begin && this.wordMap && this.prefix && from < this.prefix.length) {
-      // Engine offsets are chunk-relative; map onto the full-scope word map.
-      const global = this.prefix[from] + word.begin;
-      const i = findWordIndex(this.wordMap.spans, global);
-      if (i >= 0) {
-        setHighlight([this.wordMap.words[i].range]);
-        return;
-      }
-      // Word not in the map (whitespace boundary / split mismatch) — fall back.
+    const sentence = this.ranges.slice(from, to + 1);
+    setHighlight(this.blockExtent(from, to) ?? sentence);
+    // A word that fails to map (subtitle gap/space entries) keeps the
+    // previous underline instead of flickering it off for a frame.
+    const wordRange = this.wordRange(from, word);
+    if (wordRange !== null || !word) setWordHighlight(wordRange);
+    this.followReading(sentence[0] ?? null);
+  }
+
+  /**
+   * Widen [from..to] (the spoken chunk — long blocks split across
+   * utterances) out to the enclosing block so the wash covers the whole
+   * paragraph/cell/heading even while only part of it is being spoken.
+   * null when the scope predates block capture.
+   */
+  private blockExtent(from: number, to: number): Range[] | null {
+    if (!this.hasBlocks || !this.scopeTokens) return null;
+    const n = Math.min(to, this.scopeTokens.length - 1);
+    let s = from;
+    while (s > 0 && !startsUnit(this.scopeTokens[s])) s -= 1;
+    let e = n;
+    while (e + 1 < this.scopeTokens.length && !startsUnit(this.scopeTokens[e + 1])) e += 1;
+    // A heading that shares a chunk tail with body text keeps its wash tight.
+    if (this.scopeTokens[s].heading && s < from) s = from;
+    return this.ranges.slice(s, e + 1);
+  }
+
+  /**
+   * Keep the sentence being read visible. Gentle centering scroll only when
+   * the range is off-screen; user scrolling is never fought with — a fresh
+   * sentence boundary is the next chance to re-center.
+   */
+  /**
+   * Keep the sentence being read near the CENTER of the viewport. Each
+   * sentence boundary nudges the page so the reading line lands mid-screen,
+   * with a deadzone (±25% of the viewport) so tiny drifts don't cause
+   * scroll chatter; bigger offsets glide smoothly to center.
+   */
+  private followReading(range: Range | null): void {
+    const view = this.doc?.defaultView;
+    if (!range || !view) return;
+    // jsdom and friends lack range geometry — following is a live-page concern.
+    if (typeof range.getBoundingClientRect !== "function") return;
+    const rect = range.getBoundingClientRect();
+    const offsetFromCenter = rect.top + rect.height / 2 - view.innerHeight / 2;
+    const deadzone = view.innerHeight * 0.25;
+    if (Math.abs(offsetFromCenter) <= deadzone) return;
+    try {
+      view.scrollBy({ top: offsetFromCenter, behavior: "smooth" });
+    } catch {
+      // older engines without options — best effort only
+      range.startContainer.parentElement?.scrollIntoView(true);
     }
-    setHighlight(this.ranges.slice(from, to + 1));
+  }
+
+  /** Map chunk-relative engine word offsets onto the full-scope word map. */
+  private wordRange(from: number, word?: { begin: number; end: number }): Range | null {
+    if (!word || word.end <= word.begin || !this.wordMap || !this.prefix || from >= this.prefix.length) return null;
+    // Engine offsets are chunk-relative; map onto the full-scope word map.
+    const global = this.prefix[from] + word.begin;
+    const i = findWordIndex(this.wordMap.spans, global);
+    return i >= 0 ? this.wordMap.words[i].range : null;
+  }
+
+  /** Whether this highlighter is the bound renderer for that session. */
+  hasSession(sessionId: string): boolean {
+    return this.sessionId === sessionId;
   }
 
   clear(sessionId: string): void {
     if (sessionId !== this.sessionId) return;
     this.sessionId = null;
     this.ranges = [];
+    this.scopeTokens = null;
+    this.hasBlocks = false;
     this.doc?.removeEventListener("click", this.onClick);
     this.doc = null;
     this.wordMap = null;

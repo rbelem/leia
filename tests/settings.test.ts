@@ -42,6 +42,7 @@ import {
   saveStoredTheme,
 } from "../src/popup/popup";
 import type { EngineCapabilities } from "../src/reader/contract";
+import { AZURE_DEFAULT_REGION, AZURE_REGIONS } from "../src/audio/engine-azure";
 import { ACTIVE_THEME } from "../src/content/themes";
 
 const fakeStorage = {
@@ -143,6 +144,26 @@ describe("provider keys", () => {
     const azure = PROVIDERS.find((p) => p.id === "azure")!;
     expect(buildProviderRow(azure, "k", "eastus").querySelector<HTMLInputElement>(".region")!.value).toBe("eastus");
     expect(buildProviderRow(PROVIDERS[0], "k").querySelector(".region")).toBeNull();
+  });
+
+  it("azure region renders as a dropdown: curated list, default labeled + preselected, saved region honored", () => {
+    const azure = PROVIDERS.find((p) => p.id === "azure")!;
+    // No stored region → default preselected.
+    const row = buildProviderRow(azure, "k");
+    const select = row.querySelector<HTMLSelectElement>("select.region")!;
+    expect(select.tagName).toBe("SELECT");
+    expect([...select.options].map((o) => o.value)).toEqual([...AZURE_REGIONS]);
+    expect(select.value).toBe(AZURE_DEFAULT_REGION);
+    const defaultOpt = [...select.options].find((o) => o.value === AZURE_DEFAULT_REGION)!;
+    expect(defaultOpt.textContent).toBe(`${AZURE_DEFAULT_REGION} (default)`);
+    // Stored region preselects it.
+    const restored = buildProviderRow(azure, "k", "japaneast").querySelector<HTMLSelectElement>("select.region")!;
+    expect(restored.value).toBe("japaneast");
+    // No dropdown for providers without regionOptions (none today besides azure).
+    for (const def of PROVIDERS.filter((p) => p !== azure)) {
+      if (!def.regionStorage) continue;
+      expect(buildProviderRow(def, "k").querySelector(".region")!.tagName).not.toBe("SELECT");
+    }
   });
 });
 

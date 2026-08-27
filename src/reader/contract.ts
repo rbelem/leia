@@ -38,7 +38,35 @@ export type EngineEvent =
       speakId: number;
       begin: number;
       end: number;
+    }
+  | {
+      /** Whole-chunk word schedule, delivered once so the visible page can
+       * march words locally against its own (unthrottled) clock — hidden
+       * background pages clamp timers, so per-word pushes lag the voice.
+       * `t` is ms from audio start; `anchorWall` (Date.now in the engine
+       * context) and `anchorClock` (media clock at that same instant) map
+       * the timeline onto any consumer's clock. Not terminal. */
+      type: "timeline";
+      speakId: number;
+      words: WordTiming[];
+      anchorWall: number;
+      anchorClock: number;
     };
+
+/** One word in a chunk timeline: chunk-relative char offsets + onset in ms
+ * from audio start. */
+export interface WordTiming {
+  begin: number;
+  end: number;
+  t: number;
+}
+
+/** Timeline payload a highlight consumer needs to run the local march. */
+export interface WordTimeline {
+  words: WordTiming[];
+  anchorWall: number;
+  anchorClock: number;
+}
 
 export interface EngineCapabilities {
   /** Engine emits word events with chunk-relative char offsets. */
@@ -47,6 +75,10 @@ export interface EngineCapabilities {
   streaming: boolean;
   costClass: "free" | "paid";
   privacyClass: "local" | "provider";
+  /** Longest utterance the engine can speak as one seamless piece (HTTP MP3
+   * engines). Absent → session caps at the WebSpeech-safe 250 chars, which
+   * would put a synthesis round-trip between every sentence or two. */
+  maxUtteranceChars?: number;
 }
 
 export interface TextEngine {
@@ -76,5 +108,5 @@ export interface TextEngine {
 }
 
 export function isEngineEventTerminal(ev: EngineEvent): boolean {
-  return ev.type !== "start" && ev.type !== "word";
+  return ev.type !== "start" && ev.type !== "word" && ev.type !== "timeline";
 }

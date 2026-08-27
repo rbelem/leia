@@ -37,7 +37,13 @@ describe("token-index build cost (T4 AC: bounded)", () => {
     // Round-trip spot check on the full index: every range stringifies to its text.
     for (const t of tokens) expect(t.range.toString()).toBe(t.text);
     for (const w of wordIdx!.words) expect(w.range.toString()).toBe(w.text);
-    expect(wordIdx!.counts.reduce((n, c) => n + c, 0)).toBe(wordIdx!.words.length);
+    // Word ranges stay in document order (block cuts never reorder).
+    let inversions = 0;
+    const ws = wordIdx!.words;
+    for (let i = 1; i < ws.length; i += 1) {
+      if (ws[i].range.compareBoundaryPoints(Range.START_TO_START, ws[i - 1].range) < 0) inversions += 1;
+    }
+    expect(inversions).toBe(0);
     // Generous bound: catches accidental quadratic blowups (a quadratic walk on
     // 40k chars would take minutes), never trips on slow CI machines.
     expect(elapsed).toBeLessThan(5000);

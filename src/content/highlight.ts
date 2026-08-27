@@ -1,18 +1,26 @@
 /**
  * Marching highlight via the CSS Custom Highlight API (platform floor:
- * Chrome ≥ 105 / Firefox ≥ 140, docs/platform-floor.md). One Highlight
- * registration owns the current chunk's ranges — ≤ 3 ranges (chunks cap at
- * 3 sentences) — and no page DOM is mutated for highlighting. The one
- * <style> element injected by the content script carries the ::highlight
- * rule (extension stylesheet, not page content).
+ * Chrome ≥ 105 / Firefox ≥ 140, docs/platform-floor.md). Two registrations:
+ *
+ *  - leia-sentence: the current reading unit's ranges — a whole paragraph,
+ *    list item, table cell, or heading (block tokens carry ≤ cap chars per
+ *    sentence and blocks split at DOM boundaries), carrying the theme wash.
+ *  - leia-word: the single word currently being spoken, styled with a
+ *    strong underline so it reads as emphasis OVER the sentence wash
+ *    (no second contrast problem: the underline color tracks the theme,
+ *    the text keeps its own ink).
+ *
+ * No page DOM is mutated for highlighting. The one <style> element injected
+ * by the content script carries both ::highlight rules (extension
+ * stylesheet, not page content).
  *
  * The look comes from the theme layer (./themes.ts): the active theme's
  * variant is picked against the page background under the highlight and the
- * injected rule is rewritten in place — the ::highlight pseudo picks up the
- * new rule live, no Highlight re-registration needed, so theme swaps are
- * instant. setHighlight re-samples on every move, so the marching highlight
- * adapts as it crosses sections with different backgrounds (code blocks,
- * callouts).
+ * injected rules are rewritten in place — the ::highlight pseudo picks up
+ * the new rule live, no Highlight re-registration needed, so theme swaps
+ * are instant. setHighlight re-samples on every move, so the marching
+ * highlight adapts as it crosses sections with different backgrounds (code
+ * blocks, callouts).
  */
 import {
   ACTIVE_THEME,
@@ -25,10 +33,11 @@ import {
   type Variant,
 } from "./themes";
 
-export const HIGHLIGHT_NAME = "leia-marching";
+export const HIGHLIGHT_NAME = "leia-sentence";
+export const WORD_HIGHLIGHT_NAME = "leia-word";
 const STYLE_ID = "leia-highlight-style";
 
-const MAX_RANGES = 3;
+const MAX_RANGES = 24;
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 
 let activeTheme: ThemeId = ACTIVE_THEME;
@@ -58,18 +67,29 @@ function highlights(): HighlightRegistry | null {
 /** Highlight the given sentence ranges (must be ≤ MAX_RANGES). */
 export function setHighlight(ranges: Range[]): void {
   currentRanges = ranges.slice(0, MAX_RANGES);
+  highlights()?.set(HIGHLIGHT_NAME, new Highlight(...currentRanges));
+  // Always re-adapt — even without a registry (jsdom) the theme rule tracks
+  // the ranges' ground so first real use is styled correctly.
+  applyStyle();
+}
+
+/** Show/move the spoken-word highlight. Empty range removes it. */
+export function setWordHighlight(range: Range | null): void {
   const reg = highlights();
-  if (reg) reg.set(HIGHLIGHT_NAME, new Highlight(...currentRanges));
-  applyStyle(); // re-adapt: the highlight may have marched onto a new ground
+  if (!reg) return;
+  if (range) reg.set(WORD_HIGHLIGHT_NAME, new Highlight(range));
+  else reg.delete(WORD_HIGHLIGHT_NAME);
 }
 
 export function clearHighlight(): void {
   currentRanges = [];
   const reg = highlights();
-  if (reg) reg.delete(HIGHLIGHT_NAME);
+  if (!reg) return;
+  reg.delete(HIGHLIGHT_NAME);
+  reg.delete(WORD_HIGHLIGHT_NAME);
 }
 
-/** One style element, extension-owned; the rule is (re)written per theme. */
+/** One style element, extension-owned; the rules are (re)written per theme. */
 export function ensureHighlightStyle(doc: Document): void {
   styleDoc = doc;
   if (!doc.getElementById(STYLE_ID)) {
@@ -107,8 +127,20 @@ function ruleFor(v: Variant): string {
   return `::highlight(${HIGHLIGHT_NAME}) { ${props.join("; ")}; }`;
 }
 
+/**
+ * The spoken-word layer: a heavy theme-colored underline that stays legible
+ * over the sentence wash. Underline only — no background/color override —
+ * so the sentence's AA-checked contrast is untouched underneath.
+ */
+function wordRuleFor(v: Variant): string {
+  const fallback = "2px underline";
+  const dec = v.textDecoration ? `${fallback} ${v.textDecoration.replace(/^underline\s*/, "")}`.trim() : fallback;
+  return `::highlight(${WORD_HIGHLIGHT_NAME}) { text-decoration: ${dec}; text-underline-offset: 3px; }`;
+}
+
 function applyStyle(): void {
   const style = styleDoc?.getElementById(STYLE_ID);
   if (!style) return;
-  style.textContent = ruleFor(pickVariantForCurrent());
+  const v = pickVariantForCurrent();
+  style.textContent = `${ruleFor(v)}\n${wordRuleFor(v)}`;
 }

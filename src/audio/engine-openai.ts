@@ -22,6 +22,7 @@ export const OPENAI_CAPABILITIES: EngineCapabilities = {
   streaming: false,
   costClass: "paid",
   privacyClass: "provider",
+  maxUtteranceChars: 2000,
 };
 
 /**
@@ -59,7 +60,7 @@ export class OpenAIEngine implements TextEngine {
 
   constructor(opts: OpenAIEngineOptions) {
     this.getKey = opts.getKey;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
   }
 

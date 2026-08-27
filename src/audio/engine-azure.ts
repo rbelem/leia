@@ -20,11 +20,49 @@ export const AZURE_VOICES_URL = (region: string): string =>
   `https://${region}.tts.speech.microsoft.com/cognitiveservices/voices/list`;
 export const AZURE_OUTPUT_FORMAT = "Audio24Khz48KBitRateMonoMp3";
 
+/**
+ * Azure Speech regions for the settings dropdown (service availability per
+ * Microsoft's speech-services regions table). `eastus` first — it is the
+ * de-facto default in Azure docs/samples — and the fallback used when no
+ * region is stored.
+ */
+export const AZURE_DEFAULT_REGION = "eastus";
+export const AZURE_REGIONS = [
+  AZURE_DEFAULT_REGION,
+  "eastus2",
+  "centralus",
+  "westus",
+  "westus2",
+  "westus3",
+  "canadacentral",
+  "brazilsouth",
+  "northeurope",
+  "westeurope",
+  "uksouth",
+  "ukwest",
+  "francecentral",
+  "germanywestcentral",
+  "switzerlandnorth",
+  "swedencentral",
+  "norwayeast",
+  "uaenorth",
+  "centralindia",
+  "southindia",
+  "japaneast",
+  "japanwest",
+  "koreacentral",
+  "southeastasia",
+  "eastasia",
+  "australiaeast",
+  "australiasoutheast",
+] as const;
+
 export const AZURE_CAPABILITIES: EngineCapabilities = {
   wordTiming: true,
   streaming: true, // SDK is a live streaming client (websocket)
   costClass: "paid",
   privacyClass: "provider",
+  maxUtteranceChars: 2000,
 };
 
 /** Minimal structural surface of the SDK the engine uses (stubbed in tests). */
@@ -89,17 +127,20 @@ export class AzureEngine implements TextEngine {
   constructor(opts: AzureEngineOptions) {
     this.getKey = opts.getKey;
     this.getRegion = opts.getRegion;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
     this.sdk = opts.sdk ?? (azureSdk as unknown as AzureSdkLike);
   }
 
   async getVoices(): Promise<VoiceInfo[]> {
-    const [key, region] = await Promise.all([this.getKey(), this.getRegion()]);
-    if (!key || !region) return [];
+    const [storedKey, storedRegion] = await Promise.all([this.getKey(), this.getRegion()]);
+    if (!storedKey) return [];
+    // Unset region falls back to the service's most common one — key-only
+    // setups get voices without touching settings.
+    const region = storedRegion || AZURE_DEFAULT_REGION;
     try {
       const resp = await this.fetchImpl(AZURE_VOICES_URL(region), {
-        headers: { "Ocp-Apim-Subscription-Key": key },
+        headers: { "Ocp-Apim-Subscription-Key": storedKey },
       });
       if (!resp.ok) return [];
       return parseAzureVoicesXml(await resp.text());
@@ -152,9 +193,11 @@ export class AzureEngine implements TextEngine {
       if (this.active?.speakId === speakId) this.active = null;
     };
 
-    const [key, region] = await Promise.all([this.getKey(), this.getRegion()]);
+    const [key, regionRaw] = await Promise.all([this.getKey(), this.getRegion()]);
     if (!this.isCurrent(speakId)) return;
-    if (!key || !region) {
+    // Unset region falls back to the service's most common one.
+    const region = regionRaw || AZURE_DEFAULT_REGION;
+    if (!key) {
       fail("Azure Speech key/region not set — providers settings");
       return;
     }

@@ -21,6 +21,7 @@ export const MINIMAX_CAPABILITIES: EngineCapabilities = {
   streaming: false,
   costClass: "paid",
   privacyClass: "provider",
+  maxUtteranceChars: 2000, // whole paragraphs in one request; API limit is 10k
 };
 
 interface MiniMaxVoiceDef {
@@ -50,6 +51,10 @@ export interface Playback {
   stop(): void;
   /** Resolves when playback finishes (or fails); pending while playing. */
   done: Promise<void>;
+  /** Media clock in ms (audio.currentTime×1000), when the host exposes one.
+   * The visible page's word march re-anchors from this via clock polls —
+   * reading it is synchronous truth even in a throttled background page. */
+  clockMs?: () => number;
 }
 
 export interface AudioHost {
@@ -62,7 +67,10 @@ export const DOM_AUDIO_HOST: AudioHost = {
     const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     const url = URL.createObjectURL(new Blob([buf], { type: mime }));
     const audio = new Audio(url);
+    // done is created up-front: finish() may fire synchronously (play throw)
+    // and must always have its resolver ready.
     let resolve!: () => void;
+    const done = new Promise<void>((r) => (resolve = r));
     let finished = false;
     const finish = (): void => {
       if (finished) return;
@@ -78,7 +86,12 @@ export const DOM_AUDIO_HOST: AudioHost = {
     } catch {
       finish();
     }
-    return { stop: () => { audio.pause(); finish(); }, done: new Promise((r) => (resolve = r)) };
+    const clockMs = (): number => audio.currentTime * 1000;
+    return {
+      stop: () => { audio.pause(); finish(); },
+      done,
+      clockMs,
+    };
   },
 };
 
@@ -112,13 +125,16 @@ export class MiniMaxEngine implements TextEngine {
   private readonly locale?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly audioHost: AudioHost;
-  private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
-  private wordTimers: number[] = [];
+  private active: {
+    speakId: number;
+    stream: EventStream<EngineEvent>;
+    playback: Playback | null;
+  } | null = null;
 
   constructor(opts: MiniMaxEngineOptions) {
     this.getKey = opts.getKey;
     this.locale = opts.locale;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
   }
 
@@ -150,7 +166,6 @@ export class MiniMaxEngine implements TextEngine {
       active.stream.closeCancelled({ type: "cancelled", speakId: active.speakId });
       active.playback?.stop();
     }
-    this.clearWordTimers();
   }
 
   // --- internals ---
@@ -162,6 +177,9 @@ export class MiniMaxEngine implements TextEngine {
     stream: EventStream<EngineEvent>,
   ): Promise<void> {
     const fail = (message: string): void => {
+      // NOTE: active?.speakId === speakId is always true here — each fail
+      // site sits behind an isCurrent() guard over the same this.active.
+      // The mismatch half of this condition is defensive only.
       stream.push({ type: "error", speakId, message });
       stream.close();
       if (this.active?.speakId === speakId) this.active = null;
@@ -215,22 +233,21 @@ export class MiniMaxEngine implements TextEngine {
       return;
     }
     this.active = { speakId, stream, playback };
-    const playResolvedAt = Date.now();
     stream.push({ type: "start", speakId });
 
-    void this.scheduleWords(envelope.data?.subtitle_file, speakId, stream, playResolvedAt);
+    void this.scheduleWords(envelope.data?.subtitle_file, speakId, stream, playback);
     await playback.done;
     if (this.active?.speakId === speakId) this.active = null;
     stream.push({ type: "end", speakId });
     stream.close();
   }
 
-  /** Fetch the subtitle file and schedule one word event per timestamped word. */
+/** Fetch the subtitle file and ship the chunk's word timeline once. */
   private async scheduleWords(
     subtitleUrl: unknown,
     speakId: number,
     stream: EventStream<EngineEvent>,
-    playResolvedAt: number,
+    playback: Playback,
   ): Promise<void> {
     let segments: MiniMaxSegment[] = [];
     try {
@@ -241,7 +258,7 @@ export class MiniMaxEngine implements TextEngine {
       if (!Array.isArray(data)) return;
       segments = data as MiniMaxSegment[];
     } catch {
-      return; // word timing is best-effort — audio still plays
+      return;
     }
     const words: MiniMaxWord[] = [];
     for (const seg of segments) {
@@ -249,23 +266,33 @@ export class MiniMaxEngine implements TextEngine {
     }
     const firstTime = words[0]?.time_begin;
     if (typeof firstTime !== "number") return;
-    const elapsed = Date.now() - playResolvedAt;
-    for (const w of words) {
-      const { word_begin: begin, word_end: end, time_begin: t } = w;
-      if (typeof begin !== "number" || typeof end !== "number" || typeof t !== "number") continue;
-      if (end <= begin) continue;
-      const delay = Math.max(0, t - firstTime - elapsed);
-      this.wordTimers.push(
-        setTimeout(() => {
-          stream.push({ type: "word", speakId, begin, end });
-        }, delay),
-      );
-    }
+    const due = words
+      .filter((w) => {
+        const { word_begin: begin, word_end: end, time_begin: t } = w;
+        return typeof begin === "number" && typeof end === "number" && typeof t === "number" && end > begin;
+      })
+      .map((w) => ({ begin: w.word_begin as number, end: w.word_end as number, t: w.time_begin as number }))
+      .sort((a, b) => a.t - b.t);
+    if (due.length === 0) return;
+
+    // Ship the WHOLE timeline once: the visible content page marches words
+    // locally via rAF, re-anchoring from live clock polls (content/march.ts).
+    // Hidden background pages clamp timers (1s → 30s), so scheduling
+    // per-word here lags the voice by seconds.
+    const timeline = due.map(({ begin, end, t }) => ({ begin, end, t: t - firstTime }));
+    if (!this.isCurrent(speakId)) return;
+    stream.push({
+      type: "timeline",
+      speakId,
+      words: timeline,
+      anchorWall: Date.now(),
+      anchorClock: playback.clockMs?.() ?? 0,
+    });
   }
 
-  private clearWordTimers(): void {
-    for (const t of this.wordTimers) clearTimeout(t);
-    this.wordTimers = [];
+  /** Media clock (ms) of the active chunk's audio, for the march's poll. */
+  currentClockMs(): number | null {
+    return this.active?.playback?.clockMs?.() ?? null;
   }
 
   private isCurrent(speakId: number): boolean {
@@ -274,7 +301,9 @@ export class MiniMaxEngine implements TextEngine {
 }
 
 function clampRate(rate: number): number {
-  return Math.min(2, Math.max(0.5, rate));
+  // Guard non-finite (API rejects NaN speed) — mirrors the utterance.rate clamp.
+  const r = Number.isFinite(rate) ? rate : 1;
+  return Math.min(2, Math.max(0.5, r));
 }
 
 /** ~8-line hex decoder — no Buffer in the extension bundle. */

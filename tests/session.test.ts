@@ -37,8 +37,11 @@ class FakeEngine implements TextEngine {
     this.familyCalls.push(family);
   }
 
+  /** Voices getVoices() reports; set per-test for family-resolution cases. */
+  voices: VoiceInfo[] = [];
+
   getVoices(): Promise<VoiceInfo[]> {
-    return Promise.resolve([]);
+    return Promise.resolve(this.voices);
   }
 
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
@@ -77,6 +80,16 @@ class FakeEngine implements TextEngine {
     c.stream.push({ type: "word", speakId, begin, end });
   }
 
+  /** Test helper: push a whole-chunk timeline event for the current speak. */
+  pushTimeline(
+    speakId: number,
+    timeline: { words: Array<{ begin: number; end: number; t: number }>; anchorWall: number; anchorClock: number },
+  ): void {
+    const c = this.current;
+    if (!c || c.speakId !== speakId) return;
+    c.stream.push({ type: "timeline", speakId, ...timeline });
+  }
+
   /** Test helper: the current speak fails with the given message. */
   failCurrent(message: string): void {
     const c = this.current;
@@ -88,6 +101,10 @@ class FakeEngine implements TextEngine {
 
   selectFamilyCalls(): string[] {
     return [...this.familyCalls];
+  }
+
+  clearFamilyCalls(): void {
+    this.familyCalls.length = 0;
   }
 }
 
@@ -110,13 +127,14 @@ class MemoryStorage implements SessionStorage {
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-/** 4 sentences ⇒ chunks [0..2] and [3..3]. */
+/** 4 sentences in one paragraph + a second paragraph ⇒ chunks [0..2] and
+ * [3..3]: block-less sentences merge to the char cap; a blockStart splits. */
 const TOKENS: Array<{ text: string }> = [
   "First sentence.",
   "Second sentence.",
   "Third sentence.",
-  "Fourth sentence.",
-].map((text) => ({ text }));
+  { text: "Fourth sentence.", blockStart: true },
+].map((t) => (typeof t === "string" ? { text: t } : t));
 
 function makeSession(engine: FakeEngine = new FakeEngine()) {
   const storage = new MemoryStorage();
@@ -331,6 +349,44 @@ describe("ReaderSession (fake engine)", () => {
     expect(events.filter((e) => e.type === "highlight" && "word" in e)).toEqual([]);
   });
 
+  it("relays a chunk timeline for the visible page's local march (wordTiming engines only)", async () => {
+    const timeline = {
+      words: [
+        { begin: 0, end: 3, t: 0 },
+        { begin: 4, end: 9, t: 320 },
+      ],
+      anchorWall: 1_234,
+      anchorClock: 0,
+    };
+    const { engine, events, emit } = makeSession(new FakeEngine({ wordTiming: true }));
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    const id = s.status().sessionId;
+
+    engine.pushTimeline(1, timeline);
+    engine.finishCurrent();
+    await tick();
+    expect(events).toContainEqual({
+      type: "highlight",
+      sessionId: id,
+      from: 0,
+      to: 2,
+      timeline,
+    });
+
+    // Engines without wordTiming: timeline is dropped like word events.
+    const { engine: plain, events: plainEvents, emit: plainEmit } = makeSession(); // wordTiming false
+    const s2 = await ReaderSession.load(plain, new MemoryStorage(), plainEmit);
+    await s2.start(TOKENS);
+    await tick();
+    plain.pushTimeline(1, timeline);
+    plain.finishCurrent();
+    await tick();
+    expect(plainEvents.filter((e) => e.type === "highlight" && "timeline" in e)).toEqual([]);
+  });
+
   it("seek while playing cancels the current chunk and continues from the target", async () => {
     const { engine, events, emit } = makeSession();
     const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
@@ -428,6 +484,74 @@ describe("ReaderSession (fake engine)", () => {
     await s.setPrefs({ engine: null });
     expect(engine.selectFamilyCalls()).toEqual([]);
     expect(s.status().settings.engine).toBeNull();
+  });
+
+  it("a voice-only prefs message re-derives the family from getVoices and pins it", async () => {
+    const { engine, storage, emit } = makeSession();
+    engine.voices = [
+      { name: "browser-default", lang: "en-US", localService: true, family: "web-speech" },
+      { name: "male-qn-qingse", lang: "zh-CN", localService: false, family: "minimax" },
+    ];
+    // Hub restarted on web-speech while stored prefs still say minimax —
+    // exactly the post-restart drift the popup's omission used to preserve.
+    await storage.set({ [PREFS_KEY]: { voiceName: null, rate: 1, engine: "minimax" } });
+    const s = await ReaderSession.load(engine, storage, emit);
+    engine.clearFamilyCalls(); // ignore load-time pinning
+
+    await s.setPrefs({ voiceName: "male-qn-qingse" });
+    expect(engine.selectFamilyCalls()).toEqual(["minimax"]);
+    expect(s.status().settings.engine).toBe("minimax");
+    const prefs = storage.read(PREFS_KEY) as { engine: string | null };
+    expect(prefs.engine).toBe("minimax");
+  });
+
+  it("voice-only prefs with an unknown voice leave routing untouched (no key case)", async () => {
+    const { engine, storage, emit } = makeSession();
+    engine.voices = []; // e.g. minimax key absent → its voices list is empty
+    const s = await ReaderSession.load(engine, storage, emit);
+
+    await s.setPrefs({ voiceName: "some-minimax-id" });
+    expect(engine.selectFamilyCalls()).toEqual([]);
+  });
+
+  it("start() re-pins the stored engine family after a background restart", async () => {
+    const { engine, storage, emit } = makeSession();
+    await storage.set({ [PREFS_KEY]: { voiceName: "male-qn-qingse", rate: 1, engine: "minimax" } });
+    const s = await ReaderSession.load(engine, storage, emit);
+    engine.clearFamilyCalls(); // load-time pin verified separately
+
+    // First read of a freshly-hydrated background: speak must not race the
+    // pin — selectFamily precedes the drive loop.
+    await s.start(TOKENS);
+    await tick();
+    expect(engine.selectFamilyCalls()).toEqual(["minimax"]);
+    expect(engine.speaks[0]?.options.voiceName).toBe("male-qn-qingse");
+
+    engine.finishCurrent(); // drain both chunks
+    await tick();
+    engine.finishCurrent();
+    await tick();
+  });
+
+  it("prefs live in the durable store when one is provided (survives restarts)", async () => {
+    const { engine, emit } = makeSession();
+    const sessionStore = new MemoryStorage();
+    const prefsStore = new MemoryStorage();
+    const s = await ReaderSession.load(engine, sessionStore, emit, prefsStore);
+
+    await s.setPrefs({ voiceName: "male-qn-qingse", engine: "minimax" });
+    expect((prefsStore.read(PREFS_KEY) as { voiceName: string }).voiceName).toBe("male-qn-qingse");
+    expect(sessionStore.read(PREFS_KEY)).toBeUndefined(); // nothing leaked into session scope
+
+    // Simulated browser restart: a new session hydrates the choice and pins
+    // the family on load.
+    const engine2 = new FakeEngine();
+    engine2.voices = [
+      { name: "male-qn-qingse", lang: "zh-CN", localService: false, family: "minimax" },
+    ];
+    const s2 = await ReaderSession.load(engine2, new MemoryStorage(), emit, prefsStore);
+    expect(s2.status().settings.voiceName).toBe("male-qn-qingse");
+    expect(engine2.selectFamilyCalls()).toEqual(["minimax"]);
   });
 
   // --- T16: per-URL resume (start anchors, snapshot, url persistence) ---
@@ -564,5 +688,19 @@ describe("ReaderSession (fake engine)", () => {
     engine.finishCurrent(); // drain
     await tick();
     await s.stop();
+  });
+});
+describe("start() override hygiene (live Firefox NaN-rate bug)", () => {
+  it("explicit undefined overrides do not erase prefs", async () => {
+    const { engine, storage, emit } = makeSession();
+    await storage.set({ [PREFS_KEY]: { voiceName: "v", rate: 0.9, engine: null } });
+    const s = await ReaderSession.load(engine, storage, emit);
+    // Mirrors handleReaderStart passing {voiceName: undefined, rate: undefined}.
+    const st = await s.start(TOKENS, { url: "https://x.test/a" });
+    expect(st.settings.rate).toBe(0.9);
+    expect(st.settings.voiceName).toBe("v");
+    // Real overrides still win.
+    const st2 = await s.start(TOKENS, { rate: 1.5 });
+    expect(st2.settings.rate).toBe(1.5);
   });
 });

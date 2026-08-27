@@ -9,10 +9,24 @@
  * the popup DOM is present.
  */
 import browser from "webextension-polyfill";
-import type { RouterMessage, RouterReply } from "../background/router";
+import { isRouterMessage, type RouterMessage, type RouterReply } from "../background/router";
 import type { SessionStatus } from "../reader/session";
 import type { EngineCapabilities, VoiceInfo } from "../reader/contract";
+import { AZURE_DEFAULT_REGION, AZURE_REGIONS } from "../audio/engine-azure";
 import { ACTIVE_THEME, THEME_IDS, THEMES, type ThemeId } from "../content/themes";
+import {
+  CONTROLS_IN_PAGE_KEY,
+  LOADING_TIMEOUT_MS,
+  canSeekBack,
+  canSeekForward,
+  loadingKindForAction,
+  nextToken,
+  playAction,
+  playLabel,
+  prevToken,
+  shouldClearLoading,
+  type LoadingKind,
+} from "../controls";
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.5, 2, 2.5, 3];
 
@@ -23,6 +37,8 @@ export interface ProviderDef {
   label: string;
   keyStorage: string;
   regionStorage?: string;
+  /** When set, the region renders as a dropdown (default preselected) instead of free text. */
+  regionOptions?: { list: readonly string[]; default: string };
 }
 
 /** BYO-key provider catalog — storage keys per docs/ADR-0003 settings shape. */
@@ -30,7 +46,13 @@ export const PROVIDERS: ProviderDef[] = [
   { id: "minimax", label: "MiniMax", keyStorage: "leia:settings:minimaxKey" },
   { id: "elevenlabs", label: "ElevenLabs", keyStorage: "leia:settings:elevenlabsKey" },
   { id: "openai", label: "OpenAI", keyStorage: "leia:settings:openaiKey" },
-  { id: "azure", label: "Azure", keyStorage: "leia:settings:azureKey", regionStorage: "leia:settings:azureRegion" },
+  {
+    id: "azure",
+    label: "Azure",
+    keyStorage: "leia:settings:azureKey",
+    regionStorage: "leia:settings:azureRegion",
+    regionOptions: { list: AZURE_REGIONS, default: AZURE_DEFAULT_REGION },
+  },
 ];
 
 export interface FamilyInfo {
@@ -141,14 +163,28 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
 
   row.append(head, fields);
   if (def.regionStorage) {
-    const region = document.createElement("input");
-    region.className = "region";
-    region.type = "text";
-    region.placeholder = "region (e.g. eastus)";
-    region.autocomplete = "off";
-    region.spellcheck = false;
-    if (savedRegion) region.value = savedRegion;
-    row.append(region);
+    if (def.regionOptions) {
+      // Curated region list: dropdown, most-common default preselected.
+      const select = document.createElement("select");
+      select.className = "region";
+      for (const r of def.regionOptions.list) {
+        const opt = document.createElement("option");
+        opt.value = r;
+        opt.textContent = r === def.regionOptions.default ? `${r} (default)` : r;
+        select.appendChild(opt);
+      }
+      select.value = savedRegion && def.regionOptions.list.includes(savedRegion) ? savedRegion : def.regionOptions.default;
+      row.append(select);
+    } else {
+      const region = document.createElement("input");
+      region.className = "region";
+      region.type = "text";
+      region.placeholder = "region (e.g. eastus)";
+      region.autocomplete = "off";
+      region.spellcheck = false;
+      if (savedRegion) region.value = savedRegion;
+      row.append(region);
+    }
   }
   return row;
 }
@@ -158,6 +194,12 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
 if (document.getElementById("voice")) {
   const statusEl = document.getElementById("status") as HTMLDivElement;
   const readerErrorEl = document.getElementById("reader-error") as HTMLDivElement;
+  const playbackControls = document.getElementById("playback-controls") as HTMLDivElement;
+  const playBtn = document.getElementById("pp-play") as HTMLButtonElement;
+  const stopBtn = document.getElementById("pp-stop") as HTMLButtonElement;
+  const backBtn = document.getElementById("pp-back") as HTMLButtonElement;
+  const fwdBtn = document.getElementById("pp-fwd") as HTMLButtonElement;
+  const openInPageBtn = document.getElementById("open-in-page") as HTMLButtonElement;
   const resumeRow = document.getElementById("resume-row") as HTMLDivElement;
   const resumeLabel = document.getElementById("resume-label") as HTMLSpanElement;
   const resumeClearBtn = document.getElementById("resume-clear") as HTMLButtonElement;
@@ -175,11 +217,82 @@ if (document.getElementById("voice")) {
   let currentStatus: SessionStatus | null = null;
   let voicesByFamily = new Map<string, VoiceInfo[]>();
   let familyCaps = new Map<string, EngineCapabilities>();
+  /** Play-button pending state — see the note in floating-bar/index.ts. */
+  let loading: LoadingKind | null = null;
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function beginLoading(kind: LoadingKind): void {
+    loading = kind;
+    if (loadingTimer) clearTimeout(loadingTimer);
+    loadingTimer = setTimeout(() => {
+      if (loading && shouldClearLoading({ type: "timeout" })) clearLoading();
+    }, LOADING_TIMEOUT_MS);
+    renderReader();
+  }
+
+  function clearLoading(): void {
+    loading = null;
+    if (loadingTimer) {
+      clearTimeout(loadingTimer);
+      loadingTimer = null;
+    }
+    renderReader();
+  }
 
   function updateCapabilities(): void {
     const chosen = [...voicesByFamily.values()].flat().find((v) => v.name === voiceSelect.value);
     const family = chosen?.family ?? currentStatus?.settings.engine ?? "web-speech";
     renderCapabilities(capsEl, familyCaps.get(family) ?? null);
+  }
+
+  /** Status line + T17 error + transport buttons, from currentStatus. */
+  function renderReader(): void {
+    const s = currentStatus;
+    if (s) {
+      const fam = s.settings.engine;
+      const famSuffix = fam && fam !== "web-speech" ? ` · ${fam}` : "";
+      statusEl.textContent =
+        s.state === "stopped"
+          ? "no active session"
+          : `${s.state} · ${Math.min(s.tokenPos + 1, s.tokenCount)}/${s.tokenCount}${famSuffix}`;
+      speedSelect.value = String(s.settings.rate);
+    } else {
+      statusEl.textContent = "no active session";
+    }
+    // T17 — surface engine failures instead of a silent pause.
+    if (s?.lastError) {
+      readerErrorEl.textContent = `engine error — ${s.lastError}`;
+      readerErrorEl.hidden = false;
+    } else {
+      readerErrorEl.hidden = true;
+      if (loading) statusEl.textContent = `${loading}…`;
+    }
+    const state = s?.state ?? "stopped";
+    if (loading) {
+      playBtn.disabled = true;
+      playBtn.classList.add("loading");
+      playBtn.setAttribute("aria-busy", "true");
+      playBtn.setAttribute("aria-label", loading);
+      playBtn.textContent = "";
+      const spin = document.createElement("span");
+      spin.className = "pp-spin";
+      spin.setAttribute("aria-hidden", "true");
+      playBtn.append(spin, `${loading}…`);
+    } else {
+      playBtn.disabled = false;
+      playBtn.classList.remove("loading");
+      playBtn.removeAttribute("aria-busy");
+      playBtn.textContent = playLabel(state);
+      playBtn.setAttribute("aria-label", playLabel(state));
+    }
+    stopBtn.disabled = state === "stopped";
+    backBtn.disabled = !s || !canSeekBack(s);
+    fwdBtn.disabled = !s || !canSeekForward(s);
+  }
+
+  /** Controls live in the popup only while the in-page bar is closed. */
+  function applySurface(inPage: boolean): void {
+    playbackControls.hidden = inPage;
   }
 
   async function refresh(): Promise<void> {
@@ -190,22 +303,7 @@ if (document.getElementById("voice")) {
     ]);
     const status = (statusReply as RouterReply | undefined)?.data as SessionStatus | undefined;
     currentStatus = status ?? null;
-    if (status) {
-      const fam = status.settings.engine;
-      const famSuffix = fam && fam !== "web-speech" ? ` · ${fam}` : "";
-      statusEl.textContent =
-        status.state === "stopped"
-          ? "no active session"
-          : `${status.state} · ${Math.min(status.tokenPos + 1, status.tokenCount)}/${status.tokenCount}${famSuffix}`;
-      speedSelect.value = String(status.settings.rate);
-    }
-    // T17 — surface engine failures instead of a silent pause.
-    if (status?.lastError) {
-      readerErrorEl.textContent = `engine error — ${status.lastError}`;
-      readerErrorEl.hidden = false;
-    } else {
-      readerErrorEl.hidden = true;
-    }
+    renderReader();
 
     const voices = ((voicesReply as RouterReply | undefined)?.data as VoiceInfo[] | undefined) ?? [];
     voicesByFamily = new Map<string, VoiceInfo[]>();
@@ -347,23 +445,78 @@ if (document.getElementById("voice")) {
     }
   }
 
-  document.getElementById("read-selection")!.addEventListener("click", async () => {
-    const reply = (await send({ type: "leia:reader:start" })) as RouterReply | undefined;
-    statusEl.textContent = reply?.ok
-      ? `reading — ${String((reply.data as SessionStatus | undefined)?.tokenCount ?? "?")} sentences`
-      : `failed: ${String(reply?.error ?? "unknown")}`;
+  /** Apply a control reply's status locally — the popup gets no broadcast. */
+  function applyReplyStatus(reply: RouterReply | undefined): void {
+    const s = reply?.data as SessionStatus | undefined;
+    if (s) {
+      currentStatus = s;
+      renderReader();
+    }
+  }
+
+  playBtn.addEventListener("click", async () => {
+    const action = playAction(currentStatus?.state ?? "stopped");
+    const kind = loadingKindForAction(action);
+    if (kind) beginLoading(kind);
+    if (action === "start") {
+      // Same as the old "Read selection in active tab": background captures
+      // the active tab's selection (or page) itself.
+      const reply = (await send({ type: "leia:reader:start" })) as RouterReply | undefined;
+      if (reply?.ok) applyReplyStatus(reply);
+      else {
+        clearLoading();
+        statusEl.textContent = `failed: ${String(reply?.error ?? "unknown")}`;
+      }
+      return;
+    }
+    const reply = (await send({ type: action === "pause" ? "leia:reader:pause" : "leia:reader:resume" })) as
+      | RouterReply
+      | undefined;
+    if (reply && shouldClearLoading({ type: "reply", ok: reply.ok })) {
+      clearLoading();
+      if (!reply.ok) statusEl.textContent = `failed: ${String(reply.error ?? "unknown")}`;
+      return;
+    }
+    applyReplyStatus(reply);
+  });
+
+  stopBtn.addEventListener("click", async () => {
+    applyReplyStatus((await send({ type: "leia:reader:stop" })) as RouterReply | undefined);
+  });
+
+  backBtn.addEventListener("click", async () => {
+    if (currentStatus && canSeekBack(currentStatus)) {
+      applyReplyStatus(
+        (await send({ type: "leia:reader:seek", token: prevToken(currentStatus.tokenPos) })) as RouterReply | undefined,
+      );
+    }
+  });
+
+  fwdBtn.addEventListener("click", async () => {
+    if (currentStatus && canSeekForward(currentStatus)) {
+      applyReplyStatus(
+        (await send({ type: "leia:reader:seek", token: nextToken(currentStatus.tokenPos, currentStatus.tokenCount) })) as
+          | RouterReply
+          | undefined,
+      );
+    }
+  });
+
+  // Remount the in-page bar; it hides this section via the same flag.
+  openInPageBtn.addEventListener("click", async () => {
+    await browser.storage.local.set({ [CONTROLS_IN_PAGE_KEY]: true });
+    applySurface(true);
+  });
+
+  void browser.storage.local.get(CONTROLS_IN_PAGE_KEY).then((got) => {
+    applySurface(got[CONTROLS_IN_PAGE_KEY] !== false);
   });
 
   voiceSelect.addEventListener("change", () => {
     const voiceName = voiceSelect.value || null;
-    const prefs: { voiceName: string | null; engine?: string | null } = { voiceName };
-    if (voiceName) {
-      // Switching families requires routing prefs: send the voice's family
-      // when it differs from the session's current engine setting.
-      const chosen = [...voicesByFamily.values()].flat().find((v) => v.name === voiceName);
-      if (chosen && chosen.family !== currentStatus?.settings.engine) prefs.engine = chosen.family;
-    }
-    void send({ type: "leia:reader:prefs", ...prefs });
+    // Background derives + pins the voice's family itself (self-heals a
+    // restarted hub); the popup no longer guesses engines here.
+    void send({ type: "leia:reader:prefs", voiceName });
     previewBtn.disabled = !voiceName;
     updateCapabilities();
   });
@@ -408,6 +561,27 @@ if (document.getElementById("voice")) {
     opt.textContent = `${v}×`;
     speedSelect.appendChild(opt);
   }
+
+  // Live session signals mirrored from background (runtime.sendMessage):
+  // the first highlight is the truthful "audio started" that ends the Play
+  // pending state; state messages keep the transport fresh while open.
+  browser.runtime.onMessage.addListener((msg: unknown) => {
+    if (!isRouterMessage(msg)) return;
+    if (msg.type === "leia:highlight:set") {
+      if (loading && shouldClearLoading({ type: "highlight" })) clearLoading();
+      return;
+    }
+    if (msg.type === "leia:session:error") {
+      if (loading && shouldClearLoading({ type: "error" })) clearLoading();
+      return;
+    }
+    if (msg.type === "leia:session:state") {
+      const s = (msg as unknown as { status: SessionStatus }).status;
+      currentStatus = s;
+      if (loading && shouldClearLoading({ type: "state", state: s.state })) clearLoading();
+      renderReader();
+    }
+  });
 
   void refresh();
   void initThemes();

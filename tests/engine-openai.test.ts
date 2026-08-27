@@ -318,6 +318,7 @@ describe("OpenAIEngine", () => {
       streaming: false,
       costClass: "paid",
       privacyClass: "provider",
+      maxUtteranceChars: 2000,
     });
   });
 });

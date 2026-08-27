@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { splitTokens, sentenceSpans, CJK_TOKEN_CHARS } from "../src/reader/sentences";
-import { chunkTokens, MAX_TOKENS_PER_CHUNK } from "../src/reader/chunker";
-import { MAX_TOKEN_CHARS } from "../src/reader/sentences";
+import { chunkTokens } from "../src/reader/chunker";
+import { MAX_TOKEN_CHARS, splitTokens, sentenceSpans, CJK_TOKEN_CHARS } from "../src/reader/sentences";
 
 const texts = (tokens: Array<{ text: string }>) => tokens.map((t) => t.text);
 const toTokens = (lines: string[]): Array<{ text: string }> => lines.map((text) => ({ text }));
@@ -57,14 +56,57 @@ describe("sentence tokenizer (en + CJK)", () => {
 });
 
 describe("chunker", () => {
-  it("groups short sentences up to the cap and never crosses sentence boundaries", () => {
+  it("groups sentences of one block into a single utterance up to the char cap", () => {
     const tokens = toTokens(["A. ", "B. ", "C. ", "D. "]);
+    expect(chunkTokens(tokens)).toEqual([{ from: 0, to: 3 }]);
+  });
+
+  it("never merges across a block start: each paragraph speaks alone", () => {
+    const tokens = [
+      ...toTokens(["Para one A. ", "Para one B. "]),
+      { text: "Para two. ", blockStart: true },
+    ];
+    expect(chunkTokens(tokens)).toEqual([{ from: 0, to: 1 }, { from: 2, to: 2 }]);
+  });
+
+  it("a heading reads and highlights alone, before and after body text", () => {
+    const tokens = [
+      { text: "The Title ", heading: true, blockStart: true },
+      ...toTokens(["Body one. ", "Body two. "]),
+      { text: "Next Title ", heading: true, blockStart: true },
+    ];
     const chunks = chunkTokens(tokens);
     expect(chunks).toEqual([
-      { from: 0, to: 2 },
+      { from: 0, to: 0 }, // heading alone
+      { from: 1, to: 2 }, // its paragraph as one
+      { from: 3, to: 3 }, // second heading alone
+    ]);
+  });
+
+  it("reads table cells one at a time when they reach the chunker (e.g. cell selections)", () => {
+    const tokens = [
+      { text: "Name ", blockStart: true },
+      { text: "Age ", blockStart: true },
+      { text: "Ada ", blockStart: true },
+      { text: "36 ", blockStart: true },
+    ];
+    expect(chunkTokens(tokens)).toEqual([
+      { from: 0, to: 0 },
+      { from: 1, to: 1 },
+      { from: 2, to: 2 },
       { from: 3, to: 3 },
     ]);
-    expect(chunks.every((c) => c.to - c.from + 1 <= MAX_TOKENS_PER_CHUNK)).toBe(true);
+  });
+
+  it("long blocks split across utterances inside the same paragraph (wash stays whole)", () => {
+    const para = Array.from({ length: 8 }, (_, i) => `${"z".repeat(40)}${i}. `); // 43 chars × 8
+    const chunks = chunkTokens(toTokens(para));
+    expect(chunks.length).toBe(2); // cap splits at 5+3 tokens; no block flag interferes
+    // Every chunk ≤ char cap.
+    for (const c of chunks) {
+      const len = para.slice(c.from, c.to + 1).reduce((n, t) => n + t.length, 0);
+      expect(len).toBeLessThanOrEqual(MAX_TOKEN_CHARS);
+    }
   });
 
   it("caps chunk size at chars: a long token gets its own chunk", () => {
@@ -80,8 +122,8 @@ describe("chunker", () => {
 
   it("caps CJK chunks at CJK_TOKEN_CHARS so utterances stay ~100 chars", () => {
     const tokens = toTokens(["你好，世界。", "今天好吗？", "很好！", "再见。"]);
-    const chunks = chunkTokens(tokens, CJK_TOKEN_CHARS); // 17 chars ≤ 100 → capped by token count
-    expect(chunks).toEqual([{ from: 0, to: 2 }, { from: 3, to: 3 }]);
+    const chunks = chunkTokens(tokens, CJK_TOKEN_CHARS); // 17 chars total ≤ 100 → one utterance
+    expect(chunks).toEqual([{ from: 0, to: 3 }]);
     // A 40-char sentence token already saturates the CJK cap: stands alone.
     const big = "这是一句很长的但没有标点的话".repeat(10); // 160 chars
     const bigTokens = toTokens([big, "短句。"]);
@@ -89,15 +131,15 @@ describe("chunker", () => {
     expect(bigChunks).toEqual([{ from: 0, to: 0 }, { from: 1, to: 1 }]);
   });
 
-  it("nothing >300 chars, ever: token cap ≤250 forces chunks ≤250", () => {
+  it("nothing >300 chars, ever: token cap ≤250 forces chunk text ≤250", () => {
     const tokens = Array.from({ length: 10 }, (_, i) => ({
       text: `${"y".repeat(40)}${i}. `, // 43 chars each
     }));
     const chunks = chunkTokens(tokens);
     expect(chunks.length).toBeGreaterThan(1);
     for (const c of chunks) {
-      const size = c.to - c.from + 1;
-      expect(size).toBeLessThanOrEqual(MAX_TOKENS_PER_CHUNK); // ≤3 ranges for highlight
+      const len = tokens.slice(c.from, c.to + 1).reduce((n, t) => n + t.text.length, 0);
+      expect(len).toBeLessThanOrEqual(MAX_TOKEN_CHARS);
     }
     // Every chunk is a contiguous slice of tokens.
     expect(chunks[0].from).toBe(0);

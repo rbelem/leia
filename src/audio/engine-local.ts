@@ -60,7 +60,7 @@ export class LocalEngine implements TextEngine {
       costClass: "free",
       privacyClass: "local",
     };
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
   }
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AZURE_CAPABILITIES,
+  AZURE_DEFAULT_REGION,
   AZURE_OUTPUT_FORMAT,
   AzureEngine,
   parseAzureVoicesXml,
@@ -241,10 +242,16 @@ describe("AzureEngine", () => {
     ]);
   });
 
-  it("missing key or missing region: immediate error, no SDK call", async () => {
-    const { sdk, instances } = makeSdk();
+  it("missing key errors immediately; missing region falls back to AZURE_DEFAULT_REGION", async () => {
+    const { sdk, instances, configs, sinks } = makeSdk();
+    const host = makeHost();
     const noKey = new AzureEngine({ getKey: async () => null, getRegion: async () => "eastus", sdk });
-    const noRegion = new AzureEngine({ getKey: async () => "k", getRegion: async () => null, sdk });
+    const noRegion = new AzureEngine({
+      getKey: async () => "k",
+      getRegion: async () => null,
+      audioHost: host,
+      sdk,
+    });
 
     const e1 = collect(noKey.speak("Hi.", 1, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
@@ -254,10 +261,21 @@ describe("AzureEngine", () => {
 
     const e2 = collect(noRegion.speak("Hi.", 2, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
+    // Drive the fake synthesis to completion like the happy path.
+    instances[0].wordBoundary?.(null, { textOffset: 0, wordLength: 2, audioOffset: 0 });
+    sinks[0].write(new Uint8Array([0xff, 0xfb]).buffer);
+    instances[0].resolveCb?.(COMPLETED);
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
     expect(await e2).toEqual([
-      { type: "error", speakId: 2, message: "Azure Speech key/region not set — providers settings" },
+      { type: "start", speakId: 2 },
+      { type: "word", speakId: 2, begin: 0, end: 2 },
+      { type: "end", speakId: 2 },
     ]);
-    expect(instances).toHaveLength(0);
+    // Default region used when none stored (key-only setups work out of the box).
+    expect(configs[0]?.region).toBe(AZURE_DEFAULT_REGION);
+    expect(instances).toHaveLength(1);
   });
 
   it("synthesizeCanceled (SynthesisCanceled) → error event with the reason string; late canceled resolve is idempotent", async () => {
@@ -375,7 +393,7 @@ describe("AzureEngine", () => {
     ]);
   });
 
-  it("getVoices: no key or no region → []; key+region → voices/list XML parsed (ShortName + Locale)", async () => {
+  it("getVoices: no key → []; key+region → voices/list XML parsed (ShortName + Locale)", async () => {
     const { sdk } = makeSdk();
     const { fetchImpl, calls } = makeFetch([() => xmlResponse(VOICES_XML)]);
     const engine = new AzureEngine({ getKey: async () => "k", getRegion: async () => "eastus", fetchImpl, sdk });
@@ -390,9 +408,22 @@ describe("AzureEngine", () => {
     ]);
 
     const noKey = new AzureEngine({ getKey: async () => null, getRegion: async () => "eastus", sdk });
-    const noRegion = new AzureEngine({ getKey: async () => "k", getRegion: async () => null, sdk });
     expect(await noKey.getVoices()).toEqual([]);
-    expect(await noRegion.getVoices()).toEqual([]);
+  });
+
+  it("getVoices with unset region falls back to AZURE_DEFAULT_REGION", async () => {
+    const { sdk } = makeSdk();
+    const { fetchImpl, calls } = makeFetch([() => xmlResponse(VOICES_XML)]);
+    const engine = new AzureEngine({
+      getKey: async () => "k",
+      getRegion: async () => null,
+      fetchImpl,
+      sdk,
+    });
+    await engine.getVoices();
+    expect(calls[0].url).toBe(
+      `https://${AZURE_DEFAULT_REGION}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
+    );
   });
 
   it("voice list failure (401 or throw) → []", async () => {
@@ -432,6 +463,7 @@ describe("AzureEngine", () => {
       streaming: true,
       costClass: "paid",
       privacyClass: "provider",
+      maxUtteranceChars: 2000,
     });
     expect(AZURE_OUTPUT_FORMAT).toBe("Audio24Khz48KBitRateMonoMp3");
   });

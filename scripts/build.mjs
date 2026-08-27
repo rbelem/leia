@@ -36,6 +36,9 @@ for (const browser of BROWSERS) {
     manifest.browser_specific_settings = {
       gecko: { id: "leia@rbelem.dev", strict_min_version: "140.0" },
     };
+    // "keyboard-shortcuts" permission (FF-only): lets the Settings UI open
+    // about:addons shortcut management and expose UpdateShortcut API.
+    manifest.permissions = [...manifest.permissions, "keyboard-shortcuts"];
   }
   writeFileSync(`dist/${browser}/manifest.json`, JSON.stringify(manifest, null, 2));
 

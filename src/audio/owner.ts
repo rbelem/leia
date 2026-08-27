@@ -116,7 +116,12 @@ export class ProxyEngine implements TextEngine {
     this.capsPromise = null;
     this.fams = null;
     this.famsPromise = null;
-    void browser.runtime.sendMessage({ type: "leia:audio:family", family }).catch(() => {});
+    // The offscreen document may not exist yet (fresh browser start: the
+    // session pins its stored family before anything else wakes the doc) —
+    // ensure it first or the message dies with "no receiving end".
+    void ensureOffscreen()
+      .then(() => browser.runtime.sendMessage({ type: "leia:audio:family", family }))
+      .catch(() => {});
   }
 
   /**
@@ -187,6 +192,16 @@ export class ProxyEngine implements TextEngine {
 
 const proxy = new ProxyEngine();
 
+/**
+ * Media-clock probe for the active MiniMax audio (Firefox word march): the
+ * hidden background page's own timers/media events throttle mid-read, but a
+ * synchronous currentTime read answered over a message poll is always truth.
+ */
+let minimaxClock: MiniMaxEngine | null = null;
+export function audioClockMs(): number | null {
+  return minimaxClock?.currentClockMs() ?? null;
+}
+
 const DEFAULT_CAPABILITIES: EngineCapabilities = {
   wordTiming: false,
   streaming: false,
@@ -213,7 +228,9 @@ export function resolveAudioEngine(): TextEngine {
   }
   const hub = new EngineHub();
   hub.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
-  hub.register("minimax", new MiniMaxEngine({ getKey: () => readProviderKey("leia:settings:minimaxKey") }));
+  const minimax = new MiniMaxEngine({ getKey: () => readProviderKey("leia:settings:minimaxKey") });
+  minimaxClock = minimax;
+  hub.register("minimax", minimax);
   hub.register("elevenlabs", new ElevenLabsEngine({ getKey: () => readProviderKey("leia:settings:elevenlabsKey") }));
   hub.register("azure", new AzureEngine({
     getKey: () => readProviderKey("leia:settings:azureKey"),

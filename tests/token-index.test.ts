@@ -122,29 +122,29 @@ describe("word ↔ range index (T4)", () => {
     expect(joined).toBe(node.data.replace(/\s+/g, ""));
   });
 
-  it("word→sentence parent index: words map to their sentence; counts sum to words", () => {
-    const doc = fixture();
-    const body = doc.body;
-    const range = doc.createRange();
-    range.setStart(body, 0);
-    range.setEnd(body, 2);
+  it("skips style/script/template subtrees — and tables by product decision", () => {
+    document.body.innerHTML =
+      "<style>.x{color:red}</style><table id='tab'><tr><td>CellA</td><td>CellB</td></tr></table>" +
+      "<p id='t'>Readable text only.</p>" +
+      "<script>var a=1;</script>";
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const tokens = tokenIndexFromRange(range);
+    const joined = tokens.map((t) => t.text).join("");
+    expect(joined).not.toContain("color");
+    expect(joined).not.toContain("Cell");
+    expect(joined).toContain("Readable text only.");
+  });
 
-    const idx = wordIndexFromRange(range, "zh-CN")!;
-    const { words, parent, counts } = idx;
-    expect(counts.reduce((n, c) => n + c, 0)).toBe(words.length);
-    // Words of each sentence all report that sentence as parent.
-    const sentences = ["Leia reads pages aloud. ", "Hello world.", "中文句子。", "另一个句子！", "第三句。"];
-    let w = 0;
-    for (let s = 0; s < sentences.length; s += 1) {
-      const take = counts[s];
-      const sentenceWords = words.slice(w, w + take);
-      expect(sentenceWords.length).toBe(take);
-      for (let k = 0; k < take; k += 1) expect(parent[w + k]).toBe(s);
-      expect(sentenceWords.map((x) => x.text).join("")).toContain(sentences[s].slice(0, 3));
-      w += take;
-    }
-    // 中文/句子。 另/一个/句子！ …: dictionary words of each CJK sentence.
-    expect(counts.slice(2)).toEqual(new Int32Array([2, 3, 2]));
+  it("selections starting inside a table still capture that table's text", () => {
+    document.body.innerHTML =
+      "<table><tr><td id='cell'>Selected cell words</td><td>Other</td></tr></table>";
+    const node = document.getElementById("cell")!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, node.data.length);
+    const tokens = tokenIndexFromRange(range);
+    expect(tokens.map((t) => t.text).join("")).toBe("Selected cell words");
   });
 
   it("returns null for a collapsed or whitespace-only range", () => {

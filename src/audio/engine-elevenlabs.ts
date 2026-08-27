@@ -31,6 +31,7 @@ export const ELEVENLABS_CAPABILITIES: EngineCapabilities = {
   streaming: false,
   costClass: "paid",
   privacyClass: "provider",
+  maxUtteranceChars: 2000,
 };
 
 /**
@@ -107,7 +108,7 @@ export class ElevenLabsEngine implements TextEngine {
 
   constructor(opts: ElevenLabsEngineOptions) {
     this.getKey = opts.getKey;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
   }
 
