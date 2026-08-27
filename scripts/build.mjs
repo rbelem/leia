@@ -28,6 +28,7 @@ for (const browser of BROWSERS) {
   cpSync("src/popup/popup.html", `dist/${browser}/popup/popup.html`);
   cpSync("src/probes/offscreen.html", `dist/${browser}/probes/offscreen.html`);
   cpSync("src/offscreen/audio.html", `dist/${browser}/offscreen/audio.html`);
+  cpSync("src/icons", `dist/${browser}/icons`, { recursive: true });
 
   const manifest = JSON.parse(readFileSync("src/manifest.json", "utf8"));
   if (browser === "firefox") {

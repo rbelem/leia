@@ -5,6 +5,7 @@ import {
   canSeekBack,
   canSeekForward,
   clampBarPosition,
+  controlsInPage,
   loadingKindForAction,
   nextToken,
   playAction,
@@ -62,6 +63,12 @@ describe("clampBarPosition", () => {
 describe("CONTROLS_IN_PAGE_KEY", () => {
   it("is the shared surface flag", () => {
     expect(CONTROLS_IN_PAGE_KEY).toBe("leia:controls-in-page");
+  });
+
+  it("is opt-in: only an explicit true shows the in-page bar", () => {
+    expect(controlsInPage(undefined)).toBe(false);
+    expect(controlsInPage(false)).toBe(false);
+    expect(controlsInPage(true)).toBe(true);
   });
 });
 

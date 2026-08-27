@@ -4,8 +4,13 @@
  */
 import type { ReaderState, SessionStatus } from "./reader/session";
 
-/** storage.local flag: true (default) = controls live in the in-page bar. */
+/** storage.local flag: the in-page bar is opt-in — present-and-true shows it. */
 export const CONTROLS_IN_PAGE_KEY = "leia:controls-in-page";
+
+/** Hidden by default: only an explicit true (popup "Open controls in page") mounts the bar. */
+export function controlsInPage(value: unknown): boolean {
+  return value === true;
+}
 
 export type PlayAction = "start" | "resume" | "pause";
 

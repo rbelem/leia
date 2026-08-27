@@ -26,6 +26,7 @@ import {
   canSeekBack,
   canSeekForward,
   clampBarPosition,
+  controlsInPage,
   loadingKindForAction,
   nextToken,
   playAction,
@@ -55,10 +56,12 @@ function ensureBarStyle(doc: Document): void {
     "transition:background-color .12s ease,filter .12s ease,transform .06s ease;}" +
     "#leia-floating-bar button:hover:not(:disabled){background:rgb(255 255 255 / .22)!important;}" +
     "#leia-floating-bar button:active:not(:disabled){transform:scale(.96);filter:brightness(.85);}" +
+    "#leia-floating-bar.dragging{cursor:grabbing;}" +
+    "#leia-floating-bar.dragging button{cursor:grabbing!important;}" +
     "#leia-floating-bar button:focus-visible,#leia-floating-bar select:focus-visible{" +
     "outline:2px solid #fbbf24;outline-offset:1px;}" +
     "#leia-floating-bar button:disabled{opacity:.4;cursor:default!important;}" +
-    "#leia-floating-bar select:hover:not(:disabled){background:#4b5563!important;}" +
+    "#leia-floating-bar select:hover:not(:disabled){background:#57534e!important;}" +
     "#leia-floating-bar button.loading{cursor:progress!important;}" +
     "#leia-floating-bar .leia-spin{display:inline-block;width:10px;height:10px;margin-right:5px;" +
     "vertical-align:-1px;border:2px solid rgb(255 255 255 / .35);border-top-color:#f9fafb;" +
@@ -155,17 +158,19 @@ function render(): void {
   els.speed.value = String(status.settings.rate);
   const base =
     status.state === "stopped"
-      ? "select text — or nothing for the whole page"
+      ? "select text, or play the whole page"
       : `${status.state} · sentence ${Math.min(status.tokenPos + 1, status.tokenCount)}/${status.tokenCount}`;
   // Surface engine failures exactly where the reader is being used (T17);
-  // temporary-friendly: visible even when the popup is closed.
+  // temporary-friendly: visible even when the popup is closed. Title mirrors
+  // the text so the ellipsized overflow stays readable on hover.
   els.status.textContent =
     staleNotice ??
     (status.lastError
-      ? `${base} — ERROR: ${status.lastError.slice(0, 90)}`
+      ? `${base} — engine: ${status.lastError.slice(0, 90)}`
       : loading
         ? `${loading}…`
         : base);
+  els.status.title = els.status.textContent;
 }
 
 // --- Drag ---------------------------------------------------------------
@@ -186,6 +191,7 @@ window.addEventListener("mousemove", (e) => {
   const dx = e.clientX - drag.startX;
   const dy = e.clientY - drag.startY;
   if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+  if (!drag.moved) els.root.classList.add("dragging");
   drag.moved = true;
   const p = clampBarPosition(
     drag.baseX + dx,
@@ -201,6 +207,7 @@ window.addEventListener("mousemove", (e) => {
 window.addEventListener("mouseup", () => {
   if (!drag.active) return;
   drag.active = false;
+  els?.root.classList.remove("dragging");
   if (drag.moved) {
     // Swallow the click that follows a drag (pointer may end on a button);
     // click dispatches right after mouseup, before this timeout runs.
@@ -228,7 +235,7 @@ function buildBar(): BarElements {
   root.id = BAR_ID;
   root.style.cssText =
     "position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;gap:6px;align-items:center;" +
-    "padding:8px 12px;border-radius:999px;background:#1f2937;color:#f9fafb;cursor:grab;" +
+    "padding:8px 12px;border-radius:999px;background:#292524;color:#f9fafb;cursor:grab;" +
     "font:13px/1.4 system-ui,sans-serif;box-shadow:0 2px 8px rgb(0 0 0 / .35);user-select:none;";
   root.addEventListener("mousedown", (e) => {
     e.preventDefault(); // keep page selection/focus; also starts a drag
@@ -280,7 +287,7 @@ function buildBar(): BarElements {
   speed.id = "leia-speed";
   speed.title = "Speed";
   speed.setAttribute("aria-label", "Speed");
-  speed.style.cssText = "border-radius:999px;padding:2px 4px;font:inherit;background:#374151;color:inherit;border:0;";
+  speed.style.cssText = "border-radius:999px;padding:2px 4px;font:inherit;background:#44403c;color:inherit;border:0;";
   for (const v of SPEED_OPTIONS) {
     const opt = document.createElement("option");
     opt.value = String(v);
@@ -291,7 +298,7 @@ function buildBar(): BarElements {
 
   const statusSpan = document.createElement("span");
   statusSpan.id = "leia-bar-status";
-  statusSpan.style.cssText = "color:#9ca3af;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+  statusSpan.style.cssText = "color:#a8a29e;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
 
   root.append(back, play, fwd, stop, speed, statusSpan, close);
   document.documentElement.appendChild(root);
@@ -451,9 +458,9 @@ browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined =>
 // popup ("Open in page") without a tab reload.
 browser.storage.onChanged.addListener((changes: Record<string, { newValue?: unknown }>, area: string) => {
   if (area !== "local" || !(CONTROLS_IN_PAGE_KEY in changes)) return;
-  applySurface(changes[CONTROLS_IN_PAGE_KEY].newValue !== false);
+  applySurface(changes[CONTROLS_IN_PAGE_KEY].newValue === true);
 });
 
 void browser.storage.local.get(CONTROLS_IN_PAGE_KEY).then((got) => {
-  applySurface(got[CONTROLS_IN_PAGE_KEY] !== false);
+  applySurface(controlsInPage(got[CONTROLS_IN_PAGE_KEY]));
 });

@@ -19,6 +19,7 @@ import {
   LOADING_TIMEOUT_MS,
   canSeekBack,
   canSeekForward,
+  controlsInPage,
   loadingKindForAction,
   nextToken,
   playAction,
@@ -143,6 +144,7 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
   input.className = "key-input";
   input.type = "password";
   input.placeholder = savedKey ? "replace key" : "API key";
+  input.setAttribute("aria-label", `${def.label} API key`);
   input.autocomplete = "off";
   input.spellcheck = false;
   if (savedKey) input.value = savedKey;
@@ -167,6 +169,7 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
       // Curated region list: dropdown, most-common default preselected.
       const select = document.createElement("select");
       select.className = "region";
+      select.setAttribute("aria-label", `${def.label} region`);
       for (const r of def.regionOptions.list) {
         const opt = document.createElement("option");
         opt.value = r;
@@ -180,6 +183,7 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
       region.className = "region";
       region.type = "text";
       region.placeholder = "region (e.g. eastus)";
+      region.setAttribute("aria-label", `${def.label} region`);
       region.autocomplete = "off";
       region.spellcheck = false;
       if (savedRegion) region.value = savedRegion;
@@ -254,7 +258,7 @@ if (document.getElementById("voice")) {
       statusEl.textContent =
         s.state === "stopped"
           ? "no active session"
-          : `${s.state} · ${Math.min(s.tokenPos + 1, s.tokenCount)}/${s.tokenCount}${famSuffix}`;
+          : `${s.state} · sentence ${Math.min(s.tokenPos + 1, s.tokenCount)}/${s.tokenCount}${famSuffix}`;
       speedSelect.value = String(s.settings.rate);
     } else {
       statusEl.textContent = "no active session";
@@ -509,7 +513,7 @@ if (document.getElementById("voice")) {
   });
 
   void browser.storage.local.get(CONTROLS_IN_PAGE_KEY).then((got) => {
-    applySurface(got[CONTROLS_IN_PAGE_KEY] !== false);
+    applySurface(controlsInPage(got[CONTROLS_IN_PAGE_KEY]));
   });
 
   voiceSelect.addEventListener("change", () => {
