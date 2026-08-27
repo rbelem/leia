@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-27T00:00:00.000Z",
+  "title": "Design System: Leia",
+  "extensions": {
+    "colorMeta": {
+      "lamp-amber": {
+        "role": "primary",
+        "displayName": "Reading Lamp",
+        "canonical": "#b45309",
+        "tonalRamp": ["#573a00", "#925e06", "#b45309", "#fbbf24", "#ffd98c"]
+      },
+      "lamplight": {
+        "role": "primary",
+        "displayName": "Lamplight",
+        "canonical": "#fbbf24",
+        "tonalRamp": ["#573a00", "#925e06", "#b45309", "#fbbf24", "#ffd98c"]
+      },
+      "warm-paper": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#faf9f7",
+        "tonalRamp": ["#1c1917", "#292524", "#44403c", "#57534e", "#a8a29e", "#e7e5e4", "#f5f5f4", "#faf9f7"]
+      },
+      "stone-panel": {
+        "role": "neutral",
+        "displayName": "Stone Panel",
+        "canonical": "#292524",
+        "tonalRamp": ["#1c1917", "#292524", "#44403c", "#57534e", "#a8a29e", "#e7e5e4", "#f5f5f4", "#faf9f7"]
+      },
+      "umber-ink": {
+        "role": "neutral",
+        "displayName": "Umber Ink",
+        "canonical": "#1c1917",
+        "tonalRamp": ["#1c1917", "#292524", "#44403c", "#57534e", "#a8a29e", "#e7e5e4", "#f5f5f4", "#faf9f7"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Popup masthead wordmark only — the single display moment." },
+      "body": { "displayName": "Body", "purpose": "All popup UI text; the floating bar runs a compact 13px/1.4 sibling step." },
+      "label": { "displayName": "Label", "purpose": "Uppercase +0.08em section headings that recede under their content." },
+      "caption": { "displayName": "Caption", "purpose": "Hints, status, positions — always tabular-nums for counters." }
+    },
+    "shadows": [
+      { "name": "bar-lift", "value": "0 2px 8px rgb(0 0 0 / .35)", "purpose": "The floating bar only — the one shadow in the system." }
+    ],
+    "motion": [
+      { "name": "state-ease", "value": "background-color 0.12s ease, border-color 0.12s ease, filter 0.12s ease", "purpose": "Color/brightness state changes on all controls." },
+      { "name": "press-ease", "value": "transform 0.06s ease", "purpose": "Press compression (scale 0.96–0.98)." },
+      { "name": "spin", "value": "leia-spin 0.8s linear infinite", "purpose": "CSS-only loading ring on the Play button while synthesis is pending." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single action per view (Play). Solid Reading Lamp, semibold white text.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">▶ Play</button>",
+      "css": ".ds-btn-primary { background: #b45309; color: #fff; font: 600 12.5px/1.45 system-ui, sans-serif; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; transition: filter 0.12s ease, transform 0.06s ease; } .ds-btn-primary:hover:not(:disabled) { filter: brightness(1.06); } .ds-btn-primary:active:not(:disabled) { filter: brightness(0.94); transform: scale(0.98); } .ds-btn-primary:focus-visible { outline: 2px solid #b45309; outline-offset: 1px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: default; } @media (prefers-color-scheme: dark) { .ds-btn-primary { background: #fbbf24; color: #1c1917; } .ds-btn-primary:focus-visible { outline-color: #fbbf24; } }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary actions — Open in page, Preview, clear. Recedes until hovered.",
+      "html": "<button class=\"ds-btn-ghost\" type=\"button\">Open controls in page</button>",
+      "css": ".ds-btn-ghost { background: #ffffff; color: #57534e; font: 11.5px/1.45 system-ui, sans-serif; border: 1px solid #e7e5e4; border-radius: 8px; padding: 5px 8px; cursor: pointer; transition: color 0.12s ease, border-color 0.12s ease, transform 0.06s ease; } .ds-btn-ghost:hover:not(:disabled) { color: #1c1917; border-color: #57534e; } .ds-btn-ghost:active:not(:disabled) { transform: scale(0.96); } .ds-btn-ghost:focus-visible { outline: 2px solid #b45309; outline-offset: 1px; } @media (prefers-color-scheme: dark) { .ds-btn-ghost { background: #292524; color: #a8a29e; border-color: #44403c; } .ds-btn-ghost:hover:not(:disabled) { color: #f5f5f4; border-color: #a8a29e; } .ds-btn-ghost:focus-visible { outline-color: #fbbf24; } }"
+    },
+    {
+      "name": "Transport Row",
+      "kind": "custom",
+      "refersTo": "transport-button",
+      "description": "⏮ ▶ ⏭ ⏹ around a flex-growing primary Play; icon buttons take the lamp-glow wash on hover.",
+      "html": "<div class=\"ds-transport\"><button class=\"ds-tbtn\" type=\"button\" aria-label=\"Previous sentence\">⏮</button><button class=\"ds-tplay\" type=\"button\">▶ Play</button><button class=\"ds-tbtn\" type=\"button\" aria-label=\"Next sentence\">⏭</button><button class=\"ds-tbtn\" type=\"button\" aria-label=\"Stop\" disabled>⏹</button></div>",
+      "css": ".ds-transport { display: flex; gap: 6px; } .ds-tbtn { background: #ffffff; color: #1c1917; font: 12.5px/1.45 system-ui, sans-serif; border: 1px solid #e7e5e4; border-radius: 8px; padding: 6px 10px; cursor: pointer; transition: background-color 0.12s ease, border-color 0.12s ease, transform 0.06s ease; } .ds-tbtn:hover:not(:disabled) { color: #1c1917; border-color: #57534e; background: rgba(180, 83, 9, 0.12); } .ds-tbtn:active:not(:disabled) { transform: scale(0.96); } .ds-tbtn:focus-visible { outline: 2px solid #b45309; outline-offset: 1px; } .ds-tbtn:disabled { opacity: 0.5; cursor: default; } .ds-tplay { flex: 1; background: #b45309; color: #fff; font: 600 12.5px/1.45 system-ui, sans-serif; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; transition: filter 0.12s ease, transform 0.06s ease; } .ds-tplay:hover { filter: brightness(1.06); } .ds-tplay:active { filter: brightness(0.94); transform: scale(0.98); } .ds-tplay:focus-visible { outline: 2px solid #b45309; outline-offset: 1px; } @media (prefers-color-scheme: dark) { .ds-tbtn { background: #292524; color: #f5f5f4; border-color: #44403c; } .ds-tbtn:hover:not(:disabled) { background: rgba(251, 191, 36, 0.14); border-color: #a8a29e; } .ds-tplay { background: #fbbf24; color: #1c1917; } }"
+    },
+    {
+      "name": "Select Field",
+      "kind": "input",
+      "refersTo": "field-select",
+      "description": "Voice and speed pickers — sheet on paper, amber focus ring.",
+      "html": "<select class=\"ds-select\" aria-label=\"Speed\"><option>1×</option><option>1.5×</option><option>2×</option></select>",
+      "css": ".ds-select { width: 100%; background: #ffffff; color: #1c1917; font: 12.5px/1.45 system-ui, sans-serif; border: 1px solid #e7e5e4; border-radius: 8px; padding: 6px 8px; } .ds-select:focus { outline: 2px solid #b45309; outline-offset: 1px; } @media (prefers-color-scheme: dark) { .ds-select { background: #292524; color: #f5f5f4; border-color: #44403c; } .ds-select:focus { outline-color: #fbbf24; } }"
+    },
+    {
+      "name": "Capability Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Engine capability disclosure — free · on-device · word timing. Pure pill, no interaction.",
+      "html": "<span class=\"ds-chip\">word timing</span> <span class=\"ds-chip\">streaming</span>",
+      "css": ".ds-chip { display: inline-block; background: #ffffff; color: #57534e; font: 10.5px/1 system-ui, sans-serif; border: 1px solid #e7e5e4; border-radius: 999px; padding: 3px 7px; } @media (prefers-color-scheme: dark) { .ds-chip { background: #292524; color: #a8a29e; border-color: #44403c; } }"
+    },
+    {
+      "name": "Floating Bar",
+      "kind": "custom",
+      "refersTo": "bar-pill",
+      "description": "The signature surface: scheme-locked dark stone pill with glass-tint controls and the system's only shadow. Draggable.",
+      "html": "<div class=\"ds-bar\"><button class=\"ds-barbtn\" type=\"button\" aria-label=\"Previous sentence\">⏮</button><button class=\"ds-barbtn ds-barplay\" type=\"button\">▶ Play</button><button class=\"ds-barbtn\" type=\"button\" aria-label=\"Stop\">⏹</button><span class=\"ds-barstatus\">paused · sentence 3/12</span></div>",
+      "css": ".ds-bar { display: inline-flex; gap: 6px; align-items: center; background: #292524; color: #f9fafb; font: 13px/1.4 system-ui, sans-serif; border-radius: 999px; padding: 8px 12px; box-shadow: 0 2px 8px rgb(0 0 0 / .35); cursor: grab; user-select: none; } .ds-barbtn { background: rgb(255 255 255 / .1); color: inherit; font: inherit; border: 1px solid rgb(255 255 255 / .25); border-radius: 999px; padding: 3px 10px; cursor: pointer; transition: background-color 0.12s ease, filter 0.12s ease, transform 0.06s ease; } .ds-barbtn:hover:not(:disabled) { background: rgb(255 255 255 / .22); } .ds-barbtn:active:not(:disabled) { transform: scale(0.96); filter: brightness(0.85); } .ds-barbtn:focus-visible { outline: 2px solid #fbbf24; outline-offset: 1px; } .ds-barbtn:disabled { opacity: 0.4; cursor: default; } .ds-barstatus { color: #a8a29e; font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Theme Swatch",
+      "kind": "custom",
+      "refersTo": "swatch-chip",
+      "description": "Highlight-theme picker tile, split diagonally to preview both bands; radio semantics, amber selected ring.",
+      "html": "<button class=\"ds-swatch\" type=\"button\" role=\"radio\" aria-checked=\"true\"><span class=\"ds-swatch-chip\"></span><span class=\"ds-swatch-label\">Sun</span></button>",
+      "css": ".ds-swatch { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 1px solid transparent; border-radius: 8px; padding: 4px; cursor: pointer; font: 10px/1.45 system-ui, sans-serif; } .ds-swatch-chip { width: 34px; height: 24px; border-radius: 6px; border: 1px solid #e7e5e4; background: linear-gradient(135deg, rgba(251, 191, 36, 0.42) 50%, rgba(146, 94, 6, 0.55) 50%); } .ds-swatch-label { color: #57534e; } .ds-swatch[aria-checked=\"true\"] { border-color: #b45309; background: rgba(180, 83, 9, 0.12); } .ds-swatch[aria-checked=\"true\"] .ds-swatch-label { color: #1c1917; font-weight: 600; } .ds-swatch:focus-visible { outline: 2px solid #b45309; outline-offset: 1px; } @media (prefers-color-scheme: dark) { .ds-swatch-chip { border-color: #44403c; } .ds-swatch-label { color: #a8a29e; } .ds-swatch[aria-checked=\"true\"] { border-color: #fbbf24; background: rgba(251, 191, 36, 0.14); } .ds-swatch[aria-checked=\"true\"] .ds-swatch-label { color: #f5f5f4; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Attentive Reader",
+    "overview": "Leia is a reading companion, not an app that happens to read. The visual world is a quiet library: warm stone surfaces the color of paper and linen bindings, a single amber lamp for attention, and type set in the browser's own native voice. Every surface exists to get out of the way of the page being read — the loudest thing in the product is the moving highlight on someone else's website, never the chrome around it. Two extension surfaces share this world: the popup (a narrow, flat, hairline-sectioned panel in warm paper light or evening-stone dark) and the floating bar (a dark stone pill that drifts over arbitrary pages and can be dragged anywhere). The third surface is not chrome at all: the marching highlight, painted directly onto the host page's text through the CSS Custom Highlight API, contrast-checked against whatever background it lands on. Controls are quiet and state-honest: every control visibly answers hover, press, focus, disabled, and loading, but nothing performs.",
+    "keyCharacteristics": [
+      "Warm stone neutrals only — cool slates and blues are off-palette drift.",
+      "One amber accent per scheme; its rarity is the point.",
+      "Flat popup, one shadow in the whole system (the floating bar).",
+      "Native system-ui type; counters in tabular numerals.",
+      "Dark scheme by prefers-color-scheme only — no manual toggle.",
+      "The brand mark (amber-haired Leia with reading glasses on a stone-900 disc) carries the same two hues as the UI."
+    ],
+    "rules": [
+      { "name": "The One Lamp Rule", "body": "Amber is the only accent on chrome surfaces. If a second saturated hue appears on a button, badge, or border, it is drift — the semantic greens/reds are for state text only.", "section": "colors" },
+      { "name": "The Honest Contrast Rule", "body": "A highlight variant ships only if its ink clears WCAG AA 4.5:1 against its own wash composited over the sampled page background — computed, not eyeballed. When no variant clears AA, the system falls back to an underline-only variant that touches no colors.", "section": "colors" },
+      { "name": "The Native Stack Rule", "body": "No webfonts, ever. A content script cannot afford font loading, and a toolbar popup shouldn't want it. If a surface needs character, reach for color, spacing, or the icon — not a typeface.", "section": "typography" },
+      { "name": "The One Shadow Rule", "body": "Popup surfaces never cast shadows. If a panel needs separation, add a deckle-line border or a tonal step, not a shadow. Shadows belong to things that float over content the user owns.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep every neutral on the warm stone ramp (warm-paper → umber-ink); Marginalia text must hold ≥4.5:1 on its ground in both schemes.",
+      "Do use the 2px amber focus ring (1px offset) on every focusable element, both surfaces.",
+      "Do handle dark scheme exclusively through prefers-color-scheme token swaps.",
+      "Do keep counters and positions in tabular-nums.",
+      "Do answer every interaction state — hover, active, focus-visible, disabled, loading — with the quiet grammar above.",
+      "Do paint the reading highlight with the Custom Highlight API (::highlight), which never mutates the host page's DOM."
+    ],
+    "donts": [
+      "Don't introduce cool slates, blues, or pure grays on chrome surfaces — that drift was corrected once (the bar's old slate pill) and stays corrected.",
+      "Don't add webfonts or a second typeface.",
+      "Don't cast shadows inside the popup; one shadow system-wide, and it belongs to the bar.",
+      "Don't add saturated accent colors beyond the one amber; state hues are text-only.",
+      "Don't ship a highlight theme variant without the computed AA check; the underline-only fallback is the honest answer on hard backgrounds.",
+      "Don't use !important in popup CSS, and in the bar's injected stylesheet only against inline cssText.",
+      "Don't use image or GIF spinners; motion is CSS-only."
+    ]
+  }
+}
