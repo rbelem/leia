@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Leia",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reads webpages aloud with pluggable AI voices and a highlight that follows the speech (skeleton build).",
   "minimum_chrome_version": "109",
   "action": {

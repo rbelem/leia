@@ -84,7 +84,7 @@ export function capabilityChips(caps: EngineCapabilities): string[] {
 }
 
 export function renderCapabilities(container: HTMLElement, caps: EngineCapabilities | null): void {
-  container.innerHTML = "";
+  container.replaceChildren();
   if (!caps) return;
   for (const label of capabilityChips(caps)) {
     const chip = document.createElement("span");
@@ -323,7 +323,7 @@ if (document.getElementById("voice")) {
       ),
     );
 
-    voiceSelect.innerHTML = '<option value="">(default voice)</option>';
+    voiceSelect.replaceChildren(new Option("(default voice)", ""));
     for (const [family, list] of voicesByFamily) {
       const group = document.createElement("optgroup");
       group.label = familyLabel(family);
