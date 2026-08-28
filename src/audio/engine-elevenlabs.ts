@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * ElevenLabs engine (T8, #9). Provider TTS via the v1 REST API — one POST
  * per chunk to the with-timestamps variant, which returns JSON with base64

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A push-based AsyncIterable: producers `push()` events / `close()`, a single
  * consumer iterates. Used by every engine implementation to bridge

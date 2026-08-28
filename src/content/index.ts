@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import browser from "webextension-polyfill";
 import { isRouterMessage, routeMessage, type RouterReply } from "../background/router";
 import { pageInfoFromDocument } from "./page-info";

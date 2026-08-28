@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Pure message router shared by every extension context.
  * Each wired context augments it with its own cases (see background/index.ts,

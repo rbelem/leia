@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { beforeEach, describe, expect, it } from "vitest";
 import { captureArticle, captureScope } from "../src/content/scope";
 

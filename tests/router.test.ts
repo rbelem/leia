@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { routeMessage } from "../src/background/router";
 

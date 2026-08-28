@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * ReaderSession — one active session globally (T2 item 9), authoritative
  * state in storage.session (T2 item 2). Runs in the background context on

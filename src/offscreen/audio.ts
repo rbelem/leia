@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Product offscreen document (Chrome audio owner, ADR-0002). Hosts the real
  * engine hub (Web Speech default + MiniMax provider) and answers audio

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T2 spike: `chrome.tts` comparison probe (service-worker side, Chrome only).
  * Contender against the offscreen speechSynthesis probe — see

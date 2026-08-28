@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * MiniMax Speech-2.8 engine (T20). Provider TTS via the t2a_v2 API:
  * one POST per chunk (stream:false), hex-encoded MP3 response, and — when

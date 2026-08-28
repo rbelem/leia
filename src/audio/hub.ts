@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * EngineHub — multiplexes several TextEngines (families) behind one
  * TextEngine. One family is current: speak/cancel/capabilities route to it,

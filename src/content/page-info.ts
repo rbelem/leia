@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Page facts the content script exposes to the rest of the extension. */
 export interface PageInfo {
   title: string;

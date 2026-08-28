@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T2 spike: offscreen document (reason AUDIO_PLAYBACK) hosting speechSynthesis
  * probes. Answers typed messages forwarded by the service worker and streams

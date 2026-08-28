@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { HELPER, patchReadability } from "../scripts/readability-patch.mjs";
 import installed from "../node_modules/@mozilla/readability/Readability.js?raw";

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Leia image generation for impeccable comp-first work (and anything else).
  * Lane 1: qwen-image-3.0-pro (alibaba token-plan, native multimodal-generation API).

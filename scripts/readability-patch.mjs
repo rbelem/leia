@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * AMO's validator flags every `.innerHTML =` assignment in shipped code,
  * including the two inside Mozilla's own @mozilla/readability — its DOM

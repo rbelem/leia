@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T16 resume-store tests: per-URL save/load/clear over an in-memory
  * storage.local double, URL normalization (hash / trailing slash), and the

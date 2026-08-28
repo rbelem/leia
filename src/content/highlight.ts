@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Marching highlight via the CSS Custom Highlight API (platform floor:
  * Chrome ≥ 105 / Firefox ≥ 140, docs/platform-floor.md). Two registrations:

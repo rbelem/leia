@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Chunking: group consecutive sentence tokens into utterance chunks.
  * Constraints:

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T18: store-ready zips. Run after `npm run build`:
  *   node scripts/zip.mjs

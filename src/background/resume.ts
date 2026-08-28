@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Per-URL reading-position store (T16/T17). Resume records live in
  * browser.storage.local (survives the transient storage.session backing the

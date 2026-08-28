@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalEngine } from "../src/audio/engine-local";
 import type { LocalCapabilities, LocalProfile } from "../src/audio/local-profiles";

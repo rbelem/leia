@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Page-side read-scope capture + highlight binding (content-script world).
  * A page context captures the user's selection or the page's main article

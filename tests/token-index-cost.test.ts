@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { tokenIndexFromRange, wordIndexFromRange } from "../src/reader/token-index";
 

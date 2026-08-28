@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Local word-march scheduler for the visible page. The engine ships the
  * chunk timeline once with a best-effort (wall, clock) anchor; this sweeper

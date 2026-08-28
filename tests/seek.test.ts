@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { afterEach, describe, expect, it } from "vitest";
 import { STALE_NODE_THRESHOLD, ScopeHighlighter, tokenIndexAtPoint } from "../src/content/scope";
 import { tokenIndexFromRange } from "../src/reader/token-index";

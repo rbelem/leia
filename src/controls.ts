@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Shared playback-control helpers for the floating bar and the popup.
  * Pure functions — unit-tested in tests/controls.test.ts.

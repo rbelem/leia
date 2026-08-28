@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Popup (toolbar action, T14): playback controls, family-grouped voice
  * picker with per-family capability disclosure (ADR-0003), highlight-theme

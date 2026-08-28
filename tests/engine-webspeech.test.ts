@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { beforeEach, describe, expect, it } from "vitest";
 import { WebSpeechEngine, type SpeechSynthesisLike } from "../src/audio/engine-webspeech";
 

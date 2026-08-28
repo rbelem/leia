@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Audio-owner seam (ADR-0002, T2 item 4). Resolves the platform voice engine
  * that the ReaderSession consumes:

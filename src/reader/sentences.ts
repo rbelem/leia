@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Locale-parameterized sentence + word tokenization (pure text).
  *

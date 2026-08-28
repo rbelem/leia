@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 // Open an extension page as a tab via CDP HTTP, then evaluate a probe in it.
 // Usage: node drive-probe3.mjs <port> <extId> <type> [timeoutMs]
 const port = process.argv[2];

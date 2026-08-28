@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { build } from "esbuild";
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { patchReadability } from "./readability-patch.mjs";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * LocalEngine (ADR-0006, T11): one engine per local voice-server profile,
  * keyless, loopback-only. Structurally MiniMaxEngine minus the key —

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * OpenAI TTS engine (T10, #11). Provider TTS via the v1 REST API: one POST
  * per chunk to /audio/speech, binary MP3 response → audioHost playback.

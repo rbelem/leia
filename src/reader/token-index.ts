@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Token → DOM-range index over a selection (T2 item 6, T4 word map). Maps
  * the sentence or word tokenization of the selected text back onto live

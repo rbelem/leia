@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Local voice-server profiles (ADR-0006, T11). Pure-data profile model:
  * a profile is { id, name, baseUrl, install } — capability set is NEVER

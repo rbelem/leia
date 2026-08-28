@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Test harness fakes for engine lanes (T5/T7/T8/T11 will import these).
  * FakeEngine implements the v1 TextEngine contract (see docs/engine-contract.md)

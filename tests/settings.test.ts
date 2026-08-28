@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T14 settings tests: theme persistence round-trip, content-script theme
  * init from storage, provider-key masking/row states, and capability

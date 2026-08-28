@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Marching-highlight theme layer (T15). Themes are palette-defined data —
  * the future picker UI renders straight from THEMES — and a pure WCAG

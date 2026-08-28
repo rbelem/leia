@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T2 spike: Firefox event-page persistence probe.
  *

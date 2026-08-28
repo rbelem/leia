@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Word-march controller shared by both content scripts. The engine ships a
  * whole-chunk timeline once (contract.EngineEvent "timeline"); whichever

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Floating bar (page context): one Play/Pause button (Play from stopped
  * starts a fresh read of the selection/page), Stop, sentence Back/Forward,

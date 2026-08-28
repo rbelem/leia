@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Azure Speech engine (T9, #10). Provider TTS via the
  * microsoft-cognitiveservices-speech-sdk (websocket, live streaming): text is

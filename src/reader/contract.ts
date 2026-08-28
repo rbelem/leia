@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Voice-engine adapter contract (ADR-0001). Event-oriented so engines that
  * stream timing (providers, local models) and engines that only fire

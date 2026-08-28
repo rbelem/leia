@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Web Speech engine — one utterance per chunk, event-driven, word-granularity
  * highlight marching on estimated timing, corrected by utterance boundary
