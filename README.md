@@ -36,6 +36,7 @@ docs/             permissions, platform floor, T2 spike checklists
 ## Load in Chrome
 
 ```sh
+npm install        # esbuild, vitest, @mozilla/readability
 npm run build
 ```
 
@@ -53,6 +54,22 @@ npm run build
 
 In both browsers, click the Leia action: “Ping background router” and “Ask
 active tab for page info” walk popup → background → content script → popup
+
+## Build from source (store submission)
+
+The `dist/*.zip` store payloads are built from this exact source:
+
+```sh
+npm install           # installs esbuild, vitest, @mozilla/readability
+npm test              # vitest run (jsdom)
+npm run build         # esbuild bundles src/*.ts → dist/chrome + dist/firefox
+node scripts/zip.mjs  # → dist/chrome.zip + dist/firefox.zip
+```
+
+esbuild bundles without minifying. The only source transform is
+`scripts/readability-patch.mjs` (wired in `scripts/build.mjs`): it rewrites
+two `.innerHTML =` statements inside the vendored `@mozilla/readability`
+into a DOMParser-based equivalent — see that file for the exact diff.
 through the `browser.*` API (webextension-polyfill on Chrome, native
 `browser.*` on Firefox) — the same paths the product messaging will use.
 
