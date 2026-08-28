@@ -2,6 +2,7 @@
   "name": "leia",
   "version": "0.1.0",
   "private": true,
+  "license": "MPL-2.0",
   "type": "module",
   "description": "Browser extension (Chrome + Firefox) that reads webpages aloud with pluggable AI voices and a marching highlight.",
   "scripts": {
