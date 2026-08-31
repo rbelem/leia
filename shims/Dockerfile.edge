@@ -1,0 +1,10 @@
+# leia local-model shim — Microsoft Edge Read-Aloud via edge-tts (MIT).
+# Model-free and light (no weights download), but NOT local: the text is
+# sent to Microsoft servers. Unofficial service — if speak starts failing
+# while health is still ok, bump the edge-tts pin (README breakage note).
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi uvicorn edge-tts==7.2.8 miniaudio==1.71
+COPY server.py adapters.py ./
+EXPOSE 8884
+CMD ["python", "server.py", "--model", "edge", "--host", "0.0.0.0", "--port", "8884"]

@@ -1,0 +1,12 @@
+# leia local-model shim — KittenTTS ONNX (Apache-2.0).
+# Model (~80 MB) downloads into /root/.cache on first start — mount a volume.
+FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends espeak-ng \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir fastapi uvicorn kittentts
+COPY server.py adapters.py ./
+ENV KITTEN_MODEL=KittenML/kitten-tts-mini-0.8
+EXPOSE 8882
+CMD ["python", "server.py", "--model", "kittentts", "--host", "0.0.0.0", "--port", "8882"]

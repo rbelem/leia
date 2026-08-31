@@ -1,0 +1,10 @@
+# leia local-model shim — piper. piper-tts is GPL-3.0: it runs in this
+# container only; the extension stays MPL-2.0 (talks HTTP, never links).
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi uvicorn piper-tts
+COPY server.py adapters.py ./
+ENV PIPER_HOME=/models \
+    PIPER_VOICE=en_US-lessac-medium
+EXPOSE 8881
+CMD ["python", "server.py", "--model", "piper", "--host", "0.0.0.0", "--port", "8881"]

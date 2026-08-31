@@ -1,0 +1,14 @@
+# leia local-model shim — NeuTTS Air, Q4 GGUF via llama-cpp-python.
+# The image build compiles llama-cpp-python (~10-20 min). The backbone
+# (~0.5 GB) plus reference sample download into /root/.cache on first
+# start — mount a volume or every `--rm` run re-downloads.
+FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential cmake espeak-ng \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir fastapi uvicorn neuttsair huggingface_hub
+COPY server.py adapters.py ./
+ENV NEUTTS_BACKBONE=neutts-air-q4-gguf
+EXPOSE 8883
+CMD ["python", "server.py", "--model", "neutts", "--host", "0.0.0.0", "--port", "8883"]
