@@ -49,7 +49,7 @@ export class LocalEngine implements TextEngine {
   private readonly fetchImpl: typeof fetch;
   private readonly audioHost: AudioHost;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
-  private wordTimers: number[] = [];
+  private wordTimers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(profile: LocalProfile, caps: LocalCapabilities, opts: LocalEngineOptions = {}) {
     this.profile = profile;

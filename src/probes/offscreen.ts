@@ -10,6 +10,7 @@
  *   leia:probe-cancel — cancel any running utterance
  */
 import browser from "webextension-polyfill";
+import { handleKittenProbe } from "./kitten-probe";
 
 const SENTENCE = "hello world, this is leia.";
 
@@ -105,6 +106,10 @@ browser.runtime.onMessage.addListener((msg: unknown) => {
       return probeSpeak();
     case "leia:probe-cancel":
       return probeCancel();
+    case "leia:probe-kitten": {
+      const m = msg as unknown as { text?: string; voice?: string | null };
+      return handleKittenProbe(m.text, m.voice ?? null);
+    }
     default:
       return undefined;
   }

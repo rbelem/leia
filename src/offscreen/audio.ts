@@ -17,6 +17,7 @@ import { OpenAIEngine } from "../audio/engine-openai";
 import { XaiEngine } from "../audio/engine-xai";
 import { MistralEngine } from "../audio/engine-mistral";
 import { GeminiEngine } from "../audio/engine-gemini";
+import { KittenEngine } from "../audio/kitten/engine-kitten";
 import { registerLocalEngines } from "../audio/engine-local";
 import { EngineHub, type EngineFamilyInfo } from "../audio/hub";
 import type { EngineCapabilities } from "../reader/contract";
@@ -46,6 +47,8 @@ engine.register("openai", new OpenAIEngine({ getKey: readProviderKey("leia:setti
 engine.register("xai", new XaiEngine({ getKey: readProviderKey("leia:settings:xaiKey") }));
 engine.register("mistral", new MistralEngine({ getKey: readProviderKey("leia:settings:mistralKey") }));
 engine.register("gemini", new GeminiEngine({ getKey: readProviderKey("leia:settings:geminiKey") }));
+// kitten-local (ticket 06): lazy — the model worker spawns on first speak.
+engine.register("kitten-local", new KittenEngine());
 void registerLocalEngines(engine); // lazy boot probe (ADR-0006) — never blocks web-speech
 
 async function speakAndStream(msg: {
@@ -63,8 +66,8 @@ async function speakAndStream(msg: {
   }
 }
 
-browser.runtime.onMessage.addListener((msg: unknown) => {
-  if (typeof msg !== "object" || msg === null || !("type" in msg)) return undefined;
+/** Reply to one audio message from the engine hub (see listener below). */
+function handleAudioMessage(msg: unknown): unknown {
   switch ((msg as { type: string }).type) {
     case "leia:audio:voices":
       return engine.getVoices();
@@ -88,4 +91,9 @@ browser.runtime.onMessage.addListener((msg: unknown) => {
     default:
       return undefined;
   }
+}
+
+browser.runtime.onMessage.addListener((msg: unknown) => {
+  if (typeof msg !== "object" || msg === null || !("type" in msg)) return undefined;
+  return handleAudioMessage(msg);
 });

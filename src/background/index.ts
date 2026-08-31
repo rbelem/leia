@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 import browser from "webextension-polyfill";
-import { isRouterMessage, routeMessage, type RouterReply } from "./router";
+import { isRouterMessage, routeMessage, type RouterMessage, type RouterReply } from "./router";
 import { chromeOffscreen } from "../probes/chrome-apis";
 import { handleTtsProbe } from "../probes/tts-probe";
 import {
   handleFfPlaybackKeepalive,
   handleFfPlaybackProbe,
 } from "../probes/ff-playback";
-import { chromeAudioEngine, audioClockMs, resolveAudioEngine } from "../audio/owner";
+import { handleKittenProbe } from "../probes/kitten-probe";
+import { chromeAudioEngine, audioClockMs, isChrome, resolveAudioEngine } from "../audio/owner";
 import { ReaderSession, type SessionEvent, type TokenText } from "../reader/session";
 import type { EngineEvent, TextEngine } from "../reader/contract";
 import { ResumeStore } from "./resume";
@@ -175,20 +176,12 @@ async function handleReaderStart(msg: {
   }
 }
 
-browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply | undefined> => {
-  if (!isRouterMessage(msg)) return;
-  if (msg.type === "leia:page-info") {
-    try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) return { ok: false, replyType: "leia:page-info", error: "no active tab" };
-      const info = await browser.tabs.sendMessage(tab.id, { type: "leia:page-info" });
-      return { ok: true, replyType: "leia:page-info", data: info };
-    } catch (err) {
-      return { ok: false, replyType: "leia:page-info", error: String(err) };
-    }
-  }
-
-  // --- Reader control (T2) ---
+/**
+ * Reader session control (T2/T16/T17): start/pause/stop/resume/seek and the
+ * per-URL resume records. Position-parking lives here so every entry point
+ * (popup, floating bar, shortcut) gets identical semantics.
+ */
+async function handleReaderSession(msg: RouterMessage): Promise<RouterReply | undefined> {
   if (msg.type === "leia:reader:start") {
     return handleReaderStart(msg as { tokens?: TokenText[]; voiceName?: string | null; rate?: number });
   }
@@ -248,28 +241,37 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
     };
   }
 
+  return undefined;
+}
+
+/** Sample utterance (T14 preview button) through the SAME engine the session uses. */
+async function handlePreview(msg: RouterMessage): Promise<RouterReply> {
+  const { voiceName, family } = msg as { voiceName?: string | null; family?: string };
+  try {
+    if (family) engine.selectFamily?.(family);
+    for await (const ev of engine.speak(PREVIEW_SAMPLE, PREVIEW_SPEAK_ID, {
+      voiceName: voiceName ?? null,
+      rate: 1,
+    })) {
+      if (ev.type === "error") {
+        // Keyless family and similar: engines may report failure as an
+        // error event instead of throwing — surface it as a failed preview.
+        return { ok: false, replyType: "leia:reader:preview", error: ev.message || "engine error" };
+      }
+    }
+    return { ok: true, replyType: "leia:reader:preview" };
+  } catch (err) {
+    return { ok: false, replyType: "leia:reader:preview", error: String(err) };
+  }
+}
+
+/** Status/voices/preview/pref reads and writes (T14 popup surface). */
+async function handleReaderPrefs(msg: RouterMessage): Promise<RouterReply | undefined> {
   if (msg.type === "leia:reader:preview") {
-    // Sample utterance through the SAME engine the session uses. Preemption
-    // contract: if a session is playing, its current chunk yields
+    // Preemption contract: if a session is playing, its current chunk yields
     // `cancelled` and the drive loop re-speaks it — no deadlock. Session
     // state is never touched.
-    const { voiceName, family } = msg as { voiceName?: string | null; family?: string };
-    try {
-      if (family) engine.selectFamily?.(family);
-      for await (const ev of engine.speak(PREVIEW_SAMPLE, PREVIEW_SPEAK_ID, {
-        voiceName: voiceName ?? null,
-        rate: 1,
-      })) {
-        if (ev.type === "error") {
-          // Keyless family and similar: engines may report failure as an
-          // error event instead of throwing — surface it as a failed preview.
-          return { ok: false, replyType: "leia:reader:preview", error: ev.message || "engine error" };
-        }
-      }
-      return { ok: true, replyType: "leia:reader:preview" };
-    } catch (err) {
-      return { ok: false, replyType: "leia:reader:preview", error: String(err) };
-    }
+    return handlePreview(msg);
   }
   if (msg.type === "leia:reader:status") {
     const s = await getSession();
@@ -287,30 +289,35 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
     const status = await s.setPrefs(prefs);
     return { ok: true, replyType: "leia:reader:prefs", data: status };
   }
+  return undefined;
+}
 
-  // --- Settings (T14): per-family capability disclosure + theme relay ---
-  if (msg.type === "leia:audio:families") {
-    // ponytail: engines without families() answer as the single default
-    // family; EngineHub.families() and the Chrome proxy both implement it.
-    const withFamilies = engine as TextEngine & { families?: () => unknown };
-    const data =
-      typeof withFamilies.families === "function"
-        ? await withFamilies.families()
-        : [{ family: "web-speech", capabilities: engine.capabilities }];
-    return { ok: true, replyType: "leia:audio:families", data };
+/**
+ * kitten-local manual verification probe (ticket 06). Firefox's event page
+ * has a DOM → run it in place; Chrome's SW has neither DOM nor Worker-with-
+ * Audio → forward to the probe offscreen document. The 10-minute ceiling
+ * covers a slow first-use model download.
+ */
+async function handleKittenProbeMessage(msg: { text?: string; voice?: string | null }): Promise<RouterReply> {
+  try {
+    if (!isChrome()) {
+      return { ok: true, replyType: "leia:probe-kitten", data: await handleKittenProbe(msg.text, msg.voice ?? null) };
+    }
+    await ensureOffscreenDocument();
+    const data = await Promise.race([
+      browser.runtime.sendMessage(msg),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("kitten probe timed out after 600s")), 600_000),
+      ),
+    ]);
+    return { ok: true, replyType: "leia:probe-kitten", data };
+  } catch (err) {
+    return { ok: false, replyType: "leia:probe-kitten", error: String(err) };
   }
-  if (msg.type === "leia:theme:set") {
-    await broadcast({ type: "leia:theme:set", theme: msg.theme });
-    return { ok: true, replyType: "leia:theme:set" };
-  }
+}
 
-  // --- Audio events from the Chrome offscreen document (ADR-0002) ---
-  if (msg.type === "leia:audio:event") {
-    chromeAudioEngine().pushEvent(msg as unknown as EngineEvent);
-    return undefined;
-  }
-
-  // --- T2 spike probe entry points (no product behavior; see docs/spike-*.md) ---
+/** T2 spike probe entry points (no product behavior; see docs/spike-*.md). */
+async function handleProbeDispatch(msg: RouterMessage): Promise<RouterReply | undefined> {
   if (msg.type === "leia:probe-result") {
     // Streamed results from the offscreen document (and future probe contexts).
     console.log("[leia probe]", (msg as { probe?: string }).probe, msg.data);
@@ -330,6 +337,9 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
       return { ok: false, replyType: msg.type, error: String(err) };
     }
   }
+  if (msg.type === "leia:probe-kitten") {
+    return handleKittenProbeMessage(msg as { text?: string; voice?: string | null });
+  }
   if (msg.type === "leia:tts-probe") {
     return handleTtsProbe();
   }
@@ -339,7 +349,42 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
   if (msg.type === "leia:ff-playback-keepalive") {
     return handleFfPlaybackKeepalive();
   }
+  return undefined;
+}
 
+/** Active-tab page-info relay (content script does the extraction). */
+async function handlePageInfo(): Promise<RouterReply> {
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { ok: false, replyType: "leia:page-info", error: "no active tab" };
+    const info = await browser.tabs.sendMessage(tab.id, { type: "leia:page-info" });
+    return { ok: true, replyType: "leia:page-info", data: info };
+  } catch (err) {
+    return { ok: false, replyType: "leia:page-info", error: String(err) };
+  }
+}
+
+/** Settings/family disclosure + audio-owner plumbing (ADR-0002, T14). */
+async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | undefined> {
+  if (msg.type === "leia:audio:families") {
+    // ponytail: engines without families() answer as the single default
+    // family; EngineHub.families() and the Chrome proxy both implement it.
+    const withFamilies = engine as TextEngine & { families?: () => unknown };
+    const data =
+      typeof withFamilies.families === "function"
+        ? await withFamilies.families()
+        : [{ family: "web-speech", capabilities: engine.capabilities }];
+    return { ok: true, replyType: "leia:audio:families", data };
+  }
+  if (msg.type === "leia:theme:set") {
+    await broadcast({ type: "leia:theme:set", theme: msg.theme });
+    return { ok: true, replyType: "leia:theme:set" };
+  }
+  // --- Audio events from the Chrome offscreen document (ADR-0002) ---
+  if (msg.type === "leia:audio:event") {
+    chromeAudioEngine().pushEvent(msg as unknown as EngineEvent);
+    return undefined;
+  }
   // Firefox: the hidden background page idles into timer/media-event
   // throttling mid-read (chunk-end events then arrive minutes late, stalling
   // the session; per-word pushes lag the voice). While a read plays, every
@@ -349,6 +394,21 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
   if (msg.type === "leia:audio:clock") {
     return { ok: true, replyType: "leia:audio:clock", data: { clock: audioClockMs() } };
   }
+  return undefined;
+}
+
+browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply | undefined> => {
+  if (!isRouterMessage(msg)) return;
+  if (msg.type === "leia:page-info") return handlePageInfo();
+
+  const readerReply = (await handleReaderSession(msg)) ?? (await handleReaderPrefs(msg));
+  if (readerReply !== undefined) return readerReply;
+
+  const audioReply = await handleAudioDispatch(msg);
+  if (audioReply !== undefined) return audioReply;
+
+  const probeReply = await handleProbeDispatch(msg);
+  if (probeReply !== undefined) return probeReply;
 
   return routeMessage(msg) ?? undefined;
 });

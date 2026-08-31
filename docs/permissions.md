@@ -26,12 +26,22 @@ actually fetch audio, so the health probes (ADR-0004) stay prompt-free.
 
 ## CSP / no remote code
 
-- No `content_security_policy` key is set: the MV3 default applies
-  (`script-src 'self'; object-src 'self'`) on both Chrome and Firefox — no
-  eval, no remote scripts, no remote code in any context.
-- Bundled code only. The Azure Speech SDK (ADR-0003, the heavy in-extension
-  dependency) will be bundled into the extension build in T2 — never loaded
-  from a CDN or remote URL (the default CSP would reject that anyway).
+- The MV3 default CSP applies, plus `'wasm-unsafe-eval'`:
+  `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'` (Firefox keeps the
+  default's `upgrade-insecure-requests`, appended in `scripts/build.mjs`).
+  `'wasm-unsafe-eval'` is required by the kitten-local engine (ticket 06):
+  ONNX Runtime Web and the phonemizer's espeak-ng compile WebAssembly on
+  device. It does NOT re-enable `eval()`/remote script — code is still
+  bundled-only; the model *weights* are data, fetched once from the pinned
+  asset URLs and cached in IndexedDB (never executed).
+- Bundled code only. No remote scripts, no CDN loads — ORT's wasm binary is
+  copied from node_modules into the build (`audio/kitten/ort/`). The default
+  CSP would reject remote wasm anyway.
+- First-use model download: `raw.githubusercontent.com/clowerweb/…` (pinned)
+  with the `huggingface.co/KittenML/kitten-tts-nano-0.1/resolve/main` URLs as
+  fallback. Both send permissive CORS headers, so **no host permission is
+  needed or requested** for them (every entry in `optional_host_permissions`
+  remains a user-chosen provider API or local voice server).
 
 ## Audio-owner seam — T2 (documented here, deliberately NOT built in T1)
 

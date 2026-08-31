@@ -121,7 +121,7 @@ export class AzureEngine implements TextEngine {
   private readonly audioHost: AudioHost;
   private readonly sdk: AzureSdkLike;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
-  private wordTimers: number[] = [];
+  private wordTimers: ReturnType<typeof setTimeout>[] = [];
   /** The in-flight synthesizer; cancel() closes it mid-synthesis. */
   private synthesizer: AzureSynthesizerLike | null = null;
 

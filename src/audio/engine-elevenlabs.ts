@@ -102,7 +102,7 @@ export class ElevenLabsEngine implements TextEngine {
   private readonly fetchImpl: typeof fetch;
   private readonly audioHost: AudioHost;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
-  private wordTimers: number[] = [];
+  private wordTimers: ReturnType<typeof setTimeout>[] = [];
   /** Decoded audio for chunk pipelining (ADR-0003); cancel() discards it. */
   private readonly cache = new Map<string, Uint8Array>();
   private cacheEpoch = 0;

@@ -22,6 +22,9 @@ const ENTRIES = [
   "src/popup/popup.ts",
   "src/probes/offscreen.ts",
   "src/offscreen/audio.ts",
+  // kitten-local (ticket 06): dedicated classic worker hosting ORT-web +
+  // phonemizer so inference never blocks the audio-owner context.
+  "src/audio/kitten/worker.ts",
 ];
 const BROWSERS = ["chrome", "firefox"];
 
@@ -45,10 +48,25 @@ for (const browser of BROWSERS) {
   cpSync("src/offscreen/audio.html", `dist/${browser}/offscreen/audio.html`);
   cpSync("src/icons", `dist/${browser}/icons`, { recursive: true });
 
+  // kitten-local (ticket 06): ORT-web's wasm glue + binary must ship with the
+  // extension (offline-after-first-load) — the worker points wasmPaths at
+  // audio/kitten/ort/. WebGPU/jsep artifacts are skipped deliberately.
+  cpSync(
+    "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm",
+    `dist/${browser}/audio/kitten/ort/ort-wasm-simd-threaded.wasm`,
+  );
+  cpSync(
+    "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs",
+    `dist/${browser}/audio/kitten/ort/ort-wasm-simd-threaded.mjs`,
+  );
+
   const manifest = JSON.parse(readFileSync("src/manifest.json", "utf8"));
   if (browser === "firefox") {
     // Firefox MV3 background is an event page, not a service worker (ADR-0002).
     manifest.background = { scripts: ["background/index.js"] };
+    // Firefox's default extension-pages CSP carries `upgrade-insecure-requests`
+    // (Chrome's does not); keep it when overriding for wasm (ticket 06).
+    manifest.content_security_policy.extension_pages += "; upgrade-insecure-requests";
     manifest.browser_specific_settings = {
       gecko: {
         id: "leia@rclb.dev",

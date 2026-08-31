@@ -50,6 +50,14 @@ export const PROVIDERS: ProviderDef[] = [
   { id: "minimax", label: "MiniMax", keyStorage: "leia:settings:minimaxKey" },
   { id: "elevenlabs", label: "ElevenLabs", keyStorage: "leia:settings:elevenlabsKey" },
   { id: "openai", label: "OpenAI", keyStorage: "leia:settings:openaiKey" },
+  { id: "xai", label: "xAI", keyStorage: "leia:settings:xaiKey" },
+  {
+    id: "mistral",
+    label: "Mistral",
+    keyStorage: "leia:settings:mistralKey",
+    hint: "Mistral voices are managed via Mistral's Voices API (saved profiles) — this engine uses its default voice.",
+  },
+  { id: "gemini", label: "Gemini", keyStorage: "leia:settings:geminiKey" },
   {
     id: "azure",
     label: "Azure",
@@ -73,7 +81,22 @@ const FAMILY_LABELS: Record<string, string> = {
   mistral: "Mistral",
   gemini: "Gemini",
   azure: "Azure",
+  "kitten-local": "Kitten (local)",
 };
+
+/**
+ * Per-family disclosure notes rendered under the voice picker (ADR-0003
+ * capability disclosure). The kitten note exists so the one-time ~25 MB
+ * model download is never discovered by silence (ticket 06).
+ */
+export const FAMILY_HINTS: Record<string, string> = {
+  "kitten-local":
+    "Runs on-device in this browser. The ~25 MB voice model downloads once on first use, then works offline.",
+};
+
+export function familyHint(id: string): string | null {
+  return FAMILY_HINTS[id] ?? null;
+}
 
 export function familyLabel(id: string): string {
   return FAMILY_LABELS[id] ?? id;
@@ -98,6 +121,12 @@ export function renderCapabilities(container: HTMLElement, caps: EngineCapabilit
     chip.textContent = label;
     container.appendChild(chip);
   }
+}
+
+/** Show/hide the family disclosure note under the voice picker. */
+export function renderFamilyHint(container: HTMLElement, hint: string | null): void {
+  container.hidden = hint === null;
+  container.textContent = hint ?? "";
 }
 
 /** Mask a stored key for display, keeping only the last 4 chars. */
@@ -170,6 +199,12 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
   fields.append(input, reveal, save);
 
   row.append(head, fields);
+  if (def.hint) {
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = def.hint;
+    row.append(hint);
+  }
   if (def.regionStorage) {
     if (def.regionOptions) {
       // Curated region list: dropdown, most-common default preselected.
@@ -218,6 +253,7 @@ if (document.getElementById("voice")) {
   const previewNote = document.getElementById("preview-note") as HTMLDivElement;
   const speedSelect = document.getElementById("speed") as HTMLSelectElement;
   const capsEl = document.getElementById("capabilities") as HTMLDivElement;
+  const familyEl = document.getElementById("family-hint") as HTMLDivElement;
   const swatchesEl = document.getElementById("theme-swatches") as HTMLDivElement;
   const providersEl = document.getElementById("providers") as HTMLDivElement;
 
@@ -253,6 +289,7 @@ if (document.getElementById("voice")) {
     const chosen = [...voicesByFamily.values()].flat().find((v) => v.name === voiceSelect.value);
     const family = chosen?.family ?? currentStatus?.settings.engine ?? "web-speech";
     renderCapabilities(capsEl, familyCaps.get(family) ?? null);
+    renderFamilyHint(familyEl, familyHint(family));
   }
 
   /** Status line + T17 error + transport buttons, from currentStatus. */
@@ -572,11 +609,8 @@ if (document.getElementById("voice")) {
     speedSelect.appendChild(opt);
   }
 
-  // Live session signals mirrored from background (runtime.sendMessage):
-  // the first highlight is the truthful "audio started" that ends the Play
-  // pending state; state messages keep the transport fresh while open.
-  browser.runtime.onMessage.addListener((msg: unknown) => {
-    if (!isRouterMessage(msg)) return;
+  /** Live session signals mirrored from background (runtime.sendMessage). */
+  function applyBroadcast(msg: RouterMessage): void {
     if (msg.type === "leia:highlight:set") {
       if (loading && shouldClearLoading({ type: "highlight" })) clearLoading();
       return;
@@ -591,6 +625,13 @@ if (document.getElementById("voice")) {
       if (loading && shouldClearLoading({ type: "state", state: s.state })) clearLoading();
       renderReader();
     }
+  }
+
+  // The first highlight is the truthful "audio started" that ends the Play
+  // pending state; state messages keep the transport fresh while open.
+  browser.runtime.onMessage.addListener((msg: unknown) => {
+    if (!isRouterMessage(msg)) return;
+    applyBroadcast(msg);
   });
 
   void refresh();
