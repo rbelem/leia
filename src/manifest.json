@@ -75,6 +75,7 @@
     "https://api.minimax.io/*",
     "https://api.x.ai/*",
     "https://api.mistral.ai/*",
+    "https://generativelanguage.googleapis.com/*",
     "https://*.aliyuncs.com/*"
   ]
 }
