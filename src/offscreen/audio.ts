@@ -15,6 +15,7 @@ import { ElevenLabsEngine } from "../audio/engine-elevenlabs";
 import { AzureEngine } from "../audio/engine-azure";
 import { OpenAIEngine } from "../audio/engine-openai";
 import { XaiEngine } from "../audio/engine-xai";
+import { MistralEngine } from "../audio/engine-mistral";
 import { registerLocalEngines } from "../audio/engine-local";
 import { EngineHub, type EngineFamilyInfo } from "../audio/hub";
 import type { EngineCapabilities } from "../reader/contract";
@@ -42,6 +43,7 @@ engine.register("azure", new AzureEngine({
 }));
 engine.register("openai", new OpenAIEngine({ getKey: readProviderKey("leia:settings:openaiKey") }));
 engine.register("xai", new XaiEngine({ getKey: readProviderKey("leia:settings:xaiKey") }));
+engine.register("mistral", new MistralEngine({ getKey: readProviderKey("leia:settings:mistralKey") }));
 void registerLocalEngines(engine); // lazy boot probe (ADR-0006) — never blocks web-speech
 
 async function speakAndStream(msg: {

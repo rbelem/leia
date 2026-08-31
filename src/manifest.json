@@ -74,6 +74,7 @@
     "https://*.speech.microsoft.com/*",
     "https://api.minimax.io/*",
     "https://api.x.ai/*",
+    "https://api.mistral.ai/*",
     "https://*.aliyuncs.com/*"
   ]
 }

@@ -33,6 +33,7 @@ import { ElevenLabsEngine } from "./engine-elevenlabs";
 import { AzureEngine } from "./engine-azure";
 import { OpenAIEngine } from "./engine-openai";
 import { XaiEngine } from "./engine-xai";
+import { MistralEngine } from "./engine-mistral";
 import { registerLocalEngines } from "./engine-local";
 import { EngineHub, type EngineFamilyInfo } from "./hub";
 
@@ -240,6 +241,7 @@ export function resolveAudioEngine(): TextEngine {
   }));
   hub.register("openai", new OpenAIEngine({ getKey: () => readProviderKey("leia:settings:openaiKey") }));
   hub.register("xai", new XaiEngine({ getKey: () => readProviderKey("leia:settings:xaiKey") }));
+  hub.register("mistral", new MistralEngine({ getKey: () => readProviderKey("leia:settings:mistralKey") }));
   void registerLocalEngines(hub); // lazy boot probe (ADR-0006) — never blocks web-speech
   return hub;
 }

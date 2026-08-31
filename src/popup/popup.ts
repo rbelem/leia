@@ -70,6 +70,7 @@ const FAMILY_LABELS: Record<string, string> = {
   elevenlabs: "ElevenLabs",
   openai: "OpenAI",
   xai: "xAI",
+  mistral: "Mistral",
   azure: "Azure",
 };
 

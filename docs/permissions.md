@@ -10,7 +10,7 @@ Decisions locked in T1 (council amendments). Source of truth:
 | `activeTab` | required | install | popup ↔ active-tab messaging; no warning, scoped to user gesture |
 | `storage` | required | install | `chrome.storage.local` for API keys (T2). No warning |
 | `host_permissions` | `<all_urls>` | install | content script + floating bar must be present on every page. The only install-time warning |
-| `optional_host_permissions` | `http://localhost/*`, `http://127.0.0.1/*`, `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003) and local server profiles (ADR-0004). **Nothing network-related is asked at install** |
+| `optional_host_permissions` | `http://localhost/*`, `http://127.0.0.1/*`, `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003) and local server profiles (ADR-0004). **Nothing network-related is asked at install** |
 
 Rationale: reading the page is the product, so `<all_urls>` is unavoidable at
 install; every network destination the extension will ever touch is optional
