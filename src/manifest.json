@@ -24,27 +24,56 @@
     "service_worker": "background/index.js"
   },
   "offscreen": {
-    "scripts": ["offscreen/audio.js"],
+    "scripts": [
+      "offscreen/audio.js"
+    ],
     "reason": "AUDIO_PLAYBACK",
     "creation": "ALL"
   },
   "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["content/index.js"], "run_at": "document_idle" },
-    { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/index.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "floating-bar/index.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
-  "permissions": ["activeTab", "storage", "offscreen", "alarms"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "offscreen",
+    "alarms"
+  ],
   "commands": {
     "toggle-read": {
-      "suggested_key": { "default": "Alt+Shift+L" },
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
       "description": "Toggle reading"
     }
   },
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
   "optional_host_permissions": [
     "https://api.openai.com/*",
     "https://api.elevenlabs.io/*",
     "https://*.speech.microsoft.com/*",
     "https://api.minimax.io/*",
+    "https://api.x.ai/*",
     "https://*.aliyuncs.com/*"
   ]
 }

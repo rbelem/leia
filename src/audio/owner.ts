@@ -32,6 +32,7 @@ import { MiniMaxEngine } from "./engine-minimax";
 import { ElevenLabsEngine } from "./engine-elevenlabs";
 import { AzureEngine } from "./engine-azure";
 import { OpenAIEngine } from "./engine-openai";
+import { XaiEngine } from "./engine-xai";
 import { registerLocalEngines } from "./engine-local";
 import { EngineHub, type EngineFamilyInfo } from "./hub";
 
@@ -238,6 +239,7 @@ export function resolveAudioEngine(): TextEngine {
     getRegion: () => readProviderKey("leia:settings:azureRegion"),
   }));
   hub.register("openai", new OpenAIEngine({ getKey: () => readProviderKey("leia:settings:openaiKey") }));
+  hub.register("xai", new XaiEngine({ getKey: () => readProviderKey("leia:settings:xaiKey") }));
   void registerLocalEngines(hub); // lazy boot probe (ADR-0006) — never blocks web-speech
   return hub;
 }

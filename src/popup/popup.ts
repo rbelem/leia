@@ -39,6 +39,8 @@ export interface ProviderDef {
   label: string;
   keyStorage: string;
   regionStorage?: string;
+  /** Optional muted note under the row (e.g. mistral's Voices-API decision). */
+  hint?: string;
   /** When set, the region renders as a dropdown (default preselected) instead of free text. */
   regionOptions?: { list: readonly string[]; default: string };
 }
@@ -67,6 +69,7 @@ const FAMILY_LABELS: Record<string, string> = {
   minimax: "MiniMax",
   elevenlabs: "ElevenLabs",
   openai: "OpenAI",
+  xai: "xAI",
   azure: "Azure",
 };
 
