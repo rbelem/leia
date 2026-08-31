@@ -202,12 +202,39 @@ describe("validateBaseUrl", () => {
 });
 
 describe("built-in profiles + storage", () => {
-  it("BUILT_IN_PROFILES are the ADR-0006 kokoro/piper entries with install hints", () => {
+  it("BUILT_IN_PROFILES are the ADR-0006 kokoro/piper/kittentts/neutts/edge entries with install hints", () => {
     expect(BUILT_IN_PROFILES).toEqual([
       { id: "kokoro", name: "Kokoro", baseUrl: "http://127.0.0.1:8880", install: expect.any(String) },
       { id: "piper", name: "Piper", baseUrl: "http://127.0.0.1:8881", install: expect.any(String) },
+      { id: "kittentts", name: "Kittentts", baseUrl: "http://127.0.0.1:8882", install: expect.any(String) },
+      { id: "neutts", name: "Neutts", baseUrl: "http://127.0.0.1:8883", install: expect.any(String) },
+      { id: "edge", name: "Edge", baseUrl: "http://127.0.0.1:8884", install: expect.any(String) },
     ]);
     for (const p of BUILT_IN_PROFILES) expect(p.install).toContain("docker");
+  });
+
+  it("shim built-ins carry the exact docker run lines from shims/README.md", () => {
+    const byId = new Map(BUILT_IN_PROFILES.map((p) => [p.id, p]));
+    expect(byId.get("piper")?.install).toBe(
+      "docker run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper",
+    );
+    expect(byId.get("kittentts")?.install).toBe(
+      "docker run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts",
+    );
+    expect(byId.get("neutts")?.install).toBe(
+      "docker run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts",
+    );
+    expect(byId.get("edge")?.install).toBe("docker run --rm -p 127.0.0.1:8884:8884 leia-shim-edge");
+    // shim hints: host-side port matches the profile's baseUrl port
+    // (kokoro is the stock published image — no host bind prefix — so it's excluded)
+    for (const p of BUILT_IN_PROFILES.filter((x) => x.id !== "kokoro")) {
+      const port = new URL(p.baseUrl).port;
+      expect(p.install, p.id).toMatch(new RegExp(`-p [^ ]*:${port}:${port} `));
+    }
+  });
+
+  it("shim built-in baseUrls pass loopback validation", () => {
+    for (const p of BUILT_IN_PROFILES) expect(validateBaseUrl(p.baseUrl)).toBe(p.baseUrl);
   });
 
   it("custom profiles round-trip through storage (install is never persisted)", async () => {

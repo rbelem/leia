@@ -32,7 +32,13 @@ export interface ProbeResult {
   caps: LocalCapabilities;
 }
 
-/** Stock Kokoro-FastAPI docker port; the published image works unedited. */
+/**
+ * Built-ins (ADR-0006, tickets 05/07): Kokoro-FastAPI works unedited on its
+ * stock port; the piper/kittentts/neutts entries run the shims/ docker images
+ * and their install hints mirror shims/README.md verbatim. edge proxies the
+ * free Microsoft Edge Read-Aloud service — audio leaves the machine, so its
+ * privacy class is provider despite being a local profile.
+ */
 export const BUILT_IN_PROFILES: LocalProfile[] = [
   {
     id: "kokoro",
@@ -44,7 +50,25 @@ export const BUILT_IN_PROFILES: LocalProfile[] = [
     id: "piper",
     name: "Piper",
     baseUrl: "http://127.0.0.1:8881",
-    install: "docker run --rm -p 8881:8881 your-piper-leia-shim",
+    install: "docker run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper",
+  },
+  {
+    id: "kittentts",
+    name: "Kittentts",
+    baseUrl: "http://127.0.0.1:8882",
+    install: "docker run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts",
+  },
+  {
+    id: "neutts",
+    name: "Neutts",
+    baseUrl: "http://127.0.0.1:8883",
+    install: "docker run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts",
+  },
+  {
+    id: "edge",
+    name: "Edge",
+    baseUrl: "http://127.0.0.1:8884",
+    install: "docker run --rm -p 127.0.0.1:8884:8884 leia-shim-edge",
   },
 ];
 
