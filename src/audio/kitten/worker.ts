@@ -95,7 +95,9 @@ async function synthesize(req: { text: string; voice: string; speed: number }): 
     } else if (/style|voice|spk/i.test(name)) {
       feed[name] = new ort.Tensor("float32", embedding, [1, embedding.length]);
     } else if (/speed/i.test(name)) {
-      feed[name] = new ort.Tensor("float32", Float32Array.of(speed), []);
+      // Graph declares speed rank-1 (live OrtRun error: "Invalid rank for
+      // input: speed Got: 0 Expected: 1") — feed a length-1 vector.
+      feed[name] = new ort.Tensor("float32", Float32Array.of(speed), [1]);
     }
   }
   const outputs = await session.run(feed);
