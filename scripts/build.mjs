@@ -20,6 +20,7 @@ const ENTRIES = [
   "src/content/index.ts",
   "src/floating-bar/index.ts",
   "src/popup/popup.ts",
+  "src/options/options.ts",
   "src/probes/offscreen.ts",
   "src/offscreen/audio.ts",
   // kitten-local (ticket 06): dedicated classic worker hosting ORT-web +
@@ -44,6 +45,8 @@ for (const browser of BROWSERS) {
   });
 
   cpSync("src/popup/popup.html", `dist/${browser}/popup/popup.html`);
+  cpSync("src/options/options.html", `dist/${browser}/options/options.html`);
+  cpSync("src/ui", `dist/${browser}/ui`, { recursive: true });
   cpSync("src/probes/offscreen.html", `dist/${browser}/probes/offscreen.html`);
   cpSync("src/offscreen/audio.html", `dist/${browser}/offscreen/audio.html`);
   cpSync("src/icons", `dist/${browser}/icons`, { recursive: true });

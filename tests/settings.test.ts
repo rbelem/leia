@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 /**
- * T14 settings tests: theme persistence round-trip, content-script theme
- * init from storage, provider-key masking/row states, and capability
- * disclosure rendering.
+ * Settings tests: theme persistence round-trip, content-script theme init
+ * from storage, provider-key masking/row states, local-server row/preset/
+ * summary builders (options page + popup footer), and capability disclosure
+ * rendering.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,15 +34,24 @@ vi.mock("webextension-polyfill", () => ({
 }));
 
 import {
-  PROVIDERS,
   THEME_STORAGE_KEY,
-  buildProviderRow,
   capabilityChips,
+  familyLabel,
   loadStoredTheme,
-  maskKey,
   renderCapabilities,
   saveStoredTheme,
 } from "../src/popup/popup";
+import { PROVIDERS, buildProviderRow, maskKey } from "../src/settings/providers";
+import {
+  applyPreset,
+  baseUrlProblem,
+  buildServerRow,
+  localFamilyLabel,
+  serverStatusText,
+  setServerProbe,
+  summarizeVoiceSources,
+} from "../src/settings/local";
+import { BUILT_IN_PROFILES, DEGRADED_CAPS } from "../src/audio/local-profiles";
 import type { EngineCapabilities } from "../src/reader/contract";
 import { AZURE_DEFAULT_REGION, AZURE_REGIONS } from "../src/audio/engine-azure";
 import { ACTIVE_THEME } from "../src/content/themes";
@@ -112,7 +122,7 @@ describe("provider keys", () => {
     expect(maskKey("abc")).toBe("••••");
   });
 
-  it("catalog covers the four BYO-key providers with their storage keys", () => {
+  it("catalog covers the BYO-key providers with their storage keys", () => {
     const byId = Object.fromEntries(PROVIDERS.map((p) => [p.id, p]));
     expect(byId.minimax.keyStorage).toBe("leia:settings:minimaxKey");
     expect(byId.elevenlabs.keyStorage).toBe("leia:settings:elevenlabsKey");
@@ -165,6 +175,99 @@ describe("provider keys", () => {
       if (!def.regionStorage) continue;
       expect(buildProviderRow(def, "k").querySelector(".region")!.tagName).not.toBe("SELECT");
     }
+  });
+});
+
+describe("local server rows", () => {
+  const kokoro = BUILT_IN_PROFILES.find((p) => p.id === "kokoro")!;
+
+  it("status text: checking before the probe answers, then online/offline", () => {
+    expect(serverStatusText(null)).toBe("checking…");
+    expect(serverStatusText({ online: true, caps: DEGRADED_CAPS })).toBe("online");
+    expect(serverStatusText({ online: false, caps: DEGRADED_CAPS })).toBe("offline");
+  });
+
+  it("built-in row shows address and the install hint verbatim, not removable", () => {
+    const row = buildServerRow(kokoro, null);
+    expect(row.querySelector(".provider-name")!.textContent).toBe("Kokoro");
+    expect(row.querySelector(".provider-state")!.textContent).toBe("checking…");
+    expect(row.querySelector(".provider-state")!.classList.contains("ok")).toBe(false);
+    expect(row.querySelector(".server-url")!.textContent).toBe("http://127.0.0.1:8880");
+    expect(row.querySelector(".install-hint")!.textContent).toBe(kokoro.install);
+    expect(row.querySelector(".remove")).toBeNull();
+  });
+
+  it("online probe marks the state ok; setServerProbe settles a checking row", () => {
+    const row = buildServerRow(kokoro, null);
+    setServerProbe(row, { online: true, caps: DEGRADED_CAPS });
+    expect(row.querySelector(".provider-state")!.textContent).toBe("online");
+    expect(row.querySelector(".provider-state")!.classList.contains("ok")).toBe(true);
+    setServerProbe(row, { online: false, caps: DEGRADED_CAPS });
+    expect(row.querySelector(".provider-state")!.textContent).toBe("offline");
+    expect(row.querySelector(".provider-state")!.classList.contains("ok")).toBe(false);
+  });
+
+  it("custom rows are removable and carry no install hint", () => {
+    const custom = { id: "custom-abc", name: "My server", baseUrl: "http://127.0.0.1:9000" };
+    const row = buildServerRow(custom, null, true);
+    expect(row.querySelector(".install-hint")).toBeNull();
+    const remove = row.querySelector<HTMLButtonElement>(".remove")!;
+    expect(remove.getAttribute("aria-label")).toBe("Remove My server");
+  });
+});
+
+describe("add-a-server form", () => {
+  function fields() {
+    return {
+      name: document.createElement("input"),
+      url: document.createElement("input"),
+      hint: document.createElement("div"),
+    };
+  }
+
+  it("a preset fills name, address, and the install hint verbatim", () => {
+    const piper = BUILT_IN_PROFILES.find((p) => p.id === "piper")!;
+    const f = fields();
+    applyPreset(piper, f);
+    expect(f.name.value).toBe("Piper");
+    expect(f.url.value).toBe("http://127.0.0.1:8881");
+    expect(f.hint.hidden).toBe(false);
+    expect(f.hint.textContent).toBe(piper.install);
+  });
+
+  it("clearing the preset empties the form and hides the hint", () => {
+    const f = fields();
+    applyPreset(BUILT_IN_PROFILES[0], f);
+    applyPreset(null, f);
+    expect(f.name.value).toBe("");
+    expect(f.url.value).toBe("");
+    expect(f.hint.hidden).toBe(true);
+  });
+
+  it("baseUrl validation: empty, non-loopback, and good loopback", () => {
+    expect(baseUrlProblem("")).toBe("Enter the server's address.");
+    expect(baseUrlProblem("http://192.168.1.10:8880")).toContain("127.0.0.1");
+    expect(baseUrlProblem("https://127.0.0.1:8880")).toContain("http://");
+    expect(baseUrlProblem("http://127.0.0.1:8880")).toBeNull();
+    expect(baseUrlProblem("http://localhost:8882")).toBeNull();
+  });
+});
+
+describe("voice-source summary and labels", () => {
+  it("summarizes keys and online servers for the popup footer", () => {
+    expect(summarizeVoiceSources(0, [])).toBe("no API keys saved · no local servers online");
+    expect(summarizeVoiceSources(1, ["Kokoro"])).toBe("1 API key saved · Kokoro online");
+    expect(summarizeVoiceSources(3, ["Kokoro", "Piper"])).toBe("3 API keys saved · Kokoro, Piper online");
+  });
+
+  it("labels local families from the built-in catalog, customs, or the id", () => {
+    expect(localFamilyLabel("local-kokoro")).toBe("Kokoro (local)");
+    expect(localFamilyLabel("local-custom-abc", new Map([["custom-abc", "My server"]]))).toBe("My server (local)");
+    expect(localFamilyLabel("local-mystery")).toBe("Mystery (local)");
+    expect(localFamilyLabel("openai")).toBeNull();
+    // familyLabel consults the same mapping before falling back to the id.
+    expect(familyLabel("local-piper")).toBe("Piper (local)");
+    expect(familyLabel("web-speech")).toBe("Web Speech");
   });
 });
 

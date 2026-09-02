@@ -1,0 +1,61 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Leia settings</title>
+  <link rel="stylesheet" href="../ui/base.css" />
+</head>
+<body class="options">
+  <header class="masthead">
+    <h1>Leia</h1>
+    <p class="tagline">Voice sources — local servers and provider API keys.</p>
+  </header>
+
+  <section aria-label="Local servers">
+    <h2>Local servers</h2>
+    <p class="hint">
+      Voice servers running on this machine — no account, no API key. A server joins the voice picker while it
+      answers on its address; start one with the command under its name. A server you add here joins the picker
+      after the extension reloads.
+    </p>
+    <div id="builtin-servers"></div>
+    <div id="custom-servers"></div>
+
+    <h3 class="subhead">Add a server</h3>
+    <div class="custom-form">
+      <div class="form-row">
+        <label>
+          <span>Preset</span>
+          <select id="custom-preset" aria-label="Start from a built-in server preset">
+            <option value="">Custom server</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Name</span>
+          <input id="custom-name" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          <span>Address</span>
+          <input id="custom-url" type="text" placeholder="http://127.0.0.1:8880" autocomplete="off" spellcheck="false" />
+        </label>
+      </div>
+      <div class="install-hint" id="custom-hint" hidden></div>
+      <p class="hint error" id="custom-error" role="alert" hidden></p>
+      <div class="form-actions">
+        <button id="custom-add" type="button" class="ghost">Add server</button>
+      </div>
+    </div>
+  </section>
+
+  <section aria-label="Voice providers">
+    <h2>Voice providers</h2>
+    <p class="hint">Add your own API key to enable a voice provider. Keys stay in this browser.</p>
+    <div id="providers"></div>
+  </section>
+
+  <script src="options.js"></script>
+</body>
+</html>
