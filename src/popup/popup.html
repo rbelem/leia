@@ -41,20 +41,20 @@
       <select id="voice" aria-label="Voice"><option value="">(default voice)</option></select>
       <button id="preview-voice" class="ghost" type="button" disabled>Preview</button>
     </div>
-    <div id="preview-note" class="hint" hidden></div>
+    <div id="preview-note" class="hint" role="status" hidden></div>
     <div id="family-hint" class="hint" hidden></div>
     <div id="capabilities" class="chips" aria-label="Engine capabilities"></div>
-  </section>
-
-  <section aria-label="Highlight theme">
-    <h2>Highlight theme</h2>
-    <div id="theme-swatches" class="swatches" role="radiogroup"></div>
   </section>
 
   <section aria-label="Voice sources">
     <h2>Voice sources</h2>
     <p id="sources-summary" class="hint">checking…</p>
     <button id="open-settings" type="button" class="ghost block">Manage voice sources…</button>
+  </section>
+
+  <section aria-label="Highlight theme">
+    <h2>Highlight theme</h2>
+    <div id="theme-swatches" class="swatches" role="radiogroup"></div>
   </section>
 
   <script src="popup.js"></script>

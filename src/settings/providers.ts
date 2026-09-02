@@ -46,6 +46,20 @@ export function maskKey(key: string): string {
 }
 
 /**
+ * Picker group label for a provider that contributed no voices. Absence of
+ * voices is not absence of a key (Mistral's getVoices returns [] on API
+ * failure) — a saved-but-broken key must not read as "no key".
+ */
+export function keylessProviderLabel(def: ProviderDef, hasKey: boolean): string {
+  return hasKey ? `${def.label} — key saved, no voices loaded` : `${def.label} — no key`;
+}
+
+/** Action line inside a keyless provider's disabled picker group. */
+export function keylessProviderHint(hasKey: boolean): string {
+  return hasKey ? "check the key — see Voice sources below" : "add an API key — see Voice sources below";
+}
+
+/**
  * One provider row: name + key state, masked key input with a reveal toggle
  * and a save button, plus a region field for providers that need one
  * (azure). Pure DOM — the options page wires the save behavior.
@@ -62,6 +76,7 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
   name.textContent = def.label;
   const state = document.createElement("span");
   state.className = savedKey ? "provider-state ok" : "provider-state";
+  state.setAttribute("aria-live", "polite");
   state.textContent = savedKey ? `saved ${maskKey(savedKey)}` : "no key";
   head.append(name, state);
 
@@ -80,10 +95,12 @@ export function buildProviderRow(def: ProviderDef, savedKey: string | null, save
   reveal.className = "ghost reveal";
   reveal.textContent = "show";
   reveal.setAttribute("aria-label", `Show or hide the ${def.label} API key`);
+  reveal.setAttribute("aria-pressed", "false");
   reveal.addEventListener("click", () => {
     const show = input.type === "password";
     input.type = show ? "text" : "password";
     reveal.textContent = show ? "hide" : "show";
+    reveal.setAttribute("aria-pressed", String(show));
   });
   const save = document.createElement("button");
   save.type = "button";

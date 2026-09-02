@@ -17,8 +17,8 @@ import type { SessionStatus } from "../reader/session";
 import type { EngineCapabilities, VoiceInfo } from "../reader/contract";
 import { BUILT_IN_PROFILES, readLocalProfiles } from "../audio/local-profiles";
 import { ACTIVE_THEME, THEME_IDS, THEMES, type ThemeId } from "../content/themes";
-import { PROVIDERS } from "../settings/providers";
-import { localFamilyLabel, summarizeVoiceSources } from "../settings/local";
+import { PROVIDERS, keylessProviderHint, keylessProviderLabel } from "../settings/providers";
+import { localFamilyLabel, localProfileName, summarizeVoiceSources } from "../settings/local";
 import {
   CONTROLS_IN_PAGE_KEY,
   LOADING_TIMEOUT_MS,
@@ -255,10 +255,6 @@ if (document.getElementById("voice")) {
     );
 
     const customNames = new Map(customProfiles.map((p) => [p.id, p.name]));
-    const localName = (family: string): string => {
-      const id = family.slice("local-".length);
-      return customNames.get(id) ?? BUILT_IN_PROFILES.find((p) => p.id === id)?.name ?? id;
-    };
 
     voiceSelect.replaceChildren(new Option("(default voice)", ""));
     for (const [family, list] of voicesByFamily) {
@@ -275,23 +271,40 @@ if (document.getElementById("voice")) {
     }
     // Keyless provider families contribute no voices (hub skips them), but
     // stay visible in the picker with an affordance pointing at settings.
+    // No voices ≠ no key: a saved-but-broken key (e.g. Mistral's getVoices
+    // failing) says so instead of sending the user to re-paste it.
+    const hasStoredKey = (p: (typeof PROVIDERS)[number]): boolean =>
+      typeof storedKeys[p.keyStorage] === "string" && Boolean(storedKeys[p.keyStorage]);
     for (const p of PROVIDERS) {
       if (voicesByFamily.has(p.id)) continue;
+      const hasKey = hasStoredKey(p);
       const group = document.createElement("optgroup");
-      group.label = `${p.label} — no key`;
+      group.label = keylessProviderLabel(p, hasKey);
       group.disabled = true;
       const opt = document.createElement("option");
       opt.disabled = true;
-      opt.textContent = "add an API key — see Voice sources below";
+      opt.textContent = keylessProviderHint(hasKey);
       group.appendChild(opt);
       voiceSelect.appendChild(group);
     }
-    // Offline local servers (built-in or custom) get the same affordance:
-    // visible, honest about why they are silent, pointing at the same door.
-    for (const p of [...BUILT_IN_PROFILES, ...customProfiles]) {
-      if (voicesByFamily.has(`local-${p.id}`)) continue;
+    // Offline local servers (built-in or custom) get the same affordance.
+    // Two or more collapse into one summary group — a first-run picker
+    // would otherwise carry five disabled groups saying the same thing.
+    const offlineLocal = [...BUILT_IN_PROFILES, ...customProfiles].filter(
+      (p) => !voicesByFamily.has(`local-${p.id}`),
+    );
+    if (offlineLocal.length > 1) {
       const group = document.createElement("optgroup");
-      group.label = `${p.name} (local) — offline`;
+      group.label = `Local servers — ${offlineLocal.length} offline`;
+      group.disabled = true;
+      const opt = document.createElement("option");
+      opt.disabled = true;
+      opt.textContent = "start a server — see Voice sources below";
+      group.appendChild(opt);
+      voiceSelect.appendChild(group);
+    } else if (offlineLocal.length === 1) {
+      const group = document.createElement("optgroup");
+      group.label = `${offlineLocal[0].name} (local) — offline`;
       group.disabled = true;
       const opt = document.createElement("option");
       opt.disabled = true;
@@ -305,10 +318,10 @@ if (document.getElementById("voice")) {
 
     // Footer summary: keys from storage; online servers are the local
     // families the hub currently has voices for.
-    const savedKeys = PROVIDERS.filter(
-      (p) => typeof storedKeys[p.keyStorage] === "string" && storedKeys[p.keyStorage],
-    ).length;
-    const onlineLocal = [...voicesByFamily.keys()].filter((f) => f.startsWith("local-")).map(localName);
+    const savedKeys = PROVIDERS.filter(hasStoredKey).length;
+    const onlineLocal = [...voicesByFamily.keys()]
+      .filter((f) => f.startsWith("local-"))
+      .map((f) => localProfileName(f.slice("local-".length), customNames));
     sourcesSummaryEl.textContent = summarizeVoiceSources(savedKeys, onlineLocal);
     void refreshResume();
   }
@@ -470,7 +483,7 @@ if (document.getElementById("voice")) {
     })) as RouterReply | undefined;
     if (!reply?.ok) {
       // Keyless family or offline local server: point at the settings door.
-      previewNote.textContent = "couldn't preview — see Voice sources below (missing key or server not running)";
+      previewNote.textContent = "couldn't preview — voice source unavailable. See Voice sources below.";
       previewNote.hidden = false;
       setTimeout(() => {
         previewNote.hidden = true;

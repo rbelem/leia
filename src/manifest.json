@@ -46,7 +46,7 @@
       "description": "Toggle reading"
     }
   },
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://[::1]/*"],
   "optional_host_permissions": [
     "https://api.openai.com/*",
     "https://api.elevenlabs.io/*",

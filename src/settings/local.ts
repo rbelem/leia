@@ -34,6 +34,7 @@ export function buildServerRow(profile: LocalProfile, probe: ServerProbe, remova
   name.textContent = profile.name;
   const state = document.createElement("span");
   state.className = probe?.online ? "provider-state ok" : "provider-state";
+  state.setAttribute("aria-live", "polite");
   state.textContent = serverStatusText(probe);
   head.append(name, state);
 
@@ -45,6 +46,8 @@ export function buildServerRow(profile: LocalProfile, probe: ServerProbe, remova
   if (profile.install) {
     const hint = document.createElement("div");
     hint.className = "install-hint";
+    // Focusable so the user-select:all command is copyable from the keyboard.
+    hint.tabIndex = 0;
     hint.textContent = profile.install;
     row.append(hint);
   }
@@ -89,12 +92,19 @@ export function newCustomId(): string {
   return `custom-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Problem with a baseUrl entry, or null when it is usable. */
-export function baseUrlProblem(raw: string): string | null {
-  if (!raw.trim()) return "Enter the server's address.";
-  if (validateBaseUrl(raw.trim()) === null) {
+/**
+ * Problem with a baseUrl entry, or null when it is usable. `existing` is the
+ * normalized baseUrls already listed (built-ins + customs) — a duplicate
+ * address would shadow the earlier profile.
+ */
+export function baseUrlProblem(raw: string, existing?: readonly string[]): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return "Enter the server's address.";
+  const normalized = validateBaseUrl(trimmed);
+  if (normalized === null) {
     return "Only http:// addresses on 127.0.0.1, ::1, or localhost can be used.";
   }
+  if (existing?.includes(normalized)) return "This address is already listed.";
   return null;
 }
 
@@ -106,14 +116,20 @@ export function summarizeVoiceSources(savedKeys: number, onlineLocal: string[]):
 }
 
 /**
+ * Display name for a profile id: customs resolve via a caller-passed id →
+ * name map (storage read), built-ins come from the catalog, unknown ids fall
+ * back to the capitalized id.
+ */
+export function localProfileName(id: string, customNames?: ReadonlyMap<string, string>): string {
+  const known = customNames?.get(id) ?? BUILT_IN_PROFILES.find((p) => p.id === id)?.name;
+  return known ?? id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/**
  * Picker label for a local engine family: "local-kokoro" → "Kokoro (local)".
- * Built-in names come from the catalog; customs resolve via a caller-passed
- * id → name map (storage read). Returns null for non-local families.
+ * Returns null for non-local families.
  */
 export function localFamilyLabel(family: string, customNames?: ReadonlyMap<string, string>): string | null {
   if (!family.startsWith("local-")) return null;
-  const id = family.slice("local-".length);
-  const known = customNames?.get(id) ?? BUILT_IN_PROFILES.find((p) => p.id === id)?.name;
-  const fallback = id.charAt(0).toUpperCase() + id.slice(1);
-  return `${known ?? fallback} (local)`;
+  return `${localProfileName(family.slice("local-".length), customNames)} (local)`;
 }

@@ -30,36 +30,40 @@
     --error: #f87171;
   }
 }
-* { box-sizing: border-box; }
+ * { box-sizing: border-box; }
+/* rem scale: the user's configured default font size flows through (popup
+   can't be zoomed; low-vision users are the primary audience). The options
+   page is a reading column, so it gets a larger base than the popup. */
+html { font-size: 100%; }
 body {
   margin: 0;
-  font: 12.5px/1.45 system-ui, sans-serif;
+  font: 0.78125rem/1.45 system-ui, sans-serif; /* 12.5px at a 16px root */
   background: var(--bg);
   color: var(--ink);
 }
-body.popup { width: 320px; padding: 14px 14px 18px; }
-body.options { max-width: 600px; margin: 0 auto; padding: 28px 20px 48px; }
+body.popup { width: 320px; padding: 12px 14px 14px; }
+body.options { max-width: 600px; margin: 0 auto; padding: 28px 20px 48px; font-size: 0.875rem; } /* 14px */
 
 ::selection { background: var(--accent-soft); }
 input, select { caret-color: var(--accent); }
 
 header.masthead { margin-bottom: 12px; }
 body.options header.masthead { margin-bottom: 18px; }
-header.masthead h1 { font-size: 17px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-header.masthead .tagline { margin: 1px 0 0; color: var(--muted); font-size: 11.5px; }
+header.masthead h1 { font-size: 1.0625rem; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+header.masthead .tagline { margin: 1px 0 0; color: var(--muted); font-size: 0.71875rem; }
 
 section { border-top: 1px solid var(--line); padding: 10px 0 12px; }
 body.options section { padding: 16px 0 20px; }
 section > h2 {
   margin: 0 0 8px;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
-.subhead { margin: 14px 0 8px; font-size: 11.5px; font-weight: 650; }
-.hint { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.subhead { margin: 14px 0 8px; font-size: 0.71875rem; font-weight: 650; }
+.hint { margin: 0 0 8px; color: var(--muted); font-size: 0.6875rem; }
 .hint.error { color: var(--error); }
 
 select, input {
@@ -99,7 +103,7 @@ button.primary {
 @media (prefers-color-scheme: dark) { button.primary { color: #1c1917; } }
 button.primary:hover:not(:disabled) { filter: brightness(1.06); }
 button.primary:not(:disabled):active { filter: brightness(0.94); transform: scale(0.98); }
-button.ghost { padding: 5px 8px; font-size: 11.5px; color: var(--muted); }
+button.ghost { padding: 5px 8px; font-size: 0.71875rem; color: var(--muted); }
 button.ghost:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
 button:disabled { opacity: 0.5; cursor: default; }
 button.block { width: 100%; }
@@ -135,7 +139,7 @@ button.loading { cursor: progress; }
 
 .reader-error {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--error);
 }
 .resume-row {
@@ -144,25 +148,25 @@ button.loading { cursor: progress; }
   justify-content: space-between;
   gap: 8px;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted);
 }
 .resume-row[hidden] { display: none; }
-.resume-row button { padding: 2px 6px; font-size: 11px; }
+.resume-row button { padding: 2px 6px; font-size: 0.6875rem; }
 
 #status {
   margin: 4px 0 8px;
   min-height: 1.2em;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .field { display: flex; align-items: center; gap: 8px; }
-.field > span { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.field > span { color: var(--muted); font-size: 0.71875rem; white-space: nowrap; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-height: 18px; }
 .chip {
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   line-height: 1;
   padding: 3px 7px;
   border: 1px solid var(--line);
@@ -187,7 +191,7 @@ button.loading { cursor: progress; }
   border-radius: 6px;
   border: 1px solid var(--line);
 }
-.swatch-label { font-size: 10px; color: var(--muted); }
+.swatch-label { font-size: 0.625rem; color: var(--muted); }
 .swatch[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .swatch[aria-checked="true"] .swatch-label { color: var(--ink); font-weight: 600; }
 
@@ -195,7 +199,7 @@ button.loading { cursor: progress; }
 .provider { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px; margin-bottom: 8px; }
 .provider-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; gap: 8px; }
 .provider-name { font-weight: 600; }
-.provider-state { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.provider-state { font-size: 0.65625rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .provider-state.ok { color: var(--ok); }
 .provider-fields { display: flex; gap: 6px; }
 .provider-fields .key-input { flex: 1; min-width: 0; }
@@ -205,14 +209,14 @@ button.loading { cursor: progress; }
    data/code, so they set in mono (DESIGN.md: monospace earns its place). */
 .server-url {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted);
   word-break: break-all;
 }
 .install-hint {
   margin-top: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.4;
   color: var(--muted);
   word-break: break-all;
@@ -225,6 +229,6 @@ button.loading { cursor: progress; }
 .custom-form .form-row { display: flex; gap: 6px; margin-bottom: 6px; }
 .custom-form .form-row:last-child { margin-bottom: 0; }
 .custom-form label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.custom-form label > span { color: var(--muted); font-size: 10.5px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+.custom-form label > span { color: var(--muted); font-size: 0.65625rem; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
 .custom-form .install-hint { margin-top: 0; }
 .custom-form .form-actions { display: flex; justify-content: flex-end; }

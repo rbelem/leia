@@ -41,12 +41,13 @@ import {
   renderCapabilities,
   saveStoredTheme,
 } from "../src/popup/popup";
-import { PROVIDERS, buildProviderRow, maskKey } from "../src/settings/providers";
+import { PROVIDERS, buildProviderRow, keylessProviderHint, keylessProviderLabel, maskKey } from "../src/settings/providers";
 import {
   applyPreset,
   baseUrlProblem,
   buildServerRow,
   localFamilyLabel,
+  localProfileName,
   serverStatusText,
   setServerProbe,
   summarizeVoiceSources,
@@ -147,8 +148,19 @@ describe("provider keys", () => {
     const input = row.querySelector<HTMLInputElement>(".key-input")!;
     expect(input.type).toBe("password");
     expect(input.value).toBe("sk-abcdef123456");
-    row.querySelector<HTMLButtonElement>(".reveal")!.click();
+    const reveal = row.querySelector<HTMLButtonElement>(".reveal")!;
+    expect(reveal.getAttribute("aria-pressed")).toBe("false");
+    reveal.click();
     expect(input.type).toBe("text");
+    expect(reveal.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keyless picker label branches on key presence — no voices ≠ no key", () => {
+    const mistral = PROVIDERS.find((p) => p.id === "mistral")!;
+    expect(keylessProviderLabel(mistral, false)).toBe("Mistral — no key");
+    expect(keylessProviderLabel(mistral, true)).toBe("Mistral — key saved, no voices loaded");
+    expect(keylessProviderHint(false)).toContain("add an API key");
+    expect(keylessProviderHint(true)).toContain("check the key");
   });
 
   it("renders a region field only for azure, prefilled when stored", () => {
@@ -192,8 +204,10 @@ describe("local server rows", () => {
     expect(row.querySelector(".provider-name")!.textContent).toBe("Kokoro");
     expect(row.querySelector(".provider-state")!.textContent).toBe("checking…");
     expect(row.querySelector(".provider-state")!.classList.contains("ok")).toBe(false);
+    expect(row.querySelector(".provider-state")!.getAttribute("aria-live")).toBe("polite");
     expect(row.querySelector(".server-url")!.textContent).toBe("http://127.0.0.1:8880");
     expect(row.querySelector(".install-hint")!.textContent).toBe(kokoro.install);
+    expect(row.querySelector<HTMLElement>(".install-hint")!.tabIndex).toBe(0);
     expect(row.querySelector(".remove")).toBeNull();
   });
 
@@ -251,6 +265,15 @@ describe("add-a-server form", () => {
     expect(baseUrlProblem("http://127.0.0.1:8880")).toBeNull();
     expect(baseUrlProblem("http://localhost:8882")).toBeNull();
   });
+
+  it("baseUrl validation rejects an address already listed, normalized", () => {
+    const existing = [...BUILT_IN_PROFILES.map((p) => p.baseUrl), "http://localhost:9999"];
+    expect(baseUrlProblem("http://127.0.0.1:8880", existing)).toBe("This address is already listed.");
+    // Normalization: path and trailing slash don't dodge the duplicate check.
+    expect(baseUrlProblem("http://127.0.0.1:8880/", existing)).toBe("This address is already listed.");
+    expect(baseUrlProblem("http://localhost:9999/some/path", existing)).toBe("This address is already listed.");
+    expect(baseUrlProblem("http://127.0.0.1:8885", existing)).toBeNull();
+  });
 });
 
 describe("voice-source summary and labels", () => {
@@ -268,6 +291,12 @@ describe("voice-source summary and labels", () => {
     // familyLabel consults the same mapping before falling back to the id.
     expect(familyLabel("local-piper")).toBe("Piper (local)");
     expect(familyLabel("web-speech")).toBe("Web Speech");
+  });
+
+  it("localProfileName: custom map, then built-in catalog, then capitalized id", () => {
+    expect(localProfileName("kokoro")).toBe("Kokoro");
+    expect(localProfileName("custom-abc", new Map([["custom-abc", "My server"]]))).toBe("My server");
+    expect(localProfileName("mystery")).toBe("Mystery");
   });
 });
 

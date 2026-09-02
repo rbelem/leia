@@ -15,6 +15,7 @@ import {
   BUILT_IN_PROFILES,
   probeProfile,
   readLocalProfiles,
+  validateBaseUrl,
   writeLocalProfiles,
   type LocalProfile,
 } from "../audio/local-profiles";
@@ -39,6 +40,7 @@ if (document.getElementById("providers")) {
   const hintEl = document.getElementById("custom-hint") as HTMLDivElement;
   const errorEl = document.getElementById("custom-error") as HTMLParagraphElement;
   const addBtn = document.getElementById("custom-add") as HTMLButtonElement;
+  const reloadBtn = document.getElementById("reload-ext") as HTMLButtonElement;
 
   /** Render a server row already checking…, then settle it when the probe answers. */
   function renderServer(container: HTMLElement, profile: LocalProfile, removable: boolean): HTMLElement {
@@ -68,26 +70,31 @@ if (document.getElementById("providers")) {
   function showError(message: string | null): void {
     errorEl.hidden = message === null;
     errorEl.textContent = message ?? "";
+    if (message === null) urlInput.removeAttribute("aria-invalid");
+    else urlInput.setAttribute("aria-invalid", "true");
   }
 
   async function addCustom(): Promise<void> {
-    const problem = baseUrlProblem(urlInput.value);
+    const customs = await readLocalProfiles();
+    const existing = [...BUILT_IN_PROFILES, ...customs].map((p) => p.baseUrl);
+    const problem = baseUrlProblem(urlInput.value, existing);
     if (problem) {
       showError(problem);
       urlInput.focus();
       return;
     }
     showError(null);
-    const customs = await readLocalProfiles();
     const profile: LocalProfile = {
       id: newCustomId(),
       name: nameInput.value.trim() || "Custom server",
-      baseUrl: urlInput.value.trim(),
+      // Store the normalized address (no path/trailing slash), not raw input.
+      baseUrl: validateBaseUrl(urlInput.value.trim())!,
     };
     await writeLocalProfiles([...customs, profile]);
     presetSelect.value = "";
     applyPreset(null, { name: nameInput, url: urlInput, hint: hintEl });
     await renderCustoms();
+    nameInput.focus();
   }
 
   async function initProviders(): Promise<void> {
@@ -134,6 +141,10 @@ if (document.getElementById("providers")) {
   urlInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") void addCustom();
   });
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") void addCustom();
+  });
+  reloadBtn.addEventListener("click", () => browser.runtime.reload());
 
   void renderCustoms();
   void initProviders();

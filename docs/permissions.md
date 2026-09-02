@@ -9,13 +9,17 @@ Decisions locked in T1 (council amendments). Source of truth:
 |---|---|---|---|
 | `activeTab` | required | install | popup ↔ active-tab messaging; no warning, scoped to user gesture |
 | `storage` | required | install | `chrome.storage.local` for API keys (T2). No warning |
-| `host_permissions` | `<all_urls>` | install | content script + floating bar must be present on every page. The only install-time warning |
-| `optional_host_permissions` | `http://localhost/*`, `http://127.0.0.1/*`, `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://generativelanguage.googleapis.com/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003) and local server profiles (ADR-0004). **Nothing network-related is asked at install** |
+| `host_permissions` | `http://127.0.0.1/*`, `http://localhost/*`, `http://[::1]/*` | install (mandatory) | the options page probes local voice servers directly (ADR-0006) — loopback-only, keyless, so no prompt gate would make sense; listed alongside `<all_urls>` in the install warning |
+| content-script `matches` | `<all_urls>` | install | content script + floating bar must be present on every page. Drives the install-time warning |
+| `optional_host_permissions` | `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://generativelanguage.googleapis.com/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003). **No remote host is asked for at install** |
 
 Rationale: reading the page is the product, so `<all_urls>` is unavoidable at
-install; every network destination the extension will ever touch is optional
-and requested on first use. Local profiles need host permission only to
-actually fetch audio, so the health probes (ADR-0004) stay prompt-free.
+install; every *remote* network destination the extension will ever touch is
+optional and requested on first use. The loopback hosts are the exception,
+deliberately mandatory: the options page health-probes local servers itself
+(ADR-0006), and a first-use permission prompt for the user's own machine
+would be noise. They widen the install-time warning's host list but grant no
+access beyond this machine.
 
 ## API keys: storage.local, never sync
 

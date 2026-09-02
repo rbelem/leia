@@ -15,9 +15,9 @@
   <section aria-label="Local servers">
     <h2>Local servers</h2>
     <p class="hint">
-      Voice servers running on this machine — no account, no API key. A server joins the voice picker while it
-      answers on its address; start one with the command under its name. A server you add here joins the picker
-      after the extension reloads.
+      Voice servers running on this machine — no account, no API key. A server joins the voice picker when it
+      responds at its address; start one with the command under its name. One you add here joins after the
+      extension reloads — <button id="reload-ext" type="button" class="ghost">Reload extension now</button>
     </p>
     <div id="builtin-servers"></div>
     <div id="custom-servers"></div>
@@ -39,7 +39,7 @@
         </label>
         <label>
           <span>Address</span>
-          <input id="custom-url" type="text" placeholder="http://127.0.0.1:8880" autocomplete="off" spellcheck="false" />
+          <input id="custom-url" type="text" placeholder="http://127.0.0.1:8880" autocomplete="off" spellcheck="false" aria-describedby="custom-error" />
         </label>
       </div>
       <div class="install-hint" id="custom-hint" hidden></div>
