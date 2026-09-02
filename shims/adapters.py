@@ -95,9 +95,20 @@ class PiperModel:
 
 
 class KittenTTSModel:
-    """KittenTTS ONNX (Apache-2.0). mini by default for quality; set
-    KITTEN_MODEL=KittenML/kitten-tts-nano-0.1 for the smaller option.
-    Output is 24 kHz float32 natively."""
+    """KittenTTS ONNX (Apache-2.0). Ships NANO by default — the pairing the
+    PyPI lib actually supports (kittentts==0.1.3 takes LOCAL onnx/voices
+    paths and only understands the nano style layout). Output is 24 kHz.
+
+    Mini 0.8 is intentionally NOT shipped: its repo pairs a StyleTTS-2
+    onnx (style [1,256], voices.npz (400,256)) that needs the separate
+    kittentts-0.8.0 GitHub wheel plus misaki>=0.9.4 (git, python<3.14) —
+    too fragile for a shim. Set KITTEN_MODEL=KittenML/kitten-tts-nano-0.1
+    explicitly or point it at a local checkout dir for offline use.
+
+    kittentts (0.1.3) takes LOCAL file paths only — a repo id goes
+    straight into ort.InferenceSession and fails with NO_SUCHFILE — so
+    the adapter resolves the repo to a local checkout (snapshot_download)
+    before constructing."""
 
     FALLBACK_VOICES = (
         "expr-voice-2-m",
@@ -111,14 +122,23 @@ class KittenTTSModel:
     )
 
     def __init__(self) -> None:
+        from huggingface_hub import snapshot_download
         from kittentts import KittenTTS
 
-        self.model = KittenTTS(
-            os.environ.get("KITTEN_MODEL", "KittenML/kitten-tts-mini-0.8")
+        model_ref = os.environ.get("KITTEN_MODEL", "KittenML/kitten-tts-nano-0.1")
+        checkout = Path(model_ref).expanduser()
+        if not checkout.exists():
+            log.info(
+                "fetching KittenTTS model %s (first run downloads ~80 MB)", model_ref
+            )
+            checkout = Path(snapshot_download(model_ref))
+        onnx = next(checkout.glob("*.onnx"))
+        self.model = KittenTTS(str(onnx), str(checkout / "voices.npz"))
+        # lib exposes its voices as .available_voices; keep the fallback for drift
+        live = getattr(self.model, "available_voices", None) or getattr(
+            self.model, "voices", None
         )
-        self.voice_ids = list(
-            getattr(self.model, "voices", None) or self.FALLBACK_VOICES
-        )
+        self.voice_ids = list(live or self.FALLBACK_VOICES)
 
     def voices(self) -> list[Voice]:
         return [Voice(v, "en", v) for v in self.voice_ids]
@@ -130,22 +150,33 @@ class KittenTTSModel:
 
 
 class NeuTTSModel:
-    """NeuTTS Air, Q4 GGUF backbone via llama-cpp-python (slowest shim —
-    LLM backbone on CPU; expect below real-time on many machines).
-    Zero-shot voice cloning: ships the upstream `dave` reference sample
-    as the single built-in voice. Output is 24 kHz natively. rate is
-    ignored (no speed knob)."""
+    """NeuTTS via the `neutts` PyPI package (1.4.1): transformers backbone
+    (default neuphonic/neutts-nano) + NeuCodec, zero-shot voice cloning
+    with the upstream `dave` reference sample as the single built-in
+    voice. Still the slowest shim — autoregressive backbone on CPU,
+    feed it per-sentence. rate is ignored (no speed knob). Output is
+    24 kHz natively.
+
+    History: the package was `neuttsair`/neutts-air (llama.cpp GGUF,
+    `NeuTTS(backbone=...)` + `.inference()`); 1.4.1 is import `neutts`,
+    constructor takes repo ids and the method is `.infer()`. GGUF
+    backbones need llama-cpp-python which the image does NOT ship — the
+    default nano backbone runs on plain transformers. neucodec's
+    unpinned torchao resolves to 0.18 whose layout breaks torchtune;
+    Dockerfile.neutts pins torchao==0.17.0."""
 
     def __init__(self) -> None:
         from huggingface_hub import hf_hub_download
-        from neuttsair.neutts import NeuTTS
+        from neutts import NeuTTS
 
-        backbone = os.environ.get("NEUTTS_BACKBONE", "neutts-air-q4-gguf")
-        log.info("loading NeuTTS backbone %s (first run downloads ~0.5 GB)", backbone)
+        backbone_repo = os.environ.get("NEUTTS_BACKBONE_REPO", "neuphonic/neutts-nano")
+        log.info(
+            "loading NeuTTS backbone %s (first run downloads from HF)", backbone_repo
+        )
         self.tts = NeuTTS(
-            backbone=backbone,
-            backbone_repo=f"neuphonic/{backbone}",
+            backbone_repo=backbone_repo,
             backbone_device="cpu",
+            codec_repo=os.environ.get("NEUTTS_CODEC_REPO", "neuphonic/neucodec"),
             codec_device="cpu",
         )
         ref_wav = hf_hub_download("neuphonic/neutts-air", "samples/dave.wav")
@@ -157,7 +188,7 @@ class NeuTTSModel:
         return [Voice("dave", "en", "Dave (reference sample)")]
 
     def synthesize(self, text: str, voice: str, rate: float) -> tuple[int, bytes]:
-        wav = self.tts.inference(text, self.ref, self.ref_text)
+        wav = self.tts.infer(text, self.ref, self.ref_text)
         return 24000, float_to_pcm16(wav)
 
 
@@ -211,7 +242,7 @@ def mp3_to_pcm24(mp3: bytes) -> bytes:
 
     decoded = miniaudio.decode(
         mp3,
-        output_format=miniaudio.SampleFormat.S16,
+        output_format=miniaudio.SampleFormat.SIGNED16,
         nchannels=1,
         sample_rate=24000,
     )

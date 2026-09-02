@@ -1,14 +1,21 @@
-# leia local-model shim — NeuTTS Air, Q4 GGUF via llama-cpp-python.
-# The image build compiles llama-cpp-python (~10-20 min). The backbone
-# (~0.5 GB) plus reference sample download into /root/.cache on first
-# start — mount a volume or every `--rm` run re-downloads.
+# leia local-model shim — NeuTTS via the `neutts` PyPI package (1.4.1).
+# Transformers backbone (default neuphonic/neutts-nano) + NeuCodec; the
+# backbone + codec download into /root/.cache on first start — mount a
+# volume or every `--rm` run re-downloads.
+#
+# torchao PIN: neucodec pulls torchao unpinned; torchao 0.18 removed
+# torchao.dtypes.nf4tensor which torchtune (via neucodec) still imports
+# -> ImportError at load. 0.17.0 is the last working line.
+# torch: install the CPU-only wheel first — the default PyPI torch pulls
+# the whole CUDA stack (~6 GB of nvidia wheels) for nothing on a CPU shim.
 FROM python:3.11-slim
 WORKDIR /app
 RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential cmake espeak-ng \
+ && apt-get install -y --no-install-recommends espeak-ng \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir fastapi uvicorn neuttsair huggingface_hub
+ && pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir fastapi uvicorn neutts==1.4.1 torchao==0.17.0 huggingface_hub
 COPY server.py adapters.py ./
-ENV NEUTTS_BACKBONE=neutts-air-q4-gguf
+ENV NEUTTS_BACKBONE_REPO=neuphonic/neutts-nano
 EXPOSE 8883
 CMD ["python", "server.py", "--model", "neutts", "--host", "0.0.0.0", "--port", "8883"]

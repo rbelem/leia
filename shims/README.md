@@ -7,19 +7,34 @@ One process serves one model; pick with `--model`:
 | `--model`    | Port | Package (`pip`) | Model license | Disk (download) | Speed on CPU (honest)                                   |
 | ------------ | ---- | --------------- | ------------- | --------------- | ------------------------------------------------------- |
 | `piper`      | 8881 | `piper-tts`     | GPL-3.0       | ~65 MB/voice    | Fast — real-time or faster (medium voices)               |
-| `kittentts`  | 8882 | `kittentts`     | Apache-2.0    | ~80 MB          | Roughly real-time (mini); nano is faster, lower quality  |
-| `neutts`     | 8883 | `neutts-air`    | Apache-2.0    | ~0.5 GB         | **Slowest** — LLM backbone (GGUF Q4); often below real-time. Synthesize per sentence, not per paragraph. |
+| `kittentts`  | 8882 | `kittentts==0.1.3` | Apache-2.0  | ~40 MB (nano)   | Fast on CPU; nano quality is modest                       |
+| `neutts`     | 8883 | `neutts==1.4.1` | Apache-2.0    | ~1 GB (nano backbone + codec) | **Slowest** — autoregressive backbone on CPU. Synthesize per sentence, not per paragraph. |
 | `edge`       | 8884 | `edge-tts==7.2.8` | MIT         | none (network service) | Real-time-ish (streams)                          |
 
 **Privacy:** piper/kittentts/neutts never leave your machine. **`edge` is the
 exception** — it sends the text to Microsoft's Read-Aloud service and returns
 synthesized audio (officially an undocumented browser feature, not an API).
 
-**Tested here vs not:** the HTTP contract layer (all routes/shapes) is covered
-by the pytest suite below and was curl-verified against a running stub server.
-The container images and their real-model adapters were **not executed in
-the authoring environment** — run each image once and
-hit it with the curl block before relying on it.
+**Tested here vs not** (updated 2026-09-01, after the podman smoke-test fixes —
+host: NixOS, rootless podman 5.8.4):
+
+- **Contract layer:** pytest suite green (13 tests); also verified live over
+  HTTP via `--model stub` + curl.
+- **piper** — verified live: bare-metal venv and container (README run line),
+  real synth → 24 kHz WAV (resampled from the voice's native 22.05 kHz).
+- **kittentts** — verified live: bare-metal venv and container, real nano
+  synth → 24 kHz WAV. Bare-metal on NixOS needs espeak-ng paths (see note
+  below); containers ship espeak-ng.
+- **edge** — verified live: bare-metal venv and container, real Microsoft
+  synth (pt-BR + en-US voices) → mp3 decoded in-process → 24 kHz WAV.
+- **neutts** — **blocked upstream, not verified end-to-end**: every
+  `neuphonic/*` weights repo is HF-gated (401 anonymous; no token on the test
+  machine). Adapter API verified by introspection of `neutts==1.4.1`
+  (constructor, `encode_reference`, `infer`) with a network-free unit test of
+  the synth glue; container image builds. Needs `HF_TOKEN` + license
+  acceptance to go live (see the gating note).
+- **Not tested anywhere:** audio *quality* judgments (intelligibility, voice
+  naturalness) and long-session behavior — listen once per model yourself.
 
 ## Contract
 
@@ -65,24 +80,40 @@ podman build -t leia-shim-kittentts -f Dockerfile.kittentts .
 podman run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts
 ```
 
-First start downloads the mini model (~80 MB) into the volume. Smaller/faster:
-`-e KITTEN_MODEL=KittenML/kitten-tts-nano-0.1`.
+First start downloads the nano model into the volume. **Nano is the shipped
+default and the only supported option**: the PyPI lib (`kittentts==0.1.3`)
+takes local onnx/voices paths and only understands nano's layout. Mini 0.8
+needs the separate `kittentts-0.8.0` GitHub wheel plus `misaki>=0.9.4`
+(git-only, python<3.14) — deliberately not shipped here. Voice ids:
+`expr-voice-2-m` … `expr-voice-5-f`.
 
 Install hint (extension): `podman run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts`
 
 ### neutts — http://127.0.0.1:8883
 
 ```sh
+export HF_TOKEN=hf_…   # see gating note below
 podman build -t leia-shim-neutts -f Dockerfile.neutts .
-podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts
+podman run --rm -p 127.0.0.1:8883:8883 -e HF_TOKEN -v leia-shim-neutts:/root/.cache leia-shim-neutts
 ```
 
-Image build compiles llama-cpp-python (~10–20 min). First start downloads the
-Q4 GGUF backbone (~0.5 GB) plus the reference speaker sample. One built-in
-voice (`dave`, from the upstream reference sample). Higher quality, slower:
-`-e NEUTTS_BACKBONE=neutts-air-q8-gguf`.
+No compile step (the llama.cpp era is gone — `neutts` 1.4.1 runs a
+transformers backbone). First start downloads the backbone + codec (~1 GB)
+plus the reference speaker sample into the volume. One built-in voice (`dave`,
+from the upstream reference sample). Different backbone via
+`-e NEUTTS_BACKBONE_REPO=…` (GGUF backbones additionally need
+llama-cpp-python, not shipped here).
 
-Install hint (extension): `podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts`
+**Gated weights:** every `neuphonic/*` model repo (`neutts-nano` default,
+`neucodec` codec, `neutts-air`…) requires accepting the license on
+huggingface.co and an authenticated download. Without a token the container
+exits on first start with `OSError: You are trying to access a gated repo` in
+its logs (model load happens before the port binds). Fix: accept
+`neuphonic/neutts-nano` **and** `neuphonic/neucodec` on the HF website, create
+a read token, then `export HF_TOKEN=hf_…` before `podman run` (the
+`-e HF_TOKEN` flag passes it into the container).
+
+Install hint (extension): `podman run --rm -p 127.0.0.1:8883:8883 -e HF_TOKEN -v leia-shim-neutts:/root/.cache leia-shim-neutts`
 
 ### edge — http://127.0.0.1:8884
 
@@ -143,15 +174,21 @@ python server.py --model stub    # full HTTP surface, zero model download
 smoke tests of the contract layer without a multi-GB download.
 
 Without containers, you can also run a real model bare-metal if its SDK is
-installed (`pip install piper-tts`, `kittentts`, or `neuttsair`):
+installed (`pip install piper-tts`, `kittentts`, or `neutts`):
 
 ```sh
 python server.py --model piper --port 8881   # binds 127.0.0.1 by default
 ```
 
 Model env vars (all optional): `PIPER_HOME`, `PIPER_VOICE`, `KITTEN_MODEL`,
-`NEUTTS_BACKBONE`. The edge shim has none — it's a pinned network client
+`NEUTTS_BACKBONE_REPO`, `NEUTTS_CODEC_REPO`, `HF_TOKEN` (neutts only — see
+the gating note). The edge shim has none — it's a pinned network client
 (`edge-tts==7.2.8`), not a model.
+
+NixOS bare-metal note: manylinux wheels (numpy/torch) fail to load against
+the default linker path; export `LD_LIBRARY_PATH` with a libstdc++/zlib from
+nix, and espeak-ng paths for phonemizer (`PHONEMIZER_ESPEAK_LIBRARY`,
+`PHONEMIZER_ESPEAK_PATH`) for kittentts/neutts. Containers are unaffected.
 
 ## License position
 

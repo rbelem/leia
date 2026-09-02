@@ -168,3 +168,45 @@ def test_edge_contract_via_stub() -> None:
         assert w.getframerate() == SAMPLE_RATE
         assert w.getnframes() > 0
     assert stub.calls[-1][:2] == ("olá", "pt-BR-AntonioNeural")
+
+
+# --- neutts adapter glue (network-free; weights are HF-gated upstream) ---
+
+
+class FakeNeuTTS:
+    """Stands in for neutts.NeuTTS at the synthesize() boundary."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, str]] = []
+
+    def encode_reference(self, path: str) -> bytes:
+        return b"ref-codes"
+
+    def infer(self, text: str, ref_codes: object, ref_text: str) -> "object":
+        self.calls.append((text, ref_codes, ref_text))
+        import numpy as np
+
+        return np.array([0.0, 0.5, -0.5], dtype=np.float32)
+
+
+def test_neutts_glue_wraps_infer() -> None:
+    from adapters import NeuTTSModel
+
+    model = NeuTTSModel.__new__(NeuTTSModel)  # skip __init__: no model download
+    fake = FakeNeuTTS()
+    model.tts = fake
+    model.ref = b"ref-codes"
+    model.ref_text = "reference text"
+    rate, pcm = model.synthesize("hello there", "dave", 1.0)
+    assert rate == SAMPLE_RATE
+    assert len(pcm) == 6  # 3 float32 samples -> 3 int16 frames * 2 bytes
+    assert fake.calls == [("hello there", b"ref-codes", "reference text")]
+
+
+def test_neutts_voices_static() -> None:
+    from adapters import NeuTTSModel
+
+    model = NeuTTSModel.__new__(NeuTTSModel)  # voices() needs no init-time state
+    assert [(v.id, v.lang, v.name) for v in model.voices()] == [
+        ("dave", "en", "Dave (reference sample)")
+    ]

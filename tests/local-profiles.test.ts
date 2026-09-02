@@ -222,7 +222,7 @@ describe("built-in profiles + storage", () => {
       "podman run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts",
     );
     expect(byId.get("neutts")?.install).toBe(
-      "podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts",
+      "podman run --rm -p 127.0.0.1:8883:8883 -e HF_TOKEN -v leia-shim-neutts:/root/.cache leia-shim-neutts",
     );
     expect(byId.get("edge")?.install).toBe("podman run --rm -p 127.0.0.1:8884:8884 leia-shim-edge");
     // shim hints: host-side port matches the profile's baseUrl port

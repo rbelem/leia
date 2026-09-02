@@ -62,7 +62,7 @@ export const BUILT_IN_PROFILES: LocalProfile[] = [
     id: "neutts",
     name: "Neutts",
     baseUrl: "http://127.0.0.1:8883",
-    install: "podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts",
+    install: "podman run --rm -p 127.0.0.1:8883:8883 -e HF_TOKEN -v leia-shim-neutts:/root/.cache leia-shim-neutts",
   },
   {
     id: "edge",
