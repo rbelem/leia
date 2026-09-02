@@ -55,7 +55,7 @@ export const PROVIDERS: ProviderDef[] = [
     id: "mistral",
     label: "Mistral",
     keyStorage: "leia:settings:mistralKey",
-    hint: "Mistral voices are managed via Mistral's Voices API (saved profiles) — this engine uses its default voice.",
+    hint: "Mistral voices are the saved voices on your account (create in the Mistral console / Le Chat voice library) — they load automatically in the picker.",
   },
   { id: "gemini", label: "Gemini", keyStorage: "leia:settings:geminiKey" },
   {

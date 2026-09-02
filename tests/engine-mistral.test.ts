@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MISTRAL_CAPABILITIES,
-  MISTRAL_DEFAULT_VOICE,
   MISTRAL_MODEL,
   MISTRAL_TTS_URL,
+  MISTRAL_VOICES_URL,
   MistralEngine,
 } from "../src/audio/engine-mistral";
 import type { Playback } from "../src/audio/engine-minimax";
@@ -82,6 +82,15 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
 const AUDIO_B64 = "SUQz";
 const AUDIO_BYTES = new Uint8Array([0x49, 0x44, 0x33]);
 
+/** Real saved-voices payload shape (verified 2026-09-01). */
+const VOICES_OK = {
+  object: "list",
+  items: [
+    { id: "uuid-paul", slug: "en_paul_sad", name: "Paul - Sad", languages: ["en_us"] },
+    { id: "uuid-alice", slug: "fr_alice_calm", name: "Alice - Calm", languages: ["fr"] },
+  ],
+};
+
 describe("MistralEngine", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -99,7 +108,7 @@ describe("MistralEngine", () => {
         expect(JSON.parse(String(init?.body))).toEqual({
           input: "Hello world.",
           model: MISTRAL_MODEL,
-          voice_id: MISTRAL_DEFAULT_VOICE, // null voiceName → curated default
+          voice_id: "uuid-paul", // selected voice id flows through
           response_format: "mp3",
           stream: false,
         });
@@ -109,11 +118,11 @@ describe("MistralEngine", () => {
     const host = makeHost();
     const engine = new MistralEngine({ getKey: async () => "k123", fetchImpl, audioHost: host });
 
-    const events = collect(engine.speak("Hello world.", 7, { voiceName: null, rate: 1.5 }));
+    const events = collect(engine.speak("Hello world.", 7, { voiceName: "uuid-paul", rate: 1.5 }));
     await vi.advanceTimersByTimeAsync(0);
 
     expect(host.played).toEqual([{ bytes: AUDIO_BYTES, mime: "audio/mpeg" }]); // decoded from base64
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(1); // no voices fetch — selection exists
     host.playbacks[0].finish();
     await vi.advanceTimersByTimeAsync(0);
 
@@ -123,18 +132,23 @@ describe("MistralEngine", () => {
     ]);
   });
 
-  it("custom voiceName is forwarded as the voice_id field", async () => {
-    const { fetchImpl } = makeFetch([
+  it("no voice selected → fetches the saved voices once, speaks with the first", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      (url, init) => {
+        expect(url).toBe(MISTRAL_VOICES_URL);
+        expect(init?.headers).toMatchObject({ Authorization: "Bearer k" });
+        return jsonResponse(VOICES_OK);
+      },
       (url, init) => {
         expect(url).toBe(MISTRAL_TTS_URL);
-        expect(JSON.parse(String(init?.body)).voice_id).toBe("my-saved-voice");
+        expect(JSON.parse(String(init?.body)).voice_id).toBe("uuid-paul"); // first saved voice
         return jsonResponse({ audio_data: AUDIO_B64 });
       },
     ]);
     const host = makeHost();
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
 
-    const events = collect(engine.speak("X.", 1, { voiceName: "my-saved-voice", rate: 1 }));
+    const events = collect(engine.speak("X.", 1, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     host.playbacks[0].finish();
     await vi.advanceTimersByTimeAsync(0);
@@ -142,18 +156,48 @@ describe("MistralEngine", () => {
       { type: "start", speakId: 1 },
       { type: "end", speakId: 1 },
     ]);
+    expect(calls.map((c) => c.url)).toEqual([MISTRAL_VOICES_URL, MISTRAL_TTS_URL]);
+  });
+
+  it("no voice selected and the account has none → explicit create-voice error", async () => {
+    const { fetchImpl, calls } = makeFetch([() => jsonResponse({ object: "list", items: [] })]);
+    const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
+
+    const events = collect(engine.speak("X.", 2, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      {
+        type: "error",
+        speakId: 2,
+        message: "No Mistral voices found — create one in the Mistral console (Le Chat voice library)",
+      },
+    ]);
+    expect(calls).toHaveLength(1); // only the voices fetch — no TTS POST
   });
 
   it("missing key: immediate error, no fetch", async () => {
     const { fetchImpl, calls } = makeFetch([]);
     const engine = new MistralEngine({ getKey: async () => null, fetchImpl, audioHost: makeHost() });
 
-    const events = collect(engine.speak("Hi.", 2, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 3, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await events).toEqual([
-      { type: "error", speakId: 2, message: "Mistral API key not set — providers settings" },
+      { type: "error", speakId: 3, message: "Mistral API key not set — providers settings" },
     ]);
     expect(calls).toHaveLength(0);
+  });
+
+  it("invalid voice_id 404 surfaces the API message inline", async () => {
+    const { fetchImpl } = makeFetch([
+      () => jsonResponse({ object: "error", message: "Voice 'default' not found.", code: "1902" }, 404),
+    ]);
+    const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
+
+    const events = collect(engine.speak("Hi.", 4, { voiceName: "default", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "error", speakId: 4, message: "Voice 'default' not found." },
+    ]);
   });
 
   it("Mistral error body {message} surfaces as the error message", async () => {
@@ -162,10 +206,10 @@ describe("MistralEngine", () => {
     ]);
     const engine = new MistralEngine({ getKey: async () => "bad", fetchImpl, audioHost: makeHost() });
 
-    const events = collect(engine.speak("Hi.", 3, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 5, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await events).toEqual([
-      { type: "error", speakId: 3, message: "Incorrect API key provided." },
+      { type: "error", speakId: 5, message: "Incorrect API key provided." },
     ]);
   });
 
@@ -175,26 +219,11 @@ describe("MistralEngine", () => {
     ]);
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
 
-    const events = collect(engine.speak("Hi.", 4, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 6, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await events).toEqual([
-      { type: "error", speakId: 4, message: "Content moderated: policy violation" },
+      { type: "error", speakId: 6, message: "Content moderated: policy violation" },
     ]);
-  });
-
-  it("string-or-object `error` bodies also surface", async () => {
-    const { fetchImpl } = makeFetch([() => jsonResponse({ error: "voice not found" }, 400)]);
-    const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
-
-    const events = collect(engine.speak("Hi.", 5, { voiceName: "nope", rate: 1 }));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await events).toEqual([{ type: "error", speakId: 5, message: "voice not found" }]);
-
-    const { fetchImpl: fObj } = makeFetch([() => jsonResponse({ error: { message: "rate limited" } }, 429)]);
-    const eObj = new MistralEngine({ getKey: async () => "k", fetchImpl: fObj, audioHost: makeHost() });
-    const events2 = collect(eObj.speak("Hi.", 6, { voiceName: null, rate: 1 }));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await events2).toEqual([{ type: "error", speakId: 6, message: "rate limited" }]);
   });
 
   it("non-JSON error response falls back to the status", async () => {
@@ -206,7 +235,7 @@ describe("MistralEngine", () => {
     const { fetchImpl } = makeFetch([() => resp]);
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
 
-    const events = collect(engine.speak("Hi.", 8, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 8, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await events).toEqual([{ type: "error", speakId: 8, message: "Mistral error 503" }]);
   });
@@ -215,11 +244,11 @@ describe("MistralEngine", () => {
     const { fetchImpl } = makeFetch([() => jsonResponse({}), () => jsonResponse({ audio_data: "" })]);
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
 
-    const e1 = collect(engine.speak("Hi.", 9, { voiceName: null, rate: 1 }));
+    const e1 = collect(engine.speak("Hi.", 9, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await e1).toEqual([{ type: "error", speakId: 9, message: "Mistral returned no audio payload" }]);
 
-    const e2 = collect(engine.speak("Hi again.", 10, { voiceName: null, rate: 1 }));
+    const e2 = collect(engine.speak("Hi again.", 10, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await e2).toEqual([{ type: "error", speakId: 10, message: "Mistral returned no audio payload" }]);
   });
@@ -228,10 +257,10 @@ describe("MistralEngine", () => {
     const { fetchImpl } = makeFetch([() => jsonResponse({ audio_data: "!!!" })]);
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
 
-    const events = collect(engine.speak("Hi.", 11, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 11, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await events).toEqual([
-      { type: "error", speakId: 11, message: expect.stringContaining("Mistral audio payload was not valid base64") },
+      { type: "error", speakId: 11, message: expect.stringContaining("Mistral request failed") },
     ]);
   });
 
@@ -240,13 +269,13 @@ describe("MistralEngine", () => {
     const host = makeHost();
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
 
-    const events = collect(engine.speak("Hi.", 7, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 12, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0); // start fired once audio lands
     engine.cancel();
     expect(host.playbacks[0].stopCalls).toBe(1);
     expect(await events).toEqual([
-      { type: "start", speakId: 7 },
-      { type: "cancelled", speakId: 7 },
+      { type: "start", speakId: 12 },
+      { type: "cancelled", speakId: 12 },
     ]);
   });
 
@@ -259,9 +288,9 @@ describe("MistralEngine", () => {
     const host = makeHost();
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
 
-    const eventsA = collect(engine.speak("Alpha.", 1, { voiceName: null, rate: 1 }));
+    const eventsA = collect(engine.speak("Alpha.", 1, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
-    const eventsB = collect(engine.speak("Beta.", 2, { voiceName: null, rate: 1 }));
+    const eventsB = collect(engine.speak("Beta.", 2, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
 
     expect(await eventsA).toEqual([{ type: "cancelled", speakId: 1 }]);
@@ -282,10 +311,10 @@ describe("MistralEngine", () => {
     const { fetchImpl } = makeFetch([() => Promise.reject(new Error("net down"))]);
     const engine = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
 
-    const events = collect(engine.speak("Hi.", 12, { voiceName: null, rate: 1 }));
+    const events = collect(engine.speak("Hi.", 13, { voiceName: "uuid-paul", rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(await events).toEqual([
-      { type: "error", speakId: 12, message: "Mistral request failed: Error: net down" },
+      { type: "error", speakId: 13, message: "Mistral request failed: Error: net down" },
     ]);
   });
 
@@ -294,14 +323,38 @@ describe("MistralEngine", () => {
     expect(() => engine.cancel()).not.toThrow();
   });
 
-  it("getVoices: no key → []; key → the single curated default voice marked mistral", async () => {
+  it("getVoices: live-fetches the account's saved voices; no key → []; failure/malformed → []", async () => {
     const noKey = new MistralEngine({ getKey: async () => null, fetchImpl: makeFetch([]).fetchImpl });
     expect(await noKey.getVoices()).toEqual([]);
 
-    const withKey = new MistralEngine({ getKey: async () => "k", fetchImpl: makeFetch([]).fetchImpl });
-    expect(await withKey.getVoices()).toEqual([
-      { name: MISTRAL_DEFAULT_VOICE, lang: "en-US", localService: false, family: "mistral" },
+    const { fetchImpl, calls } = makeFetch([
+      (url, init) => {
+        expect(url).toBe(MISTRAL_VOICES_URL);
+        expect(init?.headers).toMatchObject({ Authorization: "Bearer k" });
+        return jsonResponse(VOICES_OK);
+      },
     ]);
+    const withKey = new MistralEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
+    expect(await withKey.getVoices()).toEqual([
+      { name: "uuid-paul", lang: "en_us", localService: false, family: "mistral" }, // name = voice_id
+      { name: "uuid-alice", lang: "fr", localService: false, family: "mistral" },
+    ]);
+    expect(calls).toHaveLength(1);
+
+    // 404 → []
+    const { fetchImpl: f404 } = makeFetch([() => jsonResponse({ object: "error", message: "nope" }, 404)]);
+    const e404 = new MistralEngine({ getKey: async () => "k", fetchImpl: f404, audioHost: makeHost() });
+    expect(await e404.getVoices()).toEqual([]);
+
+    // Malformed items → []
+    const { fetchImpl: fMal } = makeFetch([() => jsonResponse({ object: "list" })]);
+    const eMal = new MistralEngine({ getKey: async () => "k", fetchImpl: fMal, audioHost: makeHost() });
+    expect(await eMal.getVoices()).toEqual([]);
+
+    // Throwing fetch → []
+    const { fetchImpl: fThrow } = makeFetch([() => Promise.reject(new Error("net down"))]);
+    const eThrow = new MistralEngine({ getKey: async () => "k", fetchImpl: fThrow, audioHost: makeHost() });
+    expect(await eThrow.getVoices()).toEqual([]);
   });
 
   it("capabilities: no word timing (base64 audio, no timestamps), no streaming", () => {

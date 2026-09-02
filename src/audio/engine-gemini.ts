@@ -2,10 +2,11 @@
 /**
  * Google Gemini TTS engine (#03). Provider TTS via the generativelanguage
  * REST API: one POST per chunk to /v1beta/interactions (x-goog-api-key
- * header — no Bearer), JSON response whose `interaction.output_audio.data`
- * is BASE64 RAW PCM (16-bit signed LE, 24 kHz, mono). The engine prepends a
- * canonical 44-byte RIFF/WAVE header and plays audio/wav (the twist vs. the
- * MP3 siblings). No timestamps — sentence-granularity marching highlight
+ * header — no Bearer), JSON response whose audio (BASE64 RAW PCM: 16-bit
+ * signed LE, rate from the payload, mono) lives in steps[].content[] under
+ * type "audio" (older interaction variants put it at interaction.output_
+ * audio — kept as a fallback). The engine prepends a canonical 44-byte
+ * RIFF/WAVE header and plays audio/wav (the twist vs. the MP3 siblings). No timestamps — sentence-granularity marching highlight
  * only (ADR-0003), so `wordTiming: false` and NO word events ever. `rate`
  * has no API field — accepted and ignored.
  *
@@ -17,8 +18,9 @@ import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceIn
 import { DOM_AUDIO_HOST, type AudioHost, type Playback } from "./engine-minimax";
 
 export const GEMINI_TTS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
-// Documented stable TTS model; newer "-preview" models exist but churn.
-export const GEMINI_TTS_MODEL = "gemini-2.5-flash-tts";
+// Live-verified 2026-09-01; gemini-3.1-flash-tts-preview also verified 200 —
+// no stable (non-preview) TTS model name exists yet.
+export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
 export const GEMINI_DEFAULT_VOICE = "Kore";
 export const GEMINI_SAMPLE_RATE = 24_000;
 
@@ -158,17 +160,21 @@ export class GeminiEngine implements TextEngine {
       fail(await errorDetail(resp));
       return;
     }
-    const envelope = (await resp.json()) as { interaction?: { output_audio?: { data?: unknown } } };
+    const envelope = (await resp.json()) as GeminiEnvelope;
     if (!this.isCurrent(speakId)) return;
-    const audioData = envelope.interaction?.output_audio?.data;
+    const stepsAudio = pickStepsAudio(envelope);
+    const audioData = stepsAudio ? stepsAudio.data : envelope.interaction?.output_audio?.data; // legacy fallback
     if (typeof audioData !== "string" || audioData.length === 0) {
-      fail("Gemini returned no audio payload");
+      fail("Gemini returned no audio content item in steps");
       return;
     }
+    // The audio item advertises its sample rate — honor it (default 24 kHz).
+    const sampleRate =
+      stepsAudio && typeof stepsAudio.sample_rate === "number" ? stepsAudio.sample_rate : GEMINI_SAMPLE_RATE;
 
     let bytes: Uint8Array;
     try {
-      bytes = pcmToWav(base64ToBytes(audioData));
+      bytes = pcmToWav(base64ToBytes(audioData), sampleRate);
     } catch (err) {
       fail(`Gemini audio payload was not valid base64: ${String(err)}`);
       return;
@@ -229,6 +235,29 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 const WAV_HEADER_BYTES = 44;
+
+interface GeminiAudioContent {
+  type?: unknown;
+  data?: unknown;
+  sample_rate?: unknown;
+}
+
+interface GeminiEnvelope {
+  /** Real 200 shape (verified 2026-09-01): audio lives in steps[].content[]. */
+  steps?: Array<{ content?: GeminiAudioContent[] }>;
+  /** Older interaction variants: top-level output_audio. Kept as fallback. */
+  interaction?: { output_audio?: { data?: unknown } };
+}
+
+/** First real audio item in steps[].content[] — null when none is usable. */
+function pickStepsAudio(envelope: GeminiEnvelope): GeminiAudioContent | null {
+  for (const step of envelope.steps ?? []) {
+    for (const item of step.content ?? []) {
+      if (item.type === "audio" && typeof item.data === "string" && item.data.length > 0) return item;
+    }
+  }
+  return null;
+}
 
 /** Canonical 44-byte RIFF/WAVE header for 16-bit signed LE mono PCM. */
 export function pcmToWav(pcm: Uint8Array, sampleRate: number = GEMINI_SAMPLE_RATE): Uint8Array {

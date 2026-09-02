@@ -9,9 +9,10 @@
  * accepted and ignored. Content-moderation rejections arrive as ordinary
  * 400s and surface inline through errorDetail.
  *
- * Voices are managed via Mistral's separate Voices API (saved profiles); no
- * list/fetch here — the engine speaks with MISTRAL_DEFAULT_VOICE unless the
- * caller picks one. Runs in any DOM-ish context (Firefox event page, Chrome
+ * Voices are the ACCOUNT'S saved voices (Mistral console / Le Chat voice
+ * library): getVoices() live-fetches GET /v1/audio/voices with the stored
+ * key, and speak() with no selected voice falls back to the account's first
+ * saved voice. Runs in any DOM-ish context (Firefox event page, Chrome
  * offscreen doc): fetch, getKey, and audio playback are injected.
  */
 import { EventStream } from "../reader/event-stream";
@@ -19,8 +20,8 @@ import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceIn
 import { DOM_AUDIO_HOST, type AudioHost, type Playback } from "./engine-minimax";
 
 export const MISTRAL_TTS_URL = "https://api.mistral.ai/v1/audio/speech";
+export const MISTRAL_VOICES_URL = "https://api.mistral.ai/v1/audio/voices";
 export const MISTRAL_MODEL = "voxtral-mini-tts-2603";
-export const MISTRAL_DEFAULT_VOICE = "default"; // Decision (#02): anonymous/default voice_id — swap for a saved Voices API profile id if Mistral rejects it
 
 export const MISTRAL_CAPABILITIES: EngineCapabilities = {
   wordTiming: false,
@@ -29,6 +30,12 @@ export const MISTRAL_CAPABILITIES: EngineCapabilities = {
   privacyClass: "provider",
   maxUtteranceChars: 2000, // matches the sibling HTTP-MP3 engines; the ~300-word practical limit is looser than session chunking
 };
+
+export interface MistralVoiceDef {
+  id: string;
+  name?: string;
+  languages?: string[];
+}
 
 export interface MistralEngineOptions {
   getKey: () => Promise<string | null>;
@@ -50,11 +57,11 @@ export class MistralEngine implements TextEngine {
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
   }
 
-  /** Single curated default voice — Mistral voice profiles live in their Voices API. */
+  /** The account's saved voices — created in Mistral's console / Le Chat voice library. */
   async getVoices(): Promise<VoiceInfo[]> {
     const key = await this.getKey();
     if (!key) return [];
-    return [{ name: MISTRAL_DEFAULT_VOICE, lang: "en-US", localService: false, family: "mistral" }];
+    return this.fetchVoices(key);
   }
 
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
@@ -100,44 +107,26 @@ export class MistralEngine implements TextEngine {
       return;
     }
 
-    let resp: Response;
-    try {
-      resp = await this.fetchImpl(MISTRAL_TTS_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: text,
-          model: MISTRAL_MODEL,
-          voice_id: options.voiceName ?? MISTRAL_DEFAULT_VOICE,
-          response_format: "mp3",
-          stream: false,
-        }),
-      });
-    } catch (err) {
-      fail(`Mistral request failed: ${String(err)}`);
-      return;
+    let voiceId = options.voiceName;
+    if (!voiceId) {
+      // No voice selected: fall back to the account's first saved voice.
+      const voices = await this.fetchVoices(key);
+      if (!this.isCurrent(speakId)) return;
+      voiceId = voices[0]?.name;
+      if (!voiceId) {
+        fail("No Mistral voices found — create one in the Mistral console (Le Chat voice library)");
+        return;
+      }
     }
+
+    const result = await this.fetchAudio(text, voiceId, key);
     if (!this.isCurrent(speakId)) return;
-    if (!resp.ok) {
-      fail(await errorDetail(resp));
-      return;
-    }
-    const envelope = (await resp.json()) as { audio_data?: unknown };
-    if (!this.isCurrent(speakId)) return;
-    const audioData = envelope.audio_data;
-    if (typeof audioData !== "string" || audioData.length === 0) {
-      fail("Mistral returned no audio payload");
+    if (typeof result === "string") {
+      fail(result);
       return;
     }
 
-    let bytes: Uint8Array;
-    try {
-      bytes = base64ToBytes(audioData);
-    } catch (err) {
-      fail(`Mistral audio payload was not valid base64: ${String(err)}`);
-      return;
-    }
-    const playback = this.audioHost.play(bytes, "audio/mpeg");
+    const playback = this.audioHost.play(result, "audio/mpeg");
     if (!this.isCurrent(speakId)) {
       playback.stop();
       return;
@@ -149,6 +138,50 @@ export class MistralEngine implements TextEngine {
     if (this.active?.speakId === speakId) this.active = null;
     stream.push({ type: "end", speakId });
     stream.close();
+  }
+
+  /** GET /audio/voices → the account's saved voices; [] on failure/malformed. */
+  private async fetchVoices(key: string): Promise<VoiceInfo[]> {
+    try {
+      const resp = await this.fetchImpl(MISTRAL_VOICES_URL, { headers: { Authorization: `Bearer ${key}` } });
+      if (!resp.ok) return [];
+      const data = (await resp.json()) as { items?: unknown };
+      if (!Array.isArray(data.items)) return [];
+      return data.items
+        .filter((v): v is MistralVoiceDef & { id: string } => typeof v?.id === "string" && v.id.length > 0)
+        .map((v) => ({
+          name: v.id, // VoiceInfo.name carries the voice_id (picker round-trips it as voiceName)
+          lang: typeof v.languages?.[0] === "string" ? v.languages[0] : "en",
+          localService: false,
+          family: "mistral",
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** POST /audio/speech → decoded MP3 bytes, or a human-readable error string. */
+  private async fetchAudio(text: string, voiceId: string, key: string): Promise<Uint8Array | string> {
+    try {
+      const resp = await this.fetchImpl(MISTRAL_TTS_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: text,
+          model: MISTRAL_MODEL,
+          voice_id: voiceId,
+          response_format: "mp3",
+          stream: false,
+        }),
+      });
+      if (!resp.ok) return await errorDetail(resp);
+      const envelope = (await resp.json()) as { audio_data?: unknown };
+      const audioData = envelope.audio_data;
+      if (typeof audioData !== "string" || audioData.length === 0) return "Mistral returned no audio payload";
+      return base64ToBytes(audioData);
+    } catch (err) {
+      return `Mistral request failed: ${String(err)}`;
+    }
   }
 
   private isCurrent(speakId: number): boolean {

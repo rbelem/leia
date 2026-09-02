@@ -142,7 +142,24 @@ describe("GeminiEngine", () => {
           response_format: { type: "audio" },
           generation_config: { speech_config: [{ voice: GEMINI_DEFAULT_VOICE }] }, // null voiceName → Kore
         });
-        return jsonResponse({ interaction: { output_audio: { data: AUDIO_B64 } } });
+        return jsonResponse({
+          id: "int_abc123",
+          status: "completed",
+          object: "interaction",
+          model: GEMINI_TTS_MODEL,
+          steps: [
+            {
+              content: [
+                {
+                  type: "audio",
+                  data: AUDIO_B64,
+                  mime_type: "audio/L16;codec=pcm;rate=24000",
+                  sample_rate: 24_000,
+                },
+              ],
+            },
+          ],
+        });
       },
     ]);
     const host = makeHost();
@@ -167,12 +184,53 @@ describe("GeminiEngine", () => {
     ]);
   });
 
+  it("honor the advertised sample_rate from the audio content item in the WAV header", async () => {
+    const { fetchImpl } = makeFetch([
+      () =>
+        jsonResponse({
+          status: "completed",
+          steps: [{ content: [{ type: "audio", data: AUDIO_B64, sample_rate: 16_000 }] }],
+        }),
+    ]);
+    const host = makeHost();
+    const engine = new GeminiEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("X.", 14, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 14 },
+      { type: "end", speakId: 14 },
+    ]);
+    const view = new DataView(host.played[0].bytes.buffer);
+    expect(view.getUint32(24, true)).toBe(16_000); // rate flows into the header
+    expect(view.getUint32(28, true)).toBe(32_000); // byteRate follows
+  });
+
+  it("legacy interaction.output_audio.data envelope still plays (fallback path, default 24 kHz)", async () => {
+    const { fetchImpl } = makeFetch([() => jsonResponse({ interaction: { output_audio: { data: AUDIO_B64 } } })]);
+    const host = makeHost();
+    const engine = new GeminiEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("X.", 15, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 15 },
+      { type: "end", speakId: 15 },
+    ]);
+    const view = new DataView(host.played[0].bytes.buffer);
+    expect(view.getUint32(24, true)).toBe(24_000);
+  });
+
   it("custom voiceName flows into generation_config.speech_config", async () => {
     const { fetchImpl } = makeFetch([
       (url, init) => {
         expect(url).toBe(GEMINI_TTS_URL);
         expect(JSON.parse(String(init?.body)).generation_config).toEqual({ speech_config: [{ voice: "Puck" }] });
-        return jsonResponse({ interaction: { output_audio: { data: AUDIO_B64 } } });
+        return jsonResponse({ status: "completed", steps: [{ content: [{ type: "audio", data: AUDIO_B64 }] }] });
       },
     ]);
     const host = makeHost();
@@ -240,25 +298,30 @@ describe("GeminiEngine", () => {
     expect(await events).toEqual([{ type: "error", speakId: 5, message: "Gemini error 503" }]);
   });
 
-  it("response missing/malformed output_audio.data errors explicitly", async () => {
+  it("response with no usable audio content item errors explicitly", async () => {
     const { fetchImpl } = makeFetch([
-      () => jsonResponse({}),
-      () => jsonResponse({ interaction: { output_audio: {} } }),
-      () => jsonResponse({ interaction: { output_audio: { data: "" } } }),
+      () => jsonResponse({ status: "completed", object: "interaction" }), // no steps
+      () => jsonResponse({ steps: [{ content: [] }] }),
+      () => jsonResponse({ steps: [{ content: [{ type: "text", data: "not audio" }] }] }),
+      () => jsonResponse({ steps: [{ content: [{ type: "audio", data: "" }] }] }),
     ]);
     const engine = new GeminiEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost() });
 
     const e1 = collect(engine.speak("Hi.", 6, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(await e1).toEqual([{ type: "error", speakId: 6, message: "Gemini returned no audio payload" }]);
+    expect(await e1).toEqual([{ type: "error", speakId: 6, message: "Gemini returned no audio content item in steps" }]);
 
     const e2 = collect(engine.speak("Hi.", 9, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(await e2).toEqual([{ type: "error", speakId: 9, message: "Gemini returned no audio payload" }]);
+    expect(await e2).toEqual([{ type: "error", speakId: 9, message: "Gemini returned no audio content item in steps" }]);
 
     const e3 = collect(engine.speak("Hi.", 10, { voiceName: null, rate: 1 }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(await e3).toEqual([{ type: "error", speakId: 10, message: "Gemini returned no audio payload" }]);
+    expect(await e3).toEqual([{ type: "error", speakId: 10, message: "Gemini returned no audio content item in steps" }]);
+
+    const e4 = collect(engine.speak("Hi.", 16, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await e4).toEqual([{ type: "error", speakId: 16, message: "Gemini returned no audio content item in steps" }]);
   });
 
   it("invalid base64 payload errors instead of playing garbage", async () => {
