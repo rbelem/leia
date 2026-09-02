@@ -35,10 +35,11 @@ vi.stubGlobal("IDBKeyRange", {
 // --- pure halves -----------------------------------------------------------
 
 describe("kitten voice mapping", () => {
-  it("exposes the 8 nano voices as local voices of the kitten-local family", async () => {
+  it("exposes the 8 real voices.json keys as local voices of the kitten-local family", async () => {
     const engine = new KittenEngine({ workerFactory: () => null as unknown as Worker });
     const voices = await engine.getVoices();
     expect(voices.map((v) => v.name)).toEqual([...KITTEN_VOICE_NAMES]);
+    expect(voices[0].name).toBe("expr-voice-2-f"); // default voice
     for (const v of voices) {
       expect(v.lang).toBe(KITTEN_LANG);
       expect(v.localService).toBe(true);
@@ -56,10 +57,15 @@ describe("kitten voice mapping", () => {
     });
   });
 
-  it("resolves voice embeddings case-insensitively", () => {
-    const json = { Bella: [1, 2], luna: [3, 4] };
-    expect(Array.from(resolveVoiceEmbedding(json, "Bella")!)).toEqual([1, 2]);
-    expect(Array.from(resolveVoiceEmbedding(json, "Luna")!)).toEqual([3, 4]);
+  it("resolves embeddings through the real voices.json value shape (list with 1 embedding)", () => {
+    const json = {
+      "expr-voice-2-f": [[1, 2]], // the verified live shape: [numStyles][dim]
+      "expr-voice-3-f": [3, 4], // tolerate a bare flat vector too
+    };
+    expect(Array.from(resolveVoiceEmbedding(json, "expr-voice-2-f")!)).toEqual([1, 2]);
+    expect(Array.from(resolveVoiceEmbedding(json, "expr-voice-3-f")!)).toEqual([3, 4]);
+    // Relaxed fallback: case/separator-insensitive still resolves.
+    expect(Array.from(resolveVoiceEmbedding(json, "Expr-Voice_2-F")!)).toEqual([1, 2]);
     expect(resolveVoiceEmbedding(json, "nope")).toBeNull();
   });
 
@@ -193,7 +199,7 @@ function makeHarness(opts?: { failAudioHost?: boolean }): Harness {
 
 /** Drive a speak() through init + synth with the given samples. */
 async function speakThrough(h: Harness, text: string, speakId: number, samples: number[]): Promise<unknown[]> {
-  const iter = h.engine.speak(text, speakId, { voiceName: "Luna", rate: 1 });
+  const iter = h.engine.speak(text, speakId, { voiceName: "expr-voice-3-f", rate: 1 });
   const done = collect(iter);
   await tick();
   expect(h.worker().sent[0].type).toBe("init");
@@ -218,10 +224,10 @@ describe("KittenEngine contract behavior", () => {
     expect(new DataView(bytes.buffer).getUint32(24, true)).toBe(KITTEN_SAMPLE_RATE);
     // Synth request carries text, resolved voice and clamped speed.
     const synth = h.worker().sent[1];
-    expect(synth).toMatchObject({ type: "synth", reqId: 1, text: "hello", voice: "Luna", speed: 1 });
+    expect(synth).toMatchObject({ type: "synth", reqId: 1, text: "hello", voice: "expr-voice-3-f", speed: 1 });
   });
 
-  it("defaults to the first nano voice and clamps rate into the model range", async () => {
+  it("defaults to expr-voice-2-f and clamps rate into the model range", async () => {
     const h = makeHarness();
     const iter = h.engine.speak("x", 1, { voiceName: null, rate: 9 });
     const done = collect(iter);
@@ -230,7 +236,7 @@ describe("KittenEngine contract behavior", () => {
     await tick();
     h.worker().reply({ type: "audio", reqId: 1, audio: Float32Array.of(0).buffer });
     await done;
-    expect(h.worker().sent[1]).toMatchObject({ voice: "Bella", speed: 2 });
+    expect(h.worker().sent[1]).toMatchObject({ voice: "expr-voice-2-f", speed: 2 });
   });
 
   it("preempts: a newer speak cancels the older stream and playback", async () => {

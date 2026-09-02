@@ -18,6 +18,7 @@ import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceIn
 import { DOM_AUDIO_HOST, type AudioHost, type Playback } from "../engine-minimax";
 import { pcmToWav } from "../engine-gemini";
 import {
+  KITTEN_DEFAULT_VOICE,
   KITTEN_LANG,
   KITTEN_MAX_UTTERANCE_CHARS,
   KITTEN_SAMPLE_RATE,
@@ -129,7 +130,7 @@ export class KittenEngine implements TextEngine {
     try {
       await this.ensureWorker();
       if (!this.isCurrent(speakId)) return;
-      const voice = options.voiceName ?? KITTEN_VOICE_NAMES[0];
+      const voice = options.voiceName ?? KITTEN_DEFAULT_VOICE;
       samples = await this.requestSynth(text, voice, clampRate(options.rate));
     } catch (err) {
       if (!this.isCurrent(speakId)) return;
