@@ -104,7 +104,8 @@ async function broadcast(msg: Record<string, unknown>): Promise<void> {
  * tokens are passed; T17 preserve-position and T16 restore run here too so
  * every entry point gets identical semantics.
  */
-async function handleReaderStart(msg: {
+/** Exported for tests/reader-start.test.ts (the start reply must not voice-gate). */
+export async function handleReaderStart(msg: {
   tokens?: TokenText[];
   voiceName?: string | null;
   rate?: number;
@@ -167,10 +168,13 @@ async function handleReaderStart(msg: {
         })
         .catch(() => {});
     }
-    // The bar-captured path binds its own highlighter from this reply —
-    // hand it the voice locale so word-granular marching works there too.
-    const locale = (await s.voiceLang()) ?? navigator.language ?? "en";
-    return { ok: true, replyType: "leia:reader:start", data: { ...status, locale } };
+    // The bar-captured path binds its own highlighter from this reply. No
+    // voiceLang() wait here: it re-burned the voices poll after the session's
+    // chunk-cap read, so the reply landed seconds after the highlights had
+    // already fired and the bar bound its highlighter too late (pre-bind
+    // highlights are no-ops). null is tolerated — the bar binds without it
+    // and word timing degrades to chunk-level.
+    return { ok: true, replyType: "leia:reader:start", data: { ...status, locale: null } };
   } catch (err) {
     return { ok: false, replyType: "leia:reader:start", error: String(err) };
   }

@@ -9,6 +9,7 @@ import type {
   VoiceInfo,
 } from "../src/reader/contract";
 import { PREFS_KEY, ReaderSession, SESSION_KEY, type SessionEvent, type SessionStorage } from "../src/reader/session";
+import { FakeEngine as ScriptedEngine } from "./fakes";
 
 /** Test double for the TextEngine contract. */
 class FakeEngine implements TextEngine {
@@ -52,6 +53,8 @@ class FakeEngine implements TextEngine {
     }
     this.current = { speakId, stream };
     this.speaks.push({ text, speakId, options });
+    // Real engines emit `start` when audio begins; the fake speaks instantly.
+    stream.push({ type: "start", speakId });
     return stream;
   }
 
@@ -166,6 +169,52 @@ describe("ReaderSession (fake engine)", () => {
     const final = s.status();
     expect(final.state).toBe("stopped");
     expect(storage.read(SESSION_KEY)).toBeUndefined(); // cleanup
+  });
+
+  it("emits the chunk highlight only once the engine started speaking (audio began)", async () => {
+    const engine = new ScriptedEngine("web-speech"); // no script: events driven manually
+    const events: SessionEvent[] = [];
+    const s = await ReaderSession.load(engine, new MemoryStorage(), (ev) => events.push(ev));
+
+    await s.start(TOKENS);
+    await tick();
+    // The chunk was handed to the engine, but audio has not started: no
+    // highlight yet (it used to fire before speak — a fake-started read).
+    expect(engine.speakCalls).toHaveLength(1);
+    expect(events.filter((e) => e.type === "highlight")).toEqual([]);
+
+    engine.push(1, { type: "start", speakId: 1 });
+    await tick();
+    expect(events.filter((e) => e.type === "highlight")).toEqual([
+      { type: "highlight", sessionId: s.status().sessionId, from: 0, to: 2 },
+    ]);
+
+    engine.push(1, { type: "end", speakId: 1 });
+    await tick();
+    engine.push(2, { type: "start", speakId: 2 });
+    engine.push(2, { type: "end", speakId: 2 });
+    await tick();
+    expect(s.status().state).toBe("stopped");
+  });
+
+  it("an engine error before start parks paused with no highlight and no fake stop", async () => {
+    const engine = new ScriptedEngine("web-speech");
+    const events: SessionEvent[] = [];
+    const s = await ReaderSession.load(engine, new MemoryStorage(), (ev) => events.push(ev));
+    await s.start(TOKENS);
+    await tick();
+
+    // Voiceless-engine shape: the speak fails before any start/word event.
+    engine.push(1, { type: "error", speakId: 1, message: "no speech voices available" });
+    await tick();
+
+    expect(events.filter((e) => e.type === "highlight")).toEqual([]);
+    expect(s.status()).toMatchObject({ state: "paused", lastError: "no speech voices available" });
+    expect(events).toContainEqual({
+      type: "error",
+      sessionId: expect.any(String),
+      message: "no speech voices available",
+    });
   });
 
   it("prefetches the next chunk while the current one plays (pipelining)", async () => {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSpeechEngine, type SpeechSynthesisLike } from "../src/audio/engine-webspeech";
 
 // jsdom has no speechSynthesis — stub the utterance class the engine builds.
@@ -121,6 +121,70 @@ describe("WebSpeechEngine", () => {
     expect(await engine.getVoices()).toEqual([
       { name: "Zira", lang: "en-US", localService: true, family: "web-speech" },
     ]);
+  });
+
+  it("caches the voices promise: one shared population wait per engine instance", async () => {
+    vi.useFakeTimers();
+    synth.voices = []; // voices not populated yet
+    const a = engine.getVoices();
+    const b = engine.getVoices();
+    expect(b).toBe(a); // second caller shares the first wait — no second poll chain
+    synth.voices = [V]; // voices arrive mid-wait
+    await vi.advanceTimersByTimeAsync(100); // first poll tick sees them
+    expect(await a).toEqual([{ name: "Zira", lang: "en-US", localService: true, family: "web-speech" }]);
+    expect(await b).toEqual(await a);
+    vi.useRealTimers();
+  });
+
+  it("a voiceless synth fails loudly instead of queueing a silent utterance", async () => {
+    vi.useFakeTimers();
+    synth.voices = []; // no system TTS (speech-dispatcher missing, sandboxed…)
+    const events = collect(engine.speak("Hello.", 9, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(2000); // past the voices wait
+    expect(await events).toEqual([
+      {
+        type: "error",
+        speakId: 9,
+        message: "no speech voices available — system text-to-speech is unavailable (speech-dispatcher on Linux?)",
+      },
+    ]);
+    expect(synth.utterances).toHaveLength(0); // the doomed utterance was never queued
+
+    // The cached empty result also makes the next chunk fail fast.
+    const next = collect(engine.speak("More.", 10, { voiceName: null, rate: 1 }));
+    expect(await next).toEqual([
+      {
+        type: "error",
+        speakId: 10,
+        message: "no speech voices available — system text-to-speech is unavailable (speech-dispatcher on Linux?)",
+      },
+    ]);
+    vi.useRealTimers();
+  });
+
+  it("onend without onstart is an error, not a fake success", async () => {
+    const events = collect(engine.speak("Hello.", 11, { voiceName: null, rate: 1 }));
+    await tick();
+    synth.utterances[0].onend!(new Event("end"));
+    expect(await events).toEqual([
+      { type: "error", speakId: 11, message: "speech synthesis ended without starting — no audio produced" },
+    ]);
+  });
+
+  it("an implausibly fast start→end on chunk-length text is an error (silent completion)", async () => {
+    const events = collect(engine.speak("word ".repeat(30), 12, { voiceName: null, rate: 1 })); // 150 chars
+    await tick();
+    const u = synth.utterances[0];
+    u.onstart!(new Event("start"));
+    u.onend!(new Event("end")); // fires immediately — far under 150ms
+    const evs = await events;
+    expect(evs[0]).toEqual({ type: "start", speakId: 12 });
+    expect(evs.at(-1)).toMatchObject({
+      type: "error",
+      speakId: 12,
+      message: expect.stringContaining("no audio produced"),
+    });
+    expect(evs.at(-1)).not.toEqual({ type: "end", speakId: 12 });
   });
 
   it("advertises word-granularity local/free capabilities", () => {

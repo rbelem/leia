@@ -57,16 +57,19 @@ const drain = (
   synth: FakeSynth,
   text: string,
   opts: { voiceName?: string | null; rate?: number } = {},
-): Harness => {
+): Promise<Harness> => {
   const seen: EngineEvent[] = [];
   const done = (async (): Promise<void> => {
     for await (const ev of engine.speak(text, 1, { voiceName: opts.voiceName ?? null, rate: opts.rate ?? 1 })) {
       seen.push(ev);
     }
   })();
-  const utterance = synth.utterances.at(-1)!;
-  utterance.onstart!(new Event("start"));
-  return { seen, done, utterance };
+  return flush().then(() => {
+    // The voiceless gate queues the utterance a microtask after speak().
+    const utterance = synth.utterances.at(-1)!;
+    utterance.onstart!(new Event("start"));
+    return { seen, done, utterance };
+  });
 };
 
 /** Flush microtasks (the async iterator drains pushes one hop at a time). */
@@ -82,7 +85,7 @@ describe("WebSpeechEngine word timing", () => {
   it("marches word events on estimated cumulative offsets, in span order", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done, utterance } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done, utterance } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
 
     // Word 0 fires immediately on start; word 1 is not due until t = 300.
@@ -117,7 +120,7 @@ describe("WebSpeechEngine word timing", () => {
     const zhSpans = wordSpans(zhText, "zh-CN");
     expect(zhSpans.length).toBeGreaterThanOrEqual(2); // zh word segmentation sanity
 
-    const zh = drain(engine, synth, zhText, { voiceName: "Ting-Ting" });
+    const zh = await drain(engine, synth, zhText, { voiceName: "Ting-Ting" });
     await flush();
     expect(zh.seen[0]).toEqual({ type: "start", speakId: 1 });
     expect(zh.seen[1]).toEqual({ type: "word", speakId: 1, begin: zhSpans[0].start, end: zhSpans[0].end });
@@ -128,7 +131,8 @@ describe("WebSpeechEngine word timing", () => {
 
     // One-word chunk: sentence marching, silently — no word events ever.
     const { synth: synth2, engine: engine2 } = mk();
-    const hi = drain(engine2, synth2, "Hi.", {});
+    synth2.voices = [V]; // the speak() gate refuses a voiceless synth
+    const hi = await drain(engine2, synth2, "Hi.", {});
     await flush();
     expect(hi.seen).toEqual([{ type: "start", speakId: 1 }]);
     await vi.advanceTimersByTimeAsync(10_000);
@@ -147,7 +151,7 @@ describe("WebSpeechEngine word timing", () => {
   it("snaps to the boundary word when a boundary jumps ≥ 2 words ahead", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done, utterance } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done, utterance } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
 
     // Engine runs fast: at t = 0 it already reports charIndex 15 ("dddd").
@@ -170,7 +174,7 @@ describe("WebSpeechEngine word timing", () => {
   it("re-times remaining words from the boundary position (1-word drift)", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done, utterance } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done, utterance } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
 
     // Boundary at charIndex 10 ("cccc") arrives at t = 100 — one word ahead.
@@ -196,7 +200,7 @@ describe("WebSpeechEngine word timing", () => {
   it("re-times remaining words without marching backward when a boundary lags", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done, utterance } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done, utterance } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
     await vi.advanceTimersByTimeAsync(300); // w1 fired at t = 300
     expect(seen).toHaveLength(3);
@@ -222,7 +226,7 @@ describe("WebSpeechEngine word timing", () => {
   it("keeps marching on pure estimation when no boundary events arrive", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done, utterance } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done, utterance } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
 
     await vi.advanceTimersByTimeAsync(300);
@@ -244,7 +248,7 @@ describe("WebSpeechEngine word timing", () => {
   it("clears pending word timers on cancel", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
 
     engine.cancel();
@@ -262,7 +266,7 @@ describe("WebSpeechEngine word timing", () => {
   it("clears pending word timers on error", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const { seen, done, utterance } = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const { seen, done, utterance } = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
     await vi.advanceTimersByTimeAsync(100);
 
@@ -281,11 +285,11 @@ describe("WebSpeechEngine word timing", () => {
   it("a new speak clears the preempted march's timers", async () => {
     const { synth, engine } = mk();
     synth.voices = [V];
-    const first = drain(engine, synth, TEXT, { voiceName: "Zira" });
+    const first = await drain(engine, synth, TEXT, { voiceName: "Zira" });
     await flush();
     await vi.advanceTimersByTimeAsync(100);
 
-    const second = drain(engine, synth, "Hi.", {}); // preempts the first march
+    const second = await drain(engine, synth, "Hi.", {}); // preempts the first march
     await flush();
     expect(first.seen).toEqual([
       { type: "start", speakId: 1 },

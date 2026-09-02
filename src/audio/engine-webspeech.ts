@@ -22,6 +22,16 @@ export interface SpeechSynthesisLike {
 
 const VOICES_WAIT_MS = 1500;
 
+// Silent-completion signatures (voiceless systems — e.g. a flatpak sandbox
+// without speech-dispatcher access — fire onend with no audio and no error):
+// onend without a preceding onstart, or a chunk-length text that "ends"
+// implausibly fast. Both surface as engine errors, never as `end`.
+const FAST_END_MS = 150;
+const FAST_END_CHARS = 80;
+
+const NO_VOICES_MESSAGE =
+  "no speech voices available — system text-to-speech is unavailable (speech-dispatcher on Linux?)";
+
 // Word-duration estimation heuristics. ponytail: not phoneme timing — plain
 // chars/rate scaling with hard bounds; utterance.onboundary re-anchors the
 // march when the engine's real progress drifts ≥ 1 word, which keeps the
@@ -34,12 +44,21 @@ export class WebSpeechEngine implements TextEngine {
   readonly family = "web-speech";
   readonly capabilities = { wordTiming: true, streaming: false, costClass: "free", privacyClass: "local" } as const;
   private active: { speakId: number; stream: EventStream<EngineEvent>; stopMarch: () => void } | null = null;
+  private voicesPromise: Promise<VoiceInfo[]> | null = null;
 
   constructor(private readonly synth: SpeechSynthesisLike) {}
 
-  async getVoices(): Promise<VoiceInfo[]> {
+  /** Voices with the population wait cached per engine instance: one
+   * VOICES_WAIT_MS poll shared by every caller (session chunk cap, the
+   * speak() voiceless gate) instead of one per call. */
+  getVoices(): Promise<VoiceInfo[]> {
+    this.voicesPromise ??= this.loadVoices();
+    return this.voicesPromise;
+  }
+
+  private loadVoices(): Promise<VoiceInfo[]> {
     const first = this.synth.getVoices();
-    if (first.length > 0) return mapVoices(first);
+    if (first.length > 0) return Promise.resolve(mapVoices(first));
     // Voices populate asynchronously on most platforms.
     return new Promise((resolve) => {
       const started = Date.now();
@@ -142,8 +161,10 @@ export class WebSpeechEngine implements TextEngine {
       scheduleFrom(next);
     };
 
+    let startedAt: number | null = null; // null until onstart confirms audio
     utterance.onstart = () => {
       console.error(`[leia-debug] utterance #${speakId} START`);
+      startedAt = Date.now();
       stream.push({ type: "start", speakId });
       if (words.length < 2) return; // sentence marching, silently
       baseAt = Date.now();
@@ -155,7 +176,21 @@ export class WebSpeechEngine implements TextEngine {
     utterance.onend = () => {
       console.error(`[leia-debug] utterance #${speakId} END`);
       stopMarch();
-      stream.push({ type: "end", speakId });
+      // Voiceless systems "complete" utterances with no audio: onend without
+      // onstart, or a chunk-length text read implausibly fast. Surface both
+      // as errors — a natural `end` here is a fake-success (T17).
+      let silent: string | null = null;
+      if (startedAt === null) {
+        silent = "speech synthesis ended without starting — no audio produced";
+      } else if (text.length > FAST_END_CHARS && Date.now() - startedAt < FAST_END_MS) {
+        silent = `speech synthesis ended after ${Date.now() - startedAt}ms for ${text.length} chars — no audio produced`;
+      }
+      if (silent !== null) {
+        console.error(`[leia-debug] utterance #${speakId} silent completion: ${silent}`);
+        stream.push({ type: "error", speakId, message: silent });
+      } else {
+        stream.push({ type: "end", speakId });
+      }
       stream.close();
       if (this.active?.speakId === speakId) this.active = null;
     };
@@ -179,7 +214,20 @@ export class WebSpeechEngine implements TextEngine {
       this.synth.cancel();
     }
 
-    this.synth.speak(utterance);
+    // A voiceless synth queues the utterance and "ends" it with no audio and
+    // no error. Refuse to speak until the shared voices wait answers, and
+    // fail loudly when it says audio is impossible.
+    void this.getVoices().then((voices) => {
+      if (this.active?.speakId !== speakId) return; // cancelled / preempted while waiting
+      if (voices.length === 0) {
+        console.error(`[leia-debug] speak #${speakId}: ${NO_VOICES_MESSAGE}`);
+        stream.push({ type: "error", speakId, message: NO_VOICES_MESSAGE });
+        stream.close();
+        this.active = null;
+        return;
+      }
+      this.synth.speak(utterance);
+    });
     return stream;
   }
 

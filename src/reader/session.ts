@@ -338,7 +338,9 @@ export class ReaderSession {
         if (gen !== this.driveGen) return; // superseded by start/pause/stop/resume
         const chunk = this.findChunkAt(this.tokenPos) ?? { from: this.tokenPos, to: this.tokenPos };
         this.currentChunk = chunk;
-        this.emit({ type: "highlight", sessionId: this.sessionId as string, from: chunk.from, to: chunk.to });
+        // No chunk highlight yet — the drive loop emits it on the engine's
+        // `start` event, so "first highlight = audio actually began" stays
+        // true (see floating-bar/popup pending-Play handling).
 
         // Pipelining (ADR-0003): have the engine synthesize chunk N+1 while N plays.
         const nextChunk = this.findChunkAt(chunk.to + 1);
@@ -359,6 +361,14 @@ export class ReaderSession {
         let outcome: "end" | "cancelled" | "error" = "end";
         const wordTiming = this.engine.capabilities.wordTiming;
         for await (const ev of iterable) {
+          if (ev.type === "start") {
+            // First highlight = audio actually began: emit the chunk
+            // highlight only once the engine confirms this chunk started
+            // speaking. A voiceless engine failing loudly never fakes a
+            // started read (word/timeline events follow, never precede, it).
+            this.emit({ type: "highlight", sessionId: this.sessionId as string, from: chunk.from, to: chunk.to });
+            continue;
+          }
           if (ev.type === "word") {
             if (wordTiming && outcome === "end") {
               this.emit({

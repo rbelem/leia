@@ -15,8 +15,10 @@ class LangEngine implements TextEngine {
   getVoices(): Promise<VoiceInfo[]> {
     return Promise.resolve(this.voices);
   }
-  speak(): AsyncIterable<EngineEvent> {
-    return new EventStream<EngineEvent>();
+  speak(_text: string, speakId: number): AsyncIterable<EngineEvent> {
+    const stream = new EventStream<EngineEvent>();
+    stream.push({ type: "start", speakId }); // audio begins immediately (real engines emit start)
+    return stream;
   }
   cancel(): void {
     /* no-op */
