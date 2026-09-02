@@ -17,8 +17,8 @@ synthesized audio (officially an undocumented browser feature, not an API).
 
 **Tested here vs not:** the HTTP contract layer (all routes/shapes) is covered
 by the pytest suite below and was curl-verified against a running stub server.
-The three docker images and their real-model adapters were **not executed in
-the authoring environment** (no docker available) — run each image once and
+The container images and their real-model adapters were **not executed in
+the authoring environment** — run each image once and
 hit it with the curl block before relying on it.
 
 ## Contract
@@ -40,41 +40,41 @@ POST /leia/v1/synthesize    {"text": "hello", "voice": "<voice id>", "rate": 1.0
 - `wordTiming` is always `false` — none of the three SDKs expose usable word
   timestamps; the engine skips word highlighting when it is false.
 
-## Install & run (docker)
+## Install & run (podman)
 
 Build each image once from this directory (`shims/`), then run. The
-`docker run` line for each model is the string the extension embeds verbatim
+`podman run` line for each model is the string the extension embeds verbatim
 as the built-in profile install hint (ticket 05) — keep them copy-pasteable.
 
 ### piper — http://127.0.0.1:8881
 
 ```sh
-docker build -t leia-shim-piper -f Dockerfile.piper .
-docker run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper
+podman build -t leia-shim-piper -f Dockerfile.piper .
+podman run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper
 ```
 
 First start downloads `en_US-lessac-medium` (~65 MB) into the volume. Change
 voices with `-e PIPER_VOICE=en_US-amy-medium` (any piper1-gpl medium voice name).
 
-Install hint (extension): `docker run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper`
+Install hint (extension): `podman run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper`
 
 ### kittentts — http://127.0.0.1:8882
 
 ```sh
-docker build -t leia-shim-kittentts -f Dockerfile.kittentts .
-docker run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts
+podman build -t leia-shim-kittentts -f Dockerfile.kittentts .
+podman run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts
 ```
 
 First start downloads the mini model (~80 MB) into the volume. Smaller/faster:
 `-e KITTEN_MODEL=KittenML/kitten-tts-nano-0.1`.
 
-Install hint (extension): `docker run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts`
+Install hint (extension): `podman run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts`
 
 ### neutts — http://127.0.0.1:8883
 
 ```sh
-docker build -t leia-shim-neutts -f Dockerfile.neutts .
-docker run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts
+podman build -t leia-shim-neutts -f Dockerfile.neutts .
+podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts
 ```
 
 Image build compiles llama-cpp-python (~10–20 min). First start downloads the
@@ -82,19 +82,19 @@ Q4 GGUF backbone (~0.5 GB) plus the reference speaker sample. One built-in
 voice (`dave`, from the upstream reference sample). Higher quality, slower:
 `-e NEUTTS_BACKBONE=neutts-air-q8-gguf`.
 
-Install hint (extension): `docker run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts`
+Install hint (extension): `podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts`
 
 ### edge — http://127.0.0.1:8884
 
 ```sh
-docker build -t leia-shim-edge -f Dockerfile.edge .
-docker run --rm -p 127.0.0.1:8884:8884 leia-shim-edge
+podman build -t leia-shim-edge -f Dockerfile.edge .
+podman run --rm -p 127.0.0.1:8884:8884 leia-shim-edge
 ```
 
 Model-free (no download, no volume). ~20 curated neural voices across the top
 locales (pt-BR included) — try voice `pt-BR-FranciscaNeural`.
 
-Install hint (extension): `docker run --rm -p 127.0.0.1:8884:8884 leia-shim-edge`
+Install hint (extension): `podman run --rm -p 127.0.0.1:8884:8884 leia-shim-edge`
 
 **Fragility / breakage mode:** this wraps an *unofficial, undocumented*
 Microsoft service. The trusted-token scheme (`Sec-MS-GEC`) has changed before
@@ -129,7 +129,7 @@ enforces (`validateBaseUrl` accepts only 127.0.0.1 / ::1 / localhost).
 
 ## Development & tests
 
-No docker or models needed for the contract suite:
+No containers or models needed for the contract suite:
 
 ```sh
 cd shims
@@ -142,7 +142,7 @@ python server.py --model stub    # full HTTP surface, zero model download
 `--model stub` serves a deterministic beep model on 8881 — handy for curl
 smoke tests of the contract layer without a multi-GB download.
 
-Without docker, you can also run a real model bare-metal if its SDK is
+Without containers, you can also run a real model bare-metal if its SDK is
 installed (`pip install piper-tts`, `kittentts`, or `neuttsair`):
 
 ```sh

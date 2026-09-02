@@ -4,7 +4,7 @@
 Each test mirrors exactly what the extension does (the probe in
 src/audio/local-profiles.ts, speak in src/audio/engine-local.ts), so a
 failure here means the extension would break against this server.
-Real-model audio quality/smoke is manual: run a docker image per README
+Real-model audio quality/smoke is manual: run a container image per README
 and hit it with the curl block there.
 """
 

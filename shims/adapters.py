@@ -7,7 +7,7 @@ stacks. That is what keeps the pytest contract suite runnable anywhere.
 
 NOTE: these adapters are written against the documented public APIs of
 piper1-gpl, KittenTTS and neutts-air and were NOT executed in the
-authoring environment (no docker, no model downloads). Run each docker
+authoring environment (no containers, no model downloads). Run each
 image once per README and check the curl block before trusting it.
 """
 

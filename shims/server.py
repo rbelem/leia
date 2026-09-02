@@ -189,7 +189,7 @@ def main() -> None:
     parser.add_argument(
         "--host",
         default="127.0.0.1",
-        help="bind address (docker images pass 0.0.0.0; keep 127.0.0.1 otherwise)",
+        help="bind address (container images pass 0.0.0.0; keep 127.0.0.1 otherwise)",
     )
     parser.add_argument(
         "--port",

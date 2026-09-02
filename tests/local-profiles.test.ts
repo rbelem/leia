@@ -210,21 +210,21 @@ describe("built-in profiles + storage", () => {
       { id: "neutts", name: "Neutts", baseUrl: "http://127.0.0.1:8883", install: expect.any(String) },
       { id: "edge", name: "Edge", baseUrl: "http://127.0.0.1:8884", install: expect.any(String) },
     ]);
-    for (const p of BUILT_IN_PROFILES) expect(p.install).toContain("docker");
+    for (const p of BUILT_IN_PROFILES) expect(p.install).toContain("podman");
   });
 
-  it("shim built-ins carry the exact docker run lines from shims/README.md", () => {
+  it("shim built-ins carry the exact podman run lines from shims/README.md", () => {
     const byId = new Map(BUILT_IN_PROFILES.map((p) => [p.id, p]));
     expect(byId.get("piper")?.install).toBe(
-      "docker run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper",
+      "podman run --rm -p 127.0.0.1:8881:8881 -v leia-shim-piper:/models leia-shim-piper",
     );
     expect(byId.get("kittentts")?.install).toBe(
-      "docker run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts",
+      "podman run --rm -p 127.0.0.1:8882:8882 -v leia-shim-kittentts:/root/.cache leia-shim-kittentts",
     );
     expect(byId.get("neutts")?.install).toBe(
-      "docker run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts",
+      "podman run --rm -p 127.0.0.1:8883:8883 -v leia-shim-neutts:/root/.cache leia-shim-neutts",
     );
-    expect(byId.get("edge")?.install).toBe("docker run --rm -p 127.0.0.1:8884:8884 leia-shim-edge");
+    expect(byId.get("edge")?.install).toBe("podman run --rm -p 127.0.0.1:8884:8884 leia-shim-edge");
     // shim hints: host-side port matches the profile's baseUrl port
     // (kokoro is the stock published image — no host bind prefix — so it's excluded)
     for (const p of BUILT_IN_PROFILES.filter((x) => x.id !== "kokoro")) {
