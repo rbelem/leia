@@ -59,7 +59,8 @@ export class LocalEngine implements TextEngine {
       wordTiming: caps.wordTiming,
       streaming: false,
       costClass: "free",
-      privacyClass: "local",
+      // `edge` proxies Microsoft Edge Read-Aloud (see local-profiles.ts) — audio leaves the machine, so provider-class.
+      privacyClass: this.profile.id === "edge" ? "provider" : "local",
     };
     this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;

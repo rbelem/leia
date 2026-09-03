@@ -193,6 +193,11 @@ describe("LocalEngine", () => {
     ]);
   });
 
+  it("discloses the edge profile as provider-class (audio leaves the machine), others as local", () => {
+    expect(new LocalEngine(makeProfile(8884, "edge"), CAPS_OK).capabilities.privacyClass).toBe("provider");
+    expect(new LocalEngine(makeProfile(8880, "kokoro"), CAPS_OK).capabilities.privacyClass).toBe("local");
+  });
+
   it("words absent → no word events (sentence marching)", async () => {
     const { fetchImpl } = makeLocalFetch({ health: HEALTH_OK, caps: () => jsonResponse(CAPS_OK), synth: () => SYNC_OK() });
     const host = makeHost();

@@ -131,16 +131,28 @@ toward a provider.
 
 | family | engine | wordTiming | streaming | costClass | privacyClass | status |
 |---|---|---|---|---|---|---|
-| `web-speech` | Web Speech API (`src/audio/engine-webspeech.ts`) | false | false | free | local | current |
-| `minimax` | MiniMax Speech-2.8 (#20) | true | false | paid | provider | current |
-| `elevenlabs` | ElevenLabs (T8, #9) | true | false | paid | provider | planned |
-| `azure` | Azure Speech (T9, #10) | true | true | paid | provider | planned |
-| `openai` | OpenAI TTS (T10, #11) | false | false | paid | provider | planned |
-| `local-kokoro` | Kokoro-FastAPI (T11, #12, ADR-0004) | true | false | free | local | planned |
-| `local-piper` | sherpa-onnx / Piper (T11, #12, ADR-0004) | false | false | free | local | planned |
+| `web-speech` | Web Speech API (`src/audio/engine-webspeech.ts`) | true | false | free | local | current |
+| `minimax` | MiniMax Speech-2.8 (#20, `src/audio/engine-minimax.ts`) | true | false | paid | provider | current |
+| `elevenlabs` | ElevenLabs (T8, #9, `src/audio/engine-elevenlabs.ts`) | true | false | paid | provider | current |
+| `azure` | Azure Speech (T9, #10, `src/audio/engine-azure.ts`) | true | true | paid | provider | current |
+| `openai` | OpenAI TTS (T10, #11, `src/audio/engine-openai.ts`) | false | false | paid | provider | current |
+| `xai` | xAI Grok TTS (#01, `src/audio/engine-xai.ts`) | false | false | paid | provider | current |
+| `mistral` | Mistral Voxtral TTS (#02, `src/audio/engine-mistral.ts`) | false | false | paid | provider | current |
+| `gemini` | Google Gemini TTS (#03, `src/audio/engine-gemini.ts`) | false | false | paid | provider | current |
+| `kitten-local` | KittenTTS on-device (ticket 06, `src/audio/kitten/engine-kitten.ts`) | false | false | free | local | current |
+| `local-kokoro` | Kokoro-FastAPI (T11, #12, ADR-0004/0006, `src/audio/engine-local.ts`) | true | false | free | local | current |
+| `local-piper` | sherpa-onnx / Piper shim (T11, #12, `shims/`) | false | false | free | local | current |
+| `local-kittentts` | KittenTTS shim (`shims/`) | false | false | free | local | current |
+| `local-neutts` | NeuTTS shim (`shims/`) | false | false | free | local | current |
+| `local-edge` | Edge Read-Aloud shim (`shims/`) | false | false | free | provider | current |
 
-Local server profiles map to `local-*` hub families per ADR-0004; an engine
-is registered only while its profile's health probe is online.
+Local server profiles map to `local-*` hub families (ADR-0004 profiles,
+ADR-0006 protocol — `src/audio/engine-local.ts` + `src/audio/local-profiles.ts`);
+an engine is registered only while its profile's health probe is online, and a
+mid-session server death marks it offline immediately. A `local-*` row's
+`wordTiming` is whatever the server declares in its capabilities probe (the
+`shims/` servers always report `false`; Kokoro-FastAPI reports `true`).
+† `local-edge` proxies the Microsoft Edge Read-Aloud service — audio leaves the machine.
 
 ## Chunking contract
 
