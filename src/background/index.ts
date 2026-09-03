@@ -9,6 +9,9 @@ import {
 } from "../probes/ff-playback";
 import { handleKittenProbe } from "../probes/kitten-probe";
 import { chromeAudioEngine, audioClockMs, isChrome, resolveAudioEngine } from "../audio/owner";
+import { LOCAL_PROFILES_STORAGE_KEY } from "../audio/local-profiles";
+import type { KeystoreSnapshot } from "../audio/keystore";
+import { PROVIDERS } from "../settings/providers";
 import { ReaderSession, type SessionEvent, type TokenText } from "../reader/session";
 import type { EngineEvent, TextEngine } from "../reader/contract";
 import { ResumeStore } from "./resume";
@@ -428,6 +431,66 @@ async function handlePageInfo(): Promise<RouterReply> {
     return { ok: false, replyType: "leia:page-info", error: String(err) };
   }
 }
+
+// --- Chrome offscreen key snapshot (ADR-0003) --------------------------------
+// WHY: some Chrome builds (flatpak Chrome 152 observed) give offscreen
+// documents NO chrome.storage — `chrome.storage === undefined` there despite
+// the storage permission — so the offscreen audio doc cannot read provider
+// keys itself and every provider-keyed engine (minimax/elevenlabs/azure/
+// openai/xai/mistral/gemini) yields 0 voices. The service worker has working
+// storage, so every `leia:audio:*` message forwarded to the offscreen doc
+// (the ProxyEngine's runtime.sendMessage calls) is enriched here with a
+// fresh in-memory snapshot: the 7 provider keyStorage values from the
+// providers catalog (incl. azure's region) plus the custom local-server
+// profiles. Keys travel only inside same-extension runtime messages and are
+// applied to the in-memory keystore in the offscreen doc (src/audio/
+// keystore.ts) — they are never persisted anywhere else. A failed snapshot
+// read sends WITHOUT a snapshot: the audio call must never block on it.
+
+/** Forwarded-to-offscreen audio messages (events flow the other way). */
+function isOffscreenAudioForward(type: unknown): boolean {
+  return typeof type === "string" && type.startsWith("leia:audio:") && type !== "leia:audio:event";
+}
+
+/** Fresh snapshot from storage.local: provider keys from the catalog (incl.
+ * azure's region) + custom local profiles. null when storage fails. */
+async function readKeySnapshot(): Promise<KeystoreSnapshot | null> {
+  try {
+    const keySlots = PROVIDERS.flatMap((p) => (p.regionStorage ? [p.keyStorage, p.regionStorage] : [p.keyStorage]));
+    const got = (await browser.storage.local.get([...keySlots, LOCAL_PROFILES_STORAGE_KEY])) as Record<
+      string,
+      unknown
+    >;
+    const keys: Record<string, string> = {};
+    for (const slot of keySlots) {
+      const v = got[slot];
+      if (typeof v === "string" && v.length > 0) keys[slot] = v;
+    }
+    const raw = got[LOCAL_PROFILES_STORAGE_KEY];
+    if (!Array.isArray(raw)) return { keys };
+    const localProfiles = raw
+      .map((p) => (p ?? {}) as { id?: unknown; name?: unknown; baseUrl?: unknown })
+      .filter((p) => typeof p.id === "string" && typeof p.name === "string" && typeof p.baseUrl === "string")
+      .map((p) => ({ id: p.id as string, name: p.name as string, baseUrl: p.baseUrl as string }));
+    return { keys, ...(localProfiles.length > 0 ? { localProfiles } : {}) };
+  } catch {
+    return null; // snapshot is best-effort — never block the audio call
+  }
+}
+
+const swRuntimeSend = browser.runtime.sendMessage.bind(browser) as (...args: unknown[]) => Promise<unknown>;
+browser.runtime.sendMessage = (async (msg: unknown, ...rest: unknown[]) => {
+  if (typeof msg === "object" && msg !== null && isOffscreenAudioForward((msg as { type?: unknown }).type)) {
+    const snapshot = await readKeySnapshot();
+    if (snapshot) {
+      const enriched: Record<string, unknown> = { ...(msg as Record<string, unknown>), keys: snapshot.keys };
+      if (snapshot.localProfiles) enriched.localProfiles = snapshot.localProfiles;
+      return swRuntimeSend(enriched, ...rest);
+    }
+  }
+  return swRuntimeSend(msg, ...rest);
+}) as typeof browser.runtime.sendMessage;
+// -----------------------------------------------------------------------------
 
 /** Settings/family disclosure + audio-owner plumbing (ADR-0002, T14). */
 async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | undefined> {

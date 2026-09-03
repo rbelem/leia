@@ -18,22 +18,18 @@ import { XaiEngine } from "../audio/engine-xai";
 import { MistralEngine } from "../audio/engine-mistral";
 import { GeminiEngine } from "../audio/engine-gemini";
 import { KittenEngine } from "../audio/kitten/engine-kitten";
-import { registerLocalEngines } from "../audio/engine-local";
+import { LocalEngine } from "../audio/engine-local";
+import { BUILT_IN_PROFILES, probeProfile } from "../audio/local-profiles";
+import { readProviderKey, setSnapshot, snapshotLocalProfiles, type KeystoreProfile } from "../audio/keystore";
 import { EngineHub, type EngineFamilyInfo } from "../audio/hub";
 import type { EngineCapabilities } from "../reader/contract";
 
-/** Provider key from storage.local (T14 providers settings shape). */
-function readProviderKey(storageKey: string): () => Promise<string | null> {
-  return async (): Promise<string | null> => {
-    try {
-      const got = (await browser.storage.local.get(storageKey)) as Record<string, unknown>;
-      const v = got[storageKey];
-      return typeof v === "string" && v.length > 0 ? v : null;
-    } catch {
-      return null;
-    }
-  };
-}
+// Provider keys do NOT come from storage.local here: some Chrome builds
+// (flatpak Chrome 152 observed) give offscreen documents no chrome.storage
+// at all, so every read throws and all provider-keyed engines yield 0
+// voices. Instead the service worker (which has working storage) rides a
+// fresh in-memory snapshot on every forwarded leia:audio:* message and the
+// getKey closures below read the snapshot (src/audio/keystore.ts).
 
 const engine = new EngineHub();
 engine.register("web-speech", new WebSpeechEngine(speechSynthesis), { default: true });
@@ -49,7 +45,42 @@ engine.register("mistral", new MistralEngine({ getKey: readProviderKey("leia:set
 engine.register("gemini", new GeminiEngine({ getKey: readProviderKey("leia:settings:geminiKey") }));
 // kitten-local (ticket 06): lazy — the model worker spawns on first speak.
 engine.register("kitten-local", new KittenEngine());
-void registerLocalEngines(engine); // lazy boot probe (ADR-0006) — never blocks web-speech
+
+/**
+ * Offscreen variant of registerLocalEngines (engine-local.ts): its storage
+ * read of custom profiles throws in the offscreen document (no
+ * chrome.storage — see keystore.ts), which used to kill even the built-in
+ * registrations. Custom profiles come from the key snapshot instead;
+ * built-in probing stays fetch-based and works everywhere.
+ */
+async function registerLocalEnginesFromSnapshot(hub: EngineHub): Promise<void> {
+  const profiles = [...BUILT_IN_PROFILES, ...snapshotLocalProfiles()];
+  for (const profile of profiles) {
+    const { online, caps } = await probeProfile(profile.baseUrl);
+    if (online) hub.register(`local-${profile.id}`, new LocalEngine(profile, caps));
+  }
+}
+void registerLocalEnginesFromSnapshot(engine).catch(() => {}); // lazy boot probe (ADR-0006) — never blocks web-speech
+
+/**
+ * Apply the service worker's key snapshot from a forwarded leia:audio:*
+ * message. Messages without a snapshot keep the last applied one. Best
+ * effort only — a snapshot failure must never break web-speech.
+ */
+function applySnapshotFromMessage(msg: unknown): void {
+  try {
+    const t = (msg as { type?: unknown }).type;
+    if (typeof t !== "string" || !t.startsWith("leia:audio:")) return;
+    const m = msg as { keys?: unknown; localProfiles?: unknown };
+    if (m.keys === undefined && m.localProfiles === undefined) return;
+    setSnapshot({
+      ...(typeof m.keys === "object" && m.keys !== null ? { keys: m.keys as Record<string, string> } : {}),
+      ...(Array.isArray(m.localProfiles) ? { localProfiles: m.localProfiles as KeystoreProfile[] } : {}),
+    });
+  } catch {
+    // snapshot is best-effort
+  }
+}
 
 async function speakAndStream(msg: {
   speakId: number;
@@ -95,5 +126,6 @@ function handleAudioMessage(msg: unknown): unknown {
 
 browser.runtime.onMessage.addListener((msg: unknown) => {
   if (typeof msg !== "object" || msg === null || !("type" in msg)) return undefined;
+  applySnapshotFromMessage(msg); // first: refresh the in-memory key snapshot (if the message carries one)
   return handleAudioMessage(msg);
 });
