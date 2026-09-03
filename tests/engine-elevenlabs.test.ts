@@ -258,10 +258,11 @@ describe("ElevenLabsEngine", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("prefetch with a mismatched speak: cache miss, speaks synth on demand", async () => {
+  it("prefetch with a mismatched speak: cache miss, entry discarded, matching speak re-synthesizes", async () => {
     const { fetchImpl, calls } = makeFetch([
-      () => jsonResponse({ audio_base64: MP3_B64 }),
-      () => jsonResponse({ audio_base64: MP3_B64 }),
+      () => jsonResponse({ audio_base64: MP3_B64 }), // prefetch
+      () => jsonResponse({ audio_base64: MP3_B64 }), // mismatched speak
+      () => jsonResponse({ audio_base64: MP3_B64 }), // matching speak after the discard
     ]);
     const host = makeHost();
     const engine = new ElevenLabsEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
@@ -273,6 +274,98 @@ describe("ElevenLabsEngine", () => {
     host.playbacks[0].finish();
     await vi.advanceTimersByTimeAsync(0);
     await events;
+
+    // The mismatched speak discarded the stale entry: the now-matching
+    // speak must not serve it.
+    const events2 = collect(engine.speak("Hello world.", 4, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(3);
+    host.playbacks[1].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events2;
+  });
+
+  it("latest prefetch wins: the cache holds one entry", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      () => jsonResponse({ audio_base64: MP3_B64 }), // prefetch Alpha
+      () => jsonResponse({ audio_base64: MP3_B64 }), // prefetch Beta (replaces Alpha)
+      () => jsonResponse({ audio_base64: MP3_B64 }), // speak Alpha — evicted, re-synthesizes
+    ]);
+    const host = makeHost();
+    const engine = new ElevenLabsEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    await engine.prefetch("Alpha.", { voiceName: null, rate: 1 });
+    await engine.prefetch("Beta.", { voiceName: null, rate: 1 });
+
+    const eventsB = collect(engine.speak("Beta.", 1, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2); // Beta served — the latest prefetch won
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await eventsB;
+
+    const eventsA = collect(engine.speak("Alpha.", 2, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(3); // Alpha is gone — only one entry is kept
+    host.playbacks[1].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await eventsA;
+  });
+
+  it("a key change invalidates the cache (audio never serves across keys)", async () => {
+    let key = "k1";
+    const { fetchImpl, calls } = makeFetch([
+      () => jsonResponse({ audio_base64: MP3_B64 }), // prefetch under k1
+      () => jsonResponse({ audio_base64: MP3_B64 }), // speak under k2 re-synthesizes
+    ]);
+    const host = makeHost();
+    const engine = new ElevenLabsEngine({ getKey: async () => key, fetchImpl, audioHost: host });
+
+    await engine.prefetch("Hello world.", { voiceName: null, rate: 1 });
+    key = "k2";
+    const events = collect(engine.speak("Hello world.", 1, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2); // k1's cached audio not served under k2
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events;
+  });
+
+  it("prefetch never disturbs the active speak; the cached chunk serves afterwards", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      () => jsonResponse({ audio_base64: MP3_B64, alignment: ALIGNMENT }), // active speak
+      () => jsonResponse({ audio_base64: MP3_B64 }), // prefetch while it plays
+    ]);
+    const host = makeHost();
+    const engine = new ElevenLabsEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const eventsA = collect(engine.speak("Hello world.", 1, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0); // A: start + first word; playing
+
+    await engine.prefetch("Beta.", { voiceName: null, rate: 1 });
+    expect(calls).toHaveLength(2);
+    expect(host.playbacks[0].stopCalls).toBe(0); // active audio untouched
+
+    await vi.advanceTimersByTimeAsync(500); // let A's words fire
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await eventsA).toEqual([
+      { type: "start", speakId: 1 }, // not preempted by the prefetch
+      { type: "word", speakId: 1, begin: 0, end: 5 },
+      { type: "word", speakId: 1, begin: 6, end: 12 },
+      { type: "end", speakId: 1 },
+    ]);
+
+    const eventsB = collect(engine.speak("Beta.", 2, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2); // B served from the prefetch cache
+    expect(host.played).toHaveLength(2);
+    host.playbacks[1].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await eventsB).toEqual([
+      { type: "start", speakId: 2 },
+      { type: "end", speakId: 2 }, // cached bytes carry no alignment → no word events
+    ]);
   });
 
   it("cancel stops audio, clears pending words, closes with cancelled", async () => {

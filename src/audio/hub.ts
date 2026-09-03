@@ -86,4 +86,13 @@ export class EngineHub implements TextEngine {
     this.cancelTarget = null;
     target?.cancel();
   }
+
+  /** Forward pipelining to the current engine (ADR-0003); a plain engine — or no engine — is a no-op. Never throws. */
+  async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    try {
+      await this.current?.prefetch?.(text, options);
+    } catch {
+      // Pipelining is best-effort; a failing prefetch surfaces on speak().
+    }
+  }
 }

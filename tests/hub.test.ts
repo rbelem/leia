@@ -40,6 +40,16 @@ class StubEngine implements TextEngine {
 
 const voice = (name: string, family: string): VoiceInfo => ({ name, lang: "en-US", localService: true, family });
 
+class PrefetchStubEngine extends StubEngine {
+  readonly prefetchCalls: { text: string; options: SpeakOptions }[] = [];
+  fail = false;
+
+  async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    if (this.fail) throw new Error("prefetch failed");
+    this.prefetchCalls.push({ text, options });
+  }
+}
+
 describe("EngineHub", () => {
   it("merged getVoices: default family first, stable order, rejected engines skipped", async () => {
     const ws = new StubEngine("web-speech", [voice("Local A", "web-speech")]);
@@ -75,6 +85,28 @@ describe("EngineHub", () => {
     expect(mx.speakCalls).toBe(1);
     expect(mx.cancelCount).toBe(1);
     expect(ws.speakCalls).toBe(1); // unchanged
+  });
+
+  it("prefetch forwards to the current engine; plain engines no-op and failures never throw", async () => {
+    const plain = new StubEngine("web-speech", []);
+    const prefetching = new PrefetchStubEngine("minimax", []);
+    const failing = new PrefetchStubEngine("azure", []);
+    failing.fail = true;
+    const hub = new EngineHub();
+    hub.register("web-speech", plain, { default: true });
+    hub.register("minimax", prefetching);
+    hub.register("azure", failing);
+
+    const options: SpeakOptions = { voiceName: null, rate: 1.5 };
+    await expect(hub.prefetch("Hello.", options)).resolves.toBeUndefined(); // plain current → no-op
+    expect(prefetching.prefetchCalls).toHaveLength(0);
+
+    hub.select("minimax");
+    await expect(hub.prefetch("Hello.", options)).resolves.toBeUndefined();
+    expect(prefetching.prefetchCalls).toEqual([{ text: "Hello.", options }]); // same args
+
+    hub.select("azure");
+    await expect(hub.prefetch("Hello.", options)).resolves.toBeUndefined(); // engine failure swallowed
   });
 
   it("selectFamily selects the family (session engine-switch hook)", async () => {

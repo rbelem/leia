@@ -132,7 +132,7 @@ toward a provider.
 | family | engine | wordTiming | streaming | costClass | privacyClass | status |
 |---|---|---|---|---|---|---|
 | `web-speech` | Web Speech API (`src/audio/engine-webspeech.ts`) | true | false | free | local | current |
-| `minimax` | MiniMax Speech-2.8 (#20, `src/audio/engine-minimax.ts`) | true | false | paid | provider | current |
+| `minimax` | MiniMax Speech-2.8 (#20, `src/audio/engine-minimax.ts`) | true | true | paid | provider | current |
 | `elevenlabs` | ElevenLabs (T8, #9, `src/audio/engine-elevenlabs.ts`) | true | false | paid | provider | current |
 | `azure` | Azure Speech (T9, #10, `src/audio/engine-azure.ts`) | true | true | paid | provider | current |
 | `openai` | OpenAI TTS (T10, #11, `src/audio/engine-openai.ts`) | false | false | paid | provider | current |
@@ -176,9 +176,16 @@ mid-session server death marks it offline immediately. A `local-*` row's
 
 - **Streaming transport**: websocket/async streaming for engines that offer
   it (MiniMax stream variants), so `streaming: true` engines feed audio
-  incrementally end to end.
+  incrementally end to end. Shipped: MiniMax HTTP-chunked streaming
+  (engine-internal — audio is written to the audio element as chunks
+  arrive); a first-class websocket transport remains future work.
 - **Per-token confidence / correction** (T5): estimated-timing fallback for
   engines without word events (`wordTiming: false`), with boundary-event
   drift correction; the Web Speech estimator lands against this contract.
 - **Pipelining** (ADR-0003): synthesize chunk N+1 while chunk N plays to
-  hide batch-REST latency (ElevenLabs), keeping inter-chunk gaps under ~1s.
+  hide batch-REST latency, keeping inter-chunk gaps under ~1s. Shipped:
+  the optional `prefetch?` contract seam, the session wiring (fires for
+  the next chunk once the current chunk's `start` event confirms audio
+  began), and the ElevenLabs engine (single-entry cache, keyed by
+  text+voice+rate+API key). Other batch-REST engines can adopt the same
+  seam without contract changes.

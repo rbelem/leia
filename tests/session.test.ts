@@ -18,6 +18,8 @@ class FakeEngine implements TextEngine {
   speaks: Array<{ text: string; speakId: number; options: SpeakOptions }> = [];
   cancels = 0;
   prefetches: Array<{ text: string; options: SpeakOptions }> = [];
+  /** Ordering of engine entry points ("speak" / "prefetch") as the session drove them. */
+  callOrder: string[] = [];
   private familyCalls: string[] = [];
   private current: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
 
@@ -31,6 +33,7 @@ class FakeEngine implements TextEngine {
     };
     this.prefetch = (text, options) => {
       this.prefetches.push({ text, options });
+      this.callOrder.push("prefetch");
       return Promise.resolve();
     };
   }
@@ -53,6 +56,7 @@ class FakeEngine implements TextEngine {
     }
     this.current = { speakId, stream };
     this.speaks.push({ text, speakId, options });
+    this.callOrder.push("speak");
     // Real engines emit `start` when audio begins; the fake speaks instantly.
     stream.push({ type: "start", speakId });
     return stream;
@@ -248,6 +252,36 @@ describe("ReaderSession (fake engine)", () => {
 
     engine.finishCurrent();
     await tick();
+    engine.finishCurrent();
+    await tick();
+    expect(s.status().state).toBe("stopped");
+  });
+
+  it("fires prefetch only after the engine's start event (audio actually began)", async () => {
+    const { engine, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    // speak() handed chunk N to the engine first; chunk N+1 was prefetched
+    // on the start event — never before the current chunk was spoken.
+    expect(engine.callOrder).toEqual(["speak", "prefetch"]);
+    expect(engine.prefetches).toEqual([{ text: "Fourth sentence.", options: { voiceName: null, rate: 1 } }]);
+  });
+
+  it("survives a prefetch rejection (fire-and-forget; speak() stays the fallback)", async () => {
+    const { engine, emit } = makeSession();
+    engine.prefetch = () => Promise.reject(new Error("synth exploded"));
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(TOKENS);
+    await tick();
+    expect(s.status()).toMatchObject({ state: "playing", lastError: null }); // rejection swallowed
+    expect(engine.speaks).toHaveLength(1);
+
+    engine.finishCurrent();
+    await tick();
+    expect(engine.speaks).toHaveLength(2); // next chunk still speaks normally
     engine.finishCurrent();
     await tick();
     expect(s.status().state).toBe("stopped");

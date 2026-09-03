@@ -342,17 +342,6 @@ export class ReaderSession {
         // `start` event, so "first highlight = audio actually began" stays
         // true (see floating-bar/popup pending-Play handling).
 
-        // Pipelining (ADR-0003): have the engine synthesize chunk N+1 while N plays.
-        const nextChunk = this.findChunkAt(chunk.to + 1);
-        if (nextChunk && typeof this.engine.prefetch === "function") {
-          void this.engine
-            .prefetch(chunkText(this.tokens, nextChunk), {
-              voiceName: this.settings.voiceName,
-              rate: this.settings.rate,
-            })
-            .catch(() => {}); // prefetch is an optimization; failures fall back to non-cached speak
-        }
-
         const speakId = ++this.speakSeq;
         const iterable = this.engine.speak(chunkText(this.tokens, chunk), speakId, {
           voiceName: this.settings.voiceName,
@@ -367,6 +356,11 @@ export class ReaderSession {
             // speaking. A voiceless engine failing loudly never fakes a
             // started read (word/timeline events follow, never precede, it).
             this.emit({ type: "highlight", sessionId: this.sessionId as string, from: chunk.from, to: chunk.to });
+            // Pipelining (ADR-0003): chunk N's audio actually began — have
+            // the engine synthesize N+1 now so its latency hides behind
+            // playback. Fire-and-forget: a prefetch failure must never
+            // break the session; speak() remains the fallback.
+            this.prefetchNext(chunk);
             continue;
           }
           if (ev.type === "word") {
@@ -441,6 +435,24 @@ export class ReaderSession {
       this.emitState();
       if (id) this.emit({ type: "clear", sessionId: id });
     }
+  }
+
+  /**
+   * Pipelining (ADR-0003): ask the engine to synthesize the chunk after
+   * `chunk` while the current one plays. No-op without a next chunk or an
+   * engine without `prefetch` (absent = no pipelining). Failures are
+   * swallowed — the next speak() synthesizes on demand regardless.
+   */
+  private prefetchNext(chunk: ChunkSpan): void {
+    if (typeof this.engine.prefetch !== "function") return;
+    const nextChunk = this.findChunkAt(chunk.to + 1);
+    if (!nextChunk) return;
+    void this.engine
+      .prefetch(chunkText(this.tokens, nextChunk), {
+        voiceName: this.settings.voiceName,
+        rate: this.settings.rate,
+      })
+      .catch(() => {});
   }
 
   private findChunkAt(tokenIndex: number): ChunkSpan | null {

@@ -8,9 +8,10 @@
  * the march). A binary MP3 response (or missing alignment) plays with no
  * word events — `wordTiming` stays true, the events are just absent.
  *
- * Implements prefetch() (pipelining, ADR-0003): a `text|voice|rate`-keyed
- * cache of decoded audio bytes that a later speak() with identical
- * text+options consumes instead of re-synthesizing; cancel() discards it.
+ * Implements prefetch() (pipelining, ADR-0003): a single-entry cache of
+ * decoded audio bytes — the latest prefetch wins — that a later speak()
+ * with identical text+options+key consumes instead of re-synthesizing;
+ * a mismatching speak() or cancel() discards it.
  *
  * Runs in any DOM-ish context (Firefox event page, Chrome offscreen doc):
  * fetch, getKey, and audio playback are injected.
@@ -103,8 +104,10 @@ export class ElevenLabsEngine implements TextEngine {
   private readonly audioHost: AudioHost;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
   private wordTimers: ReturnType<typeof setTimeout>[] = [];
-  /** Decoded audio for chunk pipelining (ADR-0003); cancel() discards it. */
-  private readonly cache = new Map<string, Uint8Array>();
+  /** Decoded audio for chunk pipelining (ADR-0003): one entry, latest
+   * prefetch wins; cancel() discards it. `apiKey` pins the entry to the
+   * key that synthesized it so a key change can't serve stale audio. */
+  private cache: { apiKey: string; cacheKey: string; bytes: Uint8Array } | null = null;
   private cacheEpoch = 0;
 
   constructor(opts: ElevenLabsEngineOptions) {
@@ -154,7 +157,9 @@ export class ElevenLabsEngine implements TextEngine {
       });
       if (!resp.ok) return;
       const audio = await this.parseAudio(resp);
-      if (audio && this.cacheEpoch === epoch) this.cache.set(this.cacheKey(text, options), audio.bytes);
+      if (audio && this.cacheEpoch === epoch) {
+        this.cache = { apiKey: key, cacheKey: this.cacheKey(text, options), bytes: audio.bytes };
+      }
     } catch {
       // best-effort — a later speak() fetches on demand
     }
@@ -182,7 +187,7 @@ export class ElevenLabsEngine implements TextEngine {
     }
     this.clearWordTimers();
     this.cacheEpoch += 1; // discard in-flight prefetch results too
-    this.cache.clear();
+    this.cache = null;
   }
 
   // --- internals ---
@@ -208,7 +213,7 @@ export class ElevenLabsEngine implements TextEngine {
 
     let playback: Playback;
     let alignment: unknown = undefined;
-    const cached = this.cache.get(this.cacheKey(text, options));
+    const cached = this.cachedFor(key, text, options);
     if (cached) {
       playback = this.audioHost.play(cached, "audio/mpeg");
     } else {
@@ -322,6 +327,20 @@ export class ElevenLabsEngine implements TextEngine {
 
   private cacheKey(text: string, options: SpeakOptions): string {
     return `${text}|${options.voiceName ?? ""}|${options.rate}`;
+  }
+
+  /**
+   * Serve the pipelining cache when text+options+key all match. A
+   * mismatching speak() discards the entry (ADR-0003 — latest prefetch
+   * wins; nothing stale survives to a later speak). A matching speak()
+   * keeps it: the next prefetch overwrites it and cancel() clears it.
+   */
+  private cachedFor(apiKey: string, text: string, options: SpeakOptions): Uint8Array | null {
+    const entry = this.cache;
+    if (!entry) return null;
+    const match = entry.apiKey === apiKey && entry.cacheKey === this.cacheKey(text, options);
+    if (!match) this.cache = null;
+    return match ? entry.bytes : null;
   }
 
   private clearWordTimers(): void {

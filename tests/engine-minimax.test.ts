@@ -7,7 +7,9 @@ import {
   MINIMAX_TTS_URL,
   MiniMaxEngine,
   SYSTEM_VOICES,
+  type AudioHost,
   type Playback,
+  type ProgressivePlayback,
 } from "../src/audio/engine-minimax";
 
 const collect = async (it: AsyncIterable<unknown>): Promise<unknown[]> => {
@@ -94,6 +96,74 @@ function makeFetch(
     return h(url, init);
   }) as typeof fetch;
   return { fetchImpl, calls };
+}
+
+// --- streaming (progressive host) harness ---
+
+interface StubProgressive extends ProgressivePlayback {
+  stopCalls: number;
+  endCalls: number;
+  appended: Uint8Array[];
+  finish(): void;
+  /** Media-clock test hook: sets the clock read at timeline-push time. */
+  clockTo(ms: number): void;
+}
+
+function makeProgressiveHost(): { host: AudioHost; playbacks: StubProgressive[] } {
+  const playbacks: StubProgressive[] = [];
+  const host: AudioHost = {
+    play(): Playback {
+      throw new Error("batch play() must not run when playProgressive exists");
+    },
+    playProgressive(): ProgressivePlayback {
+      let resolveDone!: () => void;
+      let time = 0;
+      const pb: StubProgressive = {
+        stopCalls: 0,
+        endCalls: 0,
+        appended: [],
+        done: new Promise<void>((r) => (resolveDone = r)),
+        stop: () => {
+          pb.stopCalls += 1;
+          resolveDone();
+        },
+        append: (chunk) => {
+          pb.appended.push(chunk);
+        },
+        end: () => {
+          pb.endCalls += 1;
+        },
+        finish: () => resolveDone(),
+        clockTo: (ms) => {
+          time = ms;
+        },
+      };
+      pb.clockMs = () => time;
+      playbacks.push(pb);
+      return pb;
+    },
+  };
+  return { host, playbacks };
+}
+
+/** Chunked 200 whose body the test feeds chunk by chunk. */
+function gateableResponse(): {
+  resp: Response;
+  enqueue(text: string): void;
+  close(): void;
+} {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+  });
+  return {
+    resp: { ok: true, body: stream } as unknown as Response,
+    enqueue: (text) => controller.enqueue(encoder.encode(text)),
+    close: () => controller.close(),
+  };
 }
 
 describe("MiniMaxEngine", () => {
@@ -617,6 +687,272 @@ describe("MiniMaxEngine — failure and edge paths (100% coverage)", () => {
   });
 });
 
+describe("MiniMaxEngine — HTTP-chunked streaming (progressive hosts)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stream:true request; fragments append as they arrive (first-byte fast path)", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([
+      (url, init) => {
+        expect(url).toBe(MINIMAX_TTS_URL);
+        const body = JSON.parse(String(init?.body));
+        expect(body.stream).toBe(true);
+        expect(body.subtitle_type).toBe("word_streaming");
+        expect(body.audio_setting).toEqual({
+          format: "mp3",
+          sample_rate: 32000,
+          bitrate: 128000,
+          channel: 1,
+          output_format: "hex",
+        });
+        expect(init?.headers).toMatchObject({ Authorization: "Bearer k9" });
+        return gate.resp;
+      },
+      () => jsonResponse(SUBTITLE_OK),
+    ]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k9", fetchImpl, audioHost: host });
+
+    const iterable = engine.speak("Hello world.", 31, { voiceName: null, rate: 1 });
+    const seen: unknown[] = [];
+    void (async () => {
+      for await (const ev of iterable) seen.push(ev);
+    })();
+
+    await vi.advanceTimersByTimeAsync(0); // headers only — nothing playable yet
+    expect(playbacks).toHaveLength(0);
+    expect(seen).toEqual([]);
+
+    gate.enqueue(`{"base_resp":{"status_code":0},"data":{"audio":"ff00","status":1}}`);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(playbacks).toHaveLength(1); // first fragment opens playback immediately
+    expect(playbacks[0].appended).toEqual([new Uint8Array([0xff, 0x00])]);
+    expect(seen).toEqual([{ type: "start", speakId: 31 }]);
+
+    gate.enqueue(`{"data":{"audio":"aa55"}}`);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(playbacks[0].appended).toEqual([new Uint8Array([0xff, 0x00]), new Uint8Array([0xaa, 0x55])]);
+    expect(playbacks[0].endCalls).toBe(0); // stream still open
+
+    gate.enqueue(`{"data":{"subtitle_file":"https://sub.example/s.json"},"base_resp":{"status_code":0}}`);
+    gate.close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(playbacks[0].endCalls).toBe(1);
+
+    // Timeline defers until the media clock actually moves: a starving
+    // MediaSource reads 0 and would anchor the march dishonestly.
+    await vi.advanceTimersByTimeAsync(200);
+    expect(seen).toHaveLength(1);
+
+    playbacks[0].clockTo(120);
+    await vi.advanceTimersByTimeAsync(60); // past the 50ms anchor poll
+    expect(seen).toEqual([
+      { type: "start", speakId: 31 },
+      { type: "timeline", speakId: 31, words: [
+        { begin: 0, end: 5, t: 0 },
+        { begin: 6, end: 12, t: expect.closeTo(457.6, 6) },
+      ], anchorWall: expect.any(Number), anchorClock: 120 },
+    ]);
+
+    playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toHaveLength(3); // + end
+    expect(seen[2]).toEqual({ type: "end", speakId: 31 });
+  });
+
+  it("host without playProgressive: exact legacy batch path (stream:false, one play)", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const { fetchImpl } = makeFetch([
+      (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return jsonResponse(ENVELOPE_OK);
+      },
+      () => jsonResponse(SUBTITLE_OK),
+    ]);
+    const host = makeHost(); // no playProgressive → fallback
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hello world.", 32, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.played).toHaveLength(1); // whole clip via play(), not fragments
+
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(bodies[0].stream).toBe(false);
+    expect(bodies[0].subtitle_type).toBe("word");
+    expect(await events).toEqual([
+      { type: "start", speakId: 32 },
+      { type: "timeline", speakId: 32, words: [
+        { begin: 0, end: 5, t: 0 },
+        { begin: 6, end: 12, t: expect.closeTo(457.6, 6) },
+      ], anchorWall: Date.now(), anchorClock: 0 },
+      { type: "end", speakId: 32 },
+    ]);
+  });
+
+  it("cancel mid-stream: cancelled, playback stopped, late fragment dropped", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gate.resp]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hello world.", 33, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gate.enqueue(`{"data":{"audio":"ff00"}}`);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(playbacks[0].appended).toHaveLength(1);
+
+    engine.cancel();
+    gate.enqueue(`{"data":{"audio":"aa55"}}`); // in flight when cancel landed
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks[0].stopCalls).toBe(1);
+    expect(playbacks[0].appended).toHaveLength(1); // late fragment dropped
+    expect(await events).toEqual([
+      { type: "start", speakId: 33 },
+      { type: "cancelled", speakId: 33 },
+    ]);
+  });
+
+  it("a new speak preempts mid-stream: old cancelled + stopped, new streams", async () => {
+    const gateA = gateableResponse();
+    const gateB = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gateA.resp, () => gateB.resp]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const eventsA = collect(engine.speak("Alpha.", 41, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gateA.enqueue(`{"data":{"audio":"11"}}`);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const eventsB = collect(engine.speak("Beta.", 42, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gateB.enqueue(`{"data":{"audio":"22"}}`);
+    gateB.close();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks[0].stopCalls).toBe(1);
+    expect(playbacks[1].appended).toEqual([new Uint8Array([0x22])]);
+    expect(playbacks[1].endCalls).toBe(1);
+
+    playbacks[1].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await eventsA).toEqual([
+      { type: "start", speakId: 41 },
+      { type: "cancelled", speakId: 41 },
+    ]);
+    expect(await eventsB).toEqual([
+      { type: "start", speakId: 42 },
+      { type: "end", speakId: 42 },
+    ]);
+  });
+
+  it("error envelope mid-stream: start already pushed, then error + stop", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gate.resp]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hi.", 34, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gate.enqueue(`{"data":{"audio":"aa"},"base_resp":{"status_code":0}}`);
+    await vi.advanceTimersByTimeAsync(0);
+    gate.enqueue(`{"base_resp":{"status_code":2054,"status_msg":"voice id not exist"},"data":{"audio":""}}`);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks[0].stopCalls).toBe(1);
+    expect(await events).toEqual([
+      { type: "start", speakId: 34 },
+      { type: "error", speakId: 34, message: "voice id not exist" },
+    ]);
+  });
+
+  it("error envelope in the first object: error only, no start, no playback", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gate.resp]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hi.", 35, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gate.enqueue(`{"base_resp":{"status_code":1002}}`);
+    gate.close();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks).toHaveLength(0);
+    expect(await events).toEqual([{ type: "error", speakId: 35, message: "MiniMax error 1002" }]);
+  });
+
+  it("stream closing before any audio: 'no audio payload' error (batch parity)", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gate.resp]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hi.", 36, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gate.close();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks).toHaveLength(0);
+    expect(await events).toEqual([{ type: "error", speakId: 36, message: "MiniMax returned no audio payload" }]);
+  });
+
+  it("objects split across chunks (even inside strings) parse incrementally", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gate.resp]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hi.", 37, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gate.enqueue(`{"data":{"audio":"ff`);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(playbacks).toHaveLength(0); // partial object held back
+
+    gate.enqueue(`00"},"note":"}{"}`); // string containing braces must not confuse the scanner
+    gate.close();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks[0].appended).toEqual([new Uint8Array([0xff, 0x00])]);
+    playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 37 },
+      { type: "end", speakId: 37 },
+    ]);
+  });
+
+  it("playback finishing before the clock moves drops the timeline, keeps end", async () => {
+    const gate = gateableResponse();
+    const { fetchImpl } = makeFetch([() => gate.resp, () => jsonResponse(SUBTITLE_OK)]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hello world.", 38, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    gate.enqueue(`{"data":{"audio":"ff00"}}`);
+    gate.enqueue(`{"data":{"subtitle_file":"https://sub.example/s.json"}}`);
+    gate.close();
+    await vi.advanceTimersByTimeAsync(0);
+
+    playbacks[0].finish(); // audio ended before it ever sounded (clock still 0)
+    await vi.advanceTimersByTimeAsync(120); // anchor poll observes done, not clock
+
+    expect(await events).toEqual([
+      { type: "start", speakId: 38 },
+      { type: "end", speakId: 38 },
+    ]);
+  });
+});
+
 describe("DOM_AUDIO_HOST (default Audio-based playback)", () => {
   interface FakeAudioInstance {
     src: string;
@@ -666,6 +1002,12 @@ describe("DOM_AUDIO_HOST (default Audio-based playback)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("omits playProgressive where MediaSource is unavailable (engines fall back)", () => {
+    // jsdom (and old browsers) lack MediaSource: the property must be absent,
+    // never a throwing stub, so engines take the batch path.
+    expect(DOM_AUDIO_HOST.playProgressive).toBeUndefined();
   });
 
   it("plays via objectURL, resolves done on ended, revokes the URL exactly once", async () => {
