@@ -102,14 +102,16 @@ watch the SW console for the streamed `[leia probe]` lines.
 
 | | Offscreen `speechSynthesis` | `chrome.tts` |
 |---|---|---|
-| Voices usable | ? | ? |
-| Word `charIndex`/boundary | ? | ? |
-| Error-resilient events | ? | ? |
-| Audio in offscreen / no user-gesture need | ? | n/a |
+| Voices usable | yes (19, all network) | n/a (absent) |
+| Word `charIndex`/boundary | **NO on Linux** (sentence-level only here) | n/a (absent) |
+| Error-resilient events | yes | n/a (absent) |
+| Audio in offscreen / no user-gesture need | yes (events + end; audibility unverified) | n/a |
 
-**Default engine:** (fill in) → one becomes the Web Speech Chrome default;
-the other stays as an engine capability variant behind the adapter seam.
-Amend ADR-0002 with the winner and the concrete `charIndex` evidence.
+**Default engine:** (verdict: offscreen `speechSynthesis` stays the Chrome
+default — it is the only available path on this platform; word timing falls
+back to estimator/T5 here; `chrome.tts` stays a capability variant for
+platforms where it exists. Final cross-platform wording for ADR-0002
+amendment pending.)
 ## T2 note (product offscreen document)
 
 T2 moved the manifest `offscreen` declaration to the product audio owner
@@ -131,3 +133,17 @@ Executed via `scripts/spike-drive.mjs` (CDP: open popup tab → `chrome.runtime.
 | `leia:tts-probe` | `chrome.tts unavailable` | **`chrome.tts` is absent in headless** (speech subsystem disabled) |
 
 **Conclusion:** the probe harness is proven and reproducible; all three verdicts are headless artifacts. The Chrome default-engine decision NEEDS a GUI session: run this checklist in a real Chrome (load `dist/chrome` unpacked, drive via SW console with `chrome.runtime.sendMessage({type:"leia:probe-voices"|"leia:probe-speak"|"leia:tts-probe"})`), and record the GUI result here before amending ADR-0002.
+
+## GUI run (2026-09-04, headful flatpak Chrome 152.0.7977.75 on Linux/Wayland, loadUnpacked)
+
+Setup: `--load-extension` path-load was quarantined by Chrome content
+verification (`Content verify job failed, reason:1`); browser-level
+**Extensions → Load unpacked** worked; fixed durably by user granting
+filesystem access via Flatseal + enabling Developer mode. Verdict:
+
+| Probe | Result | Meaning |
+|---|---|---|
+| `leia:probe-voices` | `{populatedSync:false, waitMs:0, count:19, localCount:0, names: Google Deutsch de-DE, Google US English en-US, Google UK English Female/Male en-GB, Google español es-ES (all local=false)}` | Offscreen `AUDIO_PLAYBACK` creation OK; **voices exist** — all network (`localCount:0`), populated via `voiceschanged` only |
+| `leia:probe-speak` | run1 `{stage:"end", elapsedMs:2796, events:[start@692ms]}`; run2 `{stage:"end", elapsedMs:2371, events:[start@389ms]}` | Full lifecycle works, second speak completes; **zero `speak:boundary` events** (no word `charIndex` from these voices on Linux), zero `speak:error` |
+| `leia:tts-probe` | `{ok:false, error:"chrome.tts unavailable"}` | **`chrome.tts` absent** in this build/platform |
+| audible? | UNVERIFIED (no human/audio-capture check) | checklist item left open |
