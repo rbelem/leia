@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { beforeEach, describe, expect, it } from "vitest";
-import { captureArticle, captureScope } from "../src/content/scope";
+import { captureArticle, captureScope, captureScopeDetailed } from "../src/content/scope";
 
 /** Article with global noise OUTSIDE the article root (nav/aside/footer). */
 function articleFixture(): void {
@@ -68,5 +68,44 @@ describe("article scope capture (T3)", () => {
 
     document.body.innerHTML = "<p>tiny</p>";
     expect(captureScope(window)).toBeNull();
+  });
+});
+
+describe("captureScopeDetailed failure reasons (popup diagnostics)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("gives a null reason on success (article path)", () => {
+    articleFixture();
+    const { scope, reason } = captureScopeDetailed(window);
+    expect(scope).not.toBeNull();
+    expect(reason).toBeNull();
+  });
+
+  it("names the article stage when the page is not readable", () => {
+    document.body.innerHTML = "<p>tiny</p>";
+    const { scope, reason } = captureScopeDetailed(window);
+    expect(scope).toBeNull();
+    expect(reason).toContain("no selection");
+    expect(reason).toContain("page is not readable");
+  });
+
+  it("names the article stage when Readability extracts nothing", () => {
+    // Readable-looking (500+ chars inside <p>) but the extracted article
+    // body is empty text: whitespace-only nodes survive readability scoring
+    // yet normalize to nothing.
+    document.body.innerHTML = `<p>${"&nbsp;".repeat(600)}</p>`;
+    const { scope, reason } = captureScopeDetailed(window);
+    expect(scope).toBeNull();
+    expect(reason).toContain("no selection");
+  });
+
+  it("names the missing-body stage", () => {
+    document.body.remove();
+    const { scope, reason } = captureScopeDetailed(window);
+    expect(scope).toBeNull();
+    expect(reason).toContain("page has no body");
+    document.documentElement.appendChild(document.createElement("body")); // restore for beforeEach
   });
 });

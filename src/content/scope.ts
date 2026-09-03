@@ -40,40 +40,65 @@ export function captureSelection(win: Window): CapturedScope | null {
  * the LIVE DOM as the deepest element whose normalized text still covers
  * the extracted text (Readability only ever removed text, so the container
  * is the tightest superset of it), and that container's full text range is
- * tokenized like any selection.
+ * tokenized like any selection. See captureArticleDetailed for the
+ * stage-tracked variant.
  */
 export function captureArticle(win: Window): CapturedScope | null {
+  return captureArticleDetailed(win).scope;
+}
+
+/** Scope decision: explicit selection first, else the article (T3), else null. */
+export function captureScope(win: Window): CapturedScope | null {
+  return captureScopeDetailed(win).scope;
+}
+
+export interface ScopeCapture {
+  scope: CapturedScope | null;
+  /** Human-readable reason the capture failed; null when scope is non-null. */
+  reason: string | null;
+}
+
+/** captureScope with the failure reason surfaced (popup diagnostics T-err). */
+export function captureScopeDetailed(win: Window): ScopeCapture {
+  const selection = captureSelection(win);
+  if (selection) return { scope: selection, reason: null };
+  const article = captureArticleDetailed(win);
+  if (article.scope) return { scope: article.scope, reason: null };
+  return { scope: null, reason: `no selection; ${article.reason}` };
+}
+
+/** Stage-by-stage article capture; keeps captureArticle's public shape. */
+function captureArticleDetailed(win: Window): { scope: CapturedScope | null; reason: string } {
   const doc = win.document;
-  if (!doc.body || !isProbablyReaderable(doc)) return null;
+  if (!doc.body) return { scope: null, reason: "page has no body" };
+  if (!isProbablyReaderable(doc)) return { scope: null, reason: "page is not readable (no article-like content)" };
   const cloneDoc = doc.implementation.createHTMLDocument("");
   cloneDoc.body.appendChild(cloneDoc.importNode(doc.body, true));
   let textContent: string;
   try {
     const parsed = new Readability(cloneDoc).parse();
-    if (!parsed?.textContent) return null;
+    if (!parsed?.textContent) return { scope: null, reason: "Readability extracted no article text" };
     textContent = parsed.textContent;
-  } catch {
-    return null; // malformed page — degrade to the selection flow
+  } catch (err) {
+    return { scope: null, reason: `Readability failed: ${String(err)}` };
   }
   const norm = textContent.replace(/\s+/g, "");
-  if (norm.length === 0) return null;
+  if (norm.length === 0) return { scope: null, reason: "Readability extracted no article text" };
   const root = deepestCoveringElement(doc.body, norm.length);
-  if (!root) return null;
+  if (!root) return { scope: null, reason: "no element in the page covers the extracted article text" };
   const range = doc.createRange();
   range.selectNodeContents(root);
   const tokens = tokenIndexFromRange(range);
-  if (tokens.length === 0) return null;
+  if (tokens.length === 0) return { scope: null, reason: "extracted article produced no readable tokens" };
   return {
-    tokens: tokens.map(({ text, blockStart, heading }) =>
-      blockStart || heading ? { text, ...(blockStart && { blockStart }), ...(heading && { heading }) } : { text },
-    ),
-    ranges: tokens.map((t) => t.range),
+    scope: {
+      tokens: tokens.map(({ text, blockStart, heading }) =>
+        blockStart || heading ? { text, ...(blockStart && { blockStart }), ...(heading && { heading }) } : { text },
+      ),
+      ranges: tokens.map((t) => t.range),
+    },
+    reason: "",
   };
-}
-
-/** Scope decision: explicit selection first, else the article (T3), else null. */
-export function captureScope(win: Window): CapturedScope | null {
-  return captureSelection(win) ?? captureArticle(win);
 }
 
 /**

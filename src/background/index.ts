@@ -104,6 +104,65 @@ async function broadcast(msg: Record<string, unknown>): Promise<void> {
  * tokens are passed; T17 preserve-position and T16 restore run here too so
  * every entry point gets identical semantics.
  */
+interface TabCapture {
+  reply?: RouterReply;
+  error?: string;
+}
+
+/** One capture round-trip; rejections become `error`, undefined replies stay undefined. */
+async function sendCapture(tabId: number): Promise<TabCapture> {
+  try {
+    const reply = (await browser.tabs.sendMessage(tabId, { type: "leia:selection:capture" })) as
+      | RouterReply
+      | undefined;
+    return { reply };
+  } catch (err) {
+    return { error: String(err) };
+  }
+}
+
+/**
+ * Content-script injection for the capture retry. The activeTab permission is
+ * granted by the very action invocation that led here (popup open / toolbar
+ * click / shortcut), so no extra host permission is needed.
+ */
+async function injectReaderScript(tabId: number): Promise<boolean> {
+  try {
+    const scripting = (browser as unknown as {
+      scripting?: { executeScript: (details: { target: { tabId: number }; files: string[] }) => Promise<unknown> };
+    }).scripting;
+    if (!scripting) return false;
+    await scripting.executeScript({ target: { tabId }, files: ["content/index.js"] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Capture the tab's read scope with a distinct reason per failure mode
+ * (missing/orphaned content script vs capture returned null vs send threw).
+ * An undefined reply means no content script answered — the standard state
+ * after an extension reload leaves previously-open tabs orphaned — so the
+ * reader script is re-injected (activeTab) and the capture retried once.
+ */
+async function captureTabScope(tabId: number): Promise<TabCapture> {
+  let capture = await sendCapture(tabId);
+  if (capture.reply === undefined) {
+    const injected = await injectReaderScript(tabId);
+    if (injected) capture = await sendCapture(tabId);
+    else {
+      return {
+        error: `no leia reader script in this tab and re-injection failed: ${capture.error ?? "tab not injectable"}`,
+      };
+    }
+  }
+  if (capture.reply === undefined) {
+    capture.error ??= "reader script did not respond after re-injection — reload the page";
+  }
+  return capture;
+}
+
 /** Exported for tests/reader-start.test.ts (the start reply must not voice-gate). */
 export async function handleReaderStart(msg: {
   tokens?: TokenText[];
@@ -121,14 +180,16 @@ export async function handleReaderStart(msg: {
       // Toolbar-action fallback: capture the active tab's selection.
       if (!tab?.id) return { ok: false, replyType: "leia:reader:start", error: "no active tab" };
       captureTabId = tab.id;
-      const reply = (await browser.tabs.sendMessage(captureTabId, { type: "leia:selection:capture" })) as
-        | RouterReply
-        | undefined;
-      if (!reply?.ok) {
-        return { ok: false, replyType: "leia:reader:start", error: (reply as RouterReply | undefined)?.error ?? "no selection" };
+      const capture = await captureTabScope(captureTabId);
+      if (!capture.reply?.ok) {
+        return {
+          ok: false,
+          replyType: "leia:reader:start",
+          error: capture.reply?.error ?? capture.error ?? "no selection",
+        };
       }
-      tokens = (reply.data as { tokens: TokenText[] }).tokens;
-      captureId = (reply.data as { captureId?: number }).captureId;
+      tokens = (capture.reply.data as { tokens: TokenText[] }).tokens;
+      captureId = (capture.reply.data as { captureId?: number }).captureId;
     }
     // T17 — starting elsewhere must not silently drop the current
     // position: park the running session's record under its URL first.
