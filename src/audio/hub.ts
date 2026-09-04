@@ -87,6 +87,21 @@ export class EngineHub implements TextEngine {
     target?.cancel();
   }
 
+  /**
+   * Media clock (ms) of the active audio on the current engine (the content
+   * pages' 250ms word-march re-sync poll). Duck-typed like prefetch: engines
+   * without a clock (web-speech, …) — or no current engine — read null.
+   * Never throws; a clock hiccup must not kill the poll.
+   */
+  currentClockMs(): number | null {
+    try {
+      const clocked = this.current as (TextEngine & { currentClockMs?: () => number | null }) | null;
+      return clocked?.currentClockMs?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Forward pipelining to the current engine (ADR-0003); a plain engine — or no engine — is a no-op. Never throws. */
   async prefetch(text: string, options: SpeakOptions): Promise<void> {
     try {

@@ -123,6 +123,15 @@ function handleAudioMessage(msg: unknown): unknown {
     case "leia:audio:cancel":
       engine.cancel();
       return { ok: true };
+    // Synchronous read on purpose: the reply-listener helper triages sync, so
+    // the content pages' 250ms clock poll always gets an immediate reply.
+    // SINGLE RESPONDER: this doc answers with the march's envelope shape and
+    // the SW stays silent on Chrome (see background/index.ts) — two contexts
+    // answering the same poll raced raw-number vs envelope and the march kept
+    // whichever arrived first (live-proven null-hijack).
+    case "leia:audio:clock": {
+      return { ok: true, replyType: "leia:audio:clock", data: { clock: engine.currentClockMs() } };
+    }
     default:
       return undefined;
   }

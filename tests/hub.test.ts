@@ -50,6 +50,16 @@ class PrefetchStubEngine extends StubEngine {
   }
 }
 
+class ClockStubEngine extends StubEngine {
+  clock: number | null = null;
+  failClock = false;
+
+  currentClockMs(): number | null {
+    if (this.failClock) throw new Error("clock blew up");
+    return this.clock;
+  }
+}
+
 describe("EngineHub", () => {
   it("merged getVoices: default family first, stable order, rejected engines skipped", async () => {
     const ws = new StubEngine("web-speech", [voice("Local A", "web-speech")]);
@@ -107,6 +117,30 @@ describe("EngineHub", () => {
 
     hub.select("azure");
     await expect(hub.prefetch("Hello.", options)).resolves.toBeUndefined(); // engine failure swallowed
+  });
+
+  it("currentClockMs forwards to the current engine; plain engines, failure, and no engine read null", () => {
+    const plain = new StubEngine("web-speech", []);
+    const clocked = new ClockStubEngine("minimax", []);
+    const failing = new ClockStubEngine("azure", []);
+    failing.failClock = true;
+    const hub = new EngineHub();
+    hub.register("web-speech", plain, { default: true });
+    hub.register("minimax", clocked);
+    hub.register("azure", failing);
+
+    expect(hub.currentClockMs()).toBeNull(); // plain current (web-speech has no clock)
+
+    clocked.clock = 4200;
+    hub.select("minimax");
+    expect(hub.currentClockMs()).toBe(4200); // forwarded to the current engine
+    clocked.clock = 4350;
+    expect(hub.currentClockMs()).toBe(4350); // advances while the chunk plays
+
+    hub.select("azure");
+    expect(hub.currentClockMs()).toBeNull(); // throwing clock swallowed — never throws
+
+    expect(new EngineHub().currentClockMs()).toBeNull(); // no engines at all
   });
 
   it("selectFamily selects the family (session engine-switch hook)", async () => {

@@ -8,7 +8,8 @@
  * must carry BOTH: the routing type AND the engine event (nested under
  * `event`, whose own `type` drives the SW's terminal check).
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { MINIMAX_TTS_URL } from "../src/audio/engine-minimax";
 
 type ReplyListener = (msg: unknown, sender: unknown, sendResponse?: (response?: unknown) => void) => unknown;
 
@@ -116,5 +117,131 @@ describe("offscreen audio event wire shape", () => {
     // reads event.type; a routing key leaking in there would close the
     // stream after the first event instead.
     expect((sent.at(-1) as { event: { type: string } }).event.type).toBe("end");
+  });
+});
+
+// --- leia:audio:clock (Chrome live-proven dead clock) -------------------------
+// The offscreen doc hosts the real engine hub and answers the content
+// pages' 250ms word-march clock poll here with the march's envelope shape.
+// SINGLE RESPONDER: the SW stays silent on Chrome, so this envelope is the
+// only reply the poll can receive (a raw-number second reply raced it and
+// the march kept whichever arrived first). The case must answer
+// SYNCHRONOUSLY (the reply-listener helper triages sync) with the hub's
+// currentClockMs: a real number while audio plays, null when idle.
+
+interface FakeAudioInstance {
+  src: string;
+  onended: (() => void) | null;
+  onerror: (() => void) | null;
+  currentTime: number;
+  play(): Promise<void>;
+  pause(): void;
+}
+
+let lastAudio: FakeAudioInstance | null = null;
+
+class FakeAudio implements FakeAudioInstance {
+  src: string;
+  onended: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  currentTime = 0;
+  constructor(src: string) {
+    this.src = src;
+    lastAudio = this;
+  }
+  play(): Promise<void> {
+    // "Playing" from the first read — no 50ms anchor-poll wall time needed.
+    this.currentTime = 0.25;
+    return Promise.resolve();
+  }
+  pause(): void {}
+}
+
+function jsonResponse(data: unknown): Response {
+  return { ok: true, json: async () => data } as unknown as Response;
+}
+
+/** Read the clock the way the SW's forward does: through the reply listener. */
+function clockReply(): Promise<unknown> {
+  return new Promise((resolve) => {
+    state.listeners[0]({ type: "leia:audio:clock" }, {}, (r?: unknown) => resolve(r));
+  });
+}
+
+describe("offscreen leia:audio:clock", () => {
+  beforeEach(() => {
+    vi.stubGlobal("speechSynthesis", synth);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string): Promise<Response> => {
+        if (url === MINIMAX_TTS_URL) {
+          return jsonResponse({
+            base_resp: { status_code: 0 },
+            data: { audio: "ff00", subtitle_file: "https://sub.example/segments.json" },
+          });
+        }
+        if (url === "https://sub.example/segments.json") {
+          return jsonResponse([
+            { timestamped_words: [{ word: "Hello", word_begin: 0, word_end: 5, time_begin: 0 }] },
+          ]);
+        }
+        throw new Error(`unexpected fetch: ${url}`); // local-profile probes → offline → skipped
+      }),
+    );
+    vi.stubGlobal("Audio", FakeAudio);
+    (URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => "blob:test-url");
+    (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    (URL as unknown as Record<string, unknown>).createObjectURL = undefined;
+    (URL as unknown as Record<string, unknown>).revokeObjectURL = undefined;
+    lastAudio = null;
+  });
+
+  it("reads null while idle (current engine has no clock)", async () => {
+    await loadOffscreen();
+    await expect(clockReply()).resolves.toEqual({
+      ok: true,
+      replyType: "leia:audio:clock",
+      data: { clock: null },
+    });
+  });
+
+  it("returns a non-null, advancing number while a clocked engine plays", async () => {
+    await loadOffscreen();
+
+    // Select minimax AND arm its provider key in one audio message (the
+    // offscreen doc reads keys from the SW's in-memory snapshot, keystore.ts).
+    state.listeners[0](
+      { type: "leia:audio:family", family: "minimax", keys: { "leia:settings:minimaxKey": "k" } },
+      {},
+    );
+    state.listeners[0]({ type: "leia:audio:speak", speakId: 5, text: "Hello world.", voiceName: null, rate: 1 }, {});
+
+    await until(() => lastAudio !== null); // audio element exists…
+    await until(() => state.sent.some((m) => (m as { type?: string }).type === "leia:audio:event")); // …and start shipped
+
+    await expect(clockReply()).resolves.toEqual({
+      ok: true,
+      replyType: "leia:audio:clock",
+      data: { clock: 250 },
+    }); // live media clock while playing
+
+    lastAudio!.currentTime = 0.6;
+    await expect(clockReply()).resolves.toEqual({
+      ok: true,
+      replyType: "leia:audio:clock",
+      data: { clock: 600 },
+    }); // advances with playback
+
+    lastAudio!.onended!(); // natural end → active playback cleared
+    await until(() => state.sent.length >= 3); // start + timeline + end
+    await expect(clockReply()).resolves.toEqual({
+      ok: true,
+      replyType: "leia:audio:clock",
+      data: { clock: null },
+    }); // idle again
   });
 });

@@ -510,6 +510,10 @@ async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | un
   // content page polls the media clock at 250ms — the message traffic keeps
   // the page active AND each synchronous currentTime read re-anchors the
   // visible tab's word march.
+  // Chrome: the engine hub lives in the offscreen document, which answers
+  // this poll itself with the same envelope (single responder — the SW
+  // triage above stays silent on Chrome so the two replies can't race).
+  // Kept here only for Firefox, whose background page hosts its own hub.
   if (msg.type === "leia:audio:clock") {
     return { ok: true, replyType: "leia:audio:clock", data: { clock: audioClockMs() } };
   }
@@ -551,6 +555,12 @@ addReplyListener((msg: unknown) => {
     console.log("[leia probe]", (msg as { probe?: string }).probe, msg.data);
     return undefined;
   }
+  // Chrome: the offscreen doc owns leia:audio:clock (single responder — it
+  // answers with the march's envelope shape). Answering here too would race
+  // a second reply against its envelope, and the content poll keeps
+  // whichever arrives first. Firefox has no offscreen doc, so the async
+  // body below answers via audioClockMs().
+  if (msg.type === "leia:audio:clock" && isChrome()) return undefined;
   return handleBackgroundMessage(msg);
 });
 
