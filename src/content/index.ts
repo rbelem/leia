@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import browser from "webextension-polyfill";
 import { isRouterMessage, routeMessage, type RouterMessage, type RouterReply } from "../background/router";
+import { addReplyListener } from "../messaging";
 import { pageInfoFromDocument } from "./page-info";
 import { captureScopeDetailed, ScopeHighlighter, type CapturedScope } from "./scope";
 import { ensureHighlightStyle, setTheme } from "./highlight";
@@ -102,7 +103,10 @@ function handleThemeSetMsg(msg: RouterMessage): undefined {
   return undefined;
 }
 
-browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined => {
+// Respond-only-if-handled wiring (see messaging.ts for the WHY): the triage
+// below is synchronous, so unhandled message types never claim this tab's
+// reply channel. Handlers stay untouched.
+addReplyListener((msg: unknown) => {
   if (!isRouterMessage(msg)) return undefined;
   switch (msg.type) {
     case "leia:page-info":

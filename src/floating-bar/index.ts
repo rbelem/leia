@@ -16,7 +16,8 @@
  * onChanged mounts/unmounts the bar live in open tabs.
  */
 import browser from "webextension-polyfill";
-import { isRouterMessage, routeMessage, type RouterReply } from "../background/router";
+import { isRouterMessage, routeMessage, type RouterMessage, type RouterReply } from "../background/router";
+import { addReplyListener } from "../messaging";
 import { captureScope, ScopeHighlighter } from "../content/scope";
 import { ensureHighlightStyle } from "../content/highlight";
 import { createMarch } from "../content/march";
@@ -408,51 +409,72 @@ function applySurface(inPage: boolean): void {
   else unmount();
 }
 
-browser.runtime.onMessage.addListener((msg: unknown): RouterReply | undefined => {
+// Respond-only-if-handled wiring (see messaging.ts for the WHY): every arm
+// here is a sync plain return, so the async-listener version either dropped
+// them (polyfill) or hijacked channels for messages it doesn't own.
+function handleBarStatus(): RouterReply {
+  return { ok: true, replyType: "leia:bar-status", data: { mounted: els !== null, id: BAR_ID } };
+}
+
+function handleBarHighlightSet(msg: RouterMessage): undefined {
+  // First highlight = audio actually began: end the Play pending state.
+  if (loading && shouldClearLoading({ type: "highlight" })) clearLoading();
+  const m = msg as unknown as {
+    sessionId: string;
+    from: number;
+    to: number;
+    word?: { begin: number; end: number };
+    timeline?: Parameters<typeof march.arm>[3];
+  };
+  highlighter.show(m.sessionId, m.from, m.to, m.word);
+  if (m.timeline) march.arm(m.sessionId, m.from, m.to, m.timeline);
+  return undefined;
+}
+
+function handleBarHighlightClear(msg: RouterMessage): undefined {
+  march.disarm();
+  highlighter.clear((msg as unknown as { sessionId: string }).sessionId);
+  return undefined;
+}
+
+// Pause/stop/seek halt the local march (no further words arrive).
+function handleBarSessionState(msg: RouterMessage): undefined {
+  status = (msg as unknown as { status: SessionStatus }).status;
+  if (status.state !== "playing") march.disarm();
+  if (loading && shouldClearLoading({ type: "state", state: status.state })) clearLoading();
+  render();
+  return undefined;
+}
+
+// Surface engine failures directly on the bar (T17) — the popup is
+// usually closed exactly when these fire.
+function handleBarSessionError(msg: RouterMessage): undefined {
+  if (loading && shouldClearLoading({ type: "error" })) clearLoading();
+  staleNotice = `engine: ${(msg as unknown as { message: string }).message}`;
+  render();
+  return undefined;
+}
+
+addReplyListener((msg: unknown) => {
   if (!isRouterMessage(msg)) return undefined;
-  if (msg.type === "leia:bar-status") {
-    return { ok: true, replyType: "leia:bar-status", data: { mounted: els !== null, id: BAR_ID } };
+  switch (msg.type) {
+    case "leia:bar-status":
+      return handleBarStatus();
+    // Marching highlight for the bar-captured path: the background only
+    // binds the content-script highlighter for its own captures, so the
+    // bar applies highlight events to the scope it bound itself — and runs
+    // the local word march for them (see content/march.ts).
+    case "leia:highlight:set":
+      return handleBarHighlightSet(msg);
+    case "leia:highlight:clear":
+      return handleBarHighlightClear(msg);
+    case "leia:session:state":
+      return handleBarSessionState(msg);
+    case "leia:session:error":
+      return handleBarSessionError(msg);
+    default:
+      return routeMessage(msg) ?? undefined;
   }
-  // Marching highlight for the bar-captured path: the background only
-  // binds the content-script highlighter for its own captures, so the
-  // bar applies highlight events to the scope it bound itself — and runs
-  // the local word march for them (see content/march.ts).
-  if (msg.type === "leia:highlight:set") {
-    // First highlight = audio actually began: end the Play pending state.
-    if (loading && shouldClearLoading({ type: "highlight" })) clearLoading();
-    const m = msg as unknown as {
-      sessionId: string;
-      from: number;
-      to: number;
-      word?: { begin: number; end: number };
-      timeline?: Parameters<typeof march.arm>[3];
-    };
-    highlighter.show(m.sessionId, m.from, m.to, m.word);
-    if (m.timeline) march.arm(m.sessionId, m.from, m.to, m.timeline);
-    return undefined;
-  }
-  if (msg.type === "leia:highlight:clear") {
-    march.disarm();
-    highlighter.clear((msg as unknown as { sessionId: string }).sessionId);
-    return undefined;
-  }
-  // Pause/stop/seek halt the local march (no further words arrive).
-  if (msg.type === "leia:session:state") {
-    status = (msg as unknown as { status: SessionStatus }).status;
-    if (status.state !== "playing") march.disarm();
-    if (loading && shouldClearLoading({ type: "state", state: status.state })) clearLoading();
-    render();
-    return undefined;
-  }
-  // Surface engine failures directly on the bar (T17) — the popup is
-  // usually closed exactly when these fire.
-  if (msg.type === "leia:session:error") {
-    if (loading && shouldClearLoading({ type: "error" })) clearLoading();
-    staleNotice = `engine: ${(msg as unknown as { message: string }).message}`;
-    render();
-    return undefined;
-  }
-  return routeMessage(msg) ?? undefined;
 });
 
 // Surface flag: mount per stored value, then follow live toggles from the

@@ -13,6 +13,7 @@
  */
 import browser from "webextension-polyfill";
 import { isRouterMessage, type RouterMessage, type RouterReply } from "../background/router";
+import { addReplyListener } from "../messaging";
 import type { SessionStatus } from "../reader/session";
 import type { EngineCapabilities, VoiceInfo } from "../reader/contract";
 import { BUILT_IN_PROFILES, readLocalProfiles } from "../audio/local-profiles";
@@ -533,9 +534,13 @@ if (document.getElementById("voice")) {
 
   // The first highlight is the truthful "audio started" that ends the Play
   // pending state; state messages keep the transport fresh while open.
-  browser.runtime.onMessage.addListener((msg: unknown) => {
-    if (!isRouterMessage(msg)) return;
+  // Broadcast-only listener: it never replies, so it must return undefined
+  // SYNCHRONOUSLY (see messaging.ts) — as an async listener it answered every
+  // message with a resolved-undefined and hijacked other contexts' replies.
+  addReplyListener((msg: unknown) => {
+    if (!isRouterMessage(msg)) return undefined;
     applyBroadcast(msg);
+    return undefined;
   });
 
   void refresh();

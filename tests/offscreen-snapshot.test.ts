@@ -4,24 +4,39 @@
  * SW rides a key snapshot on every leia:audio:* message. With a snapshot
  * carrying the minimax key, getVoices includes minimax voices; without one
  * (storage unavailable) minimax contributes [] while web-speech still works.
+ *
+ * The listener is the respond-only-if-handled wrapper (src/messaging.ts):
+ * it returns `true` for handled messages and delivers the reply through
+ * sendResponse once resolved.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceInfo } from "../src/reader/contract";
 
+type ReplyListener = (msg: unknown, sender: unknown, sendResponse?: (response?: unknown) => void) => unknown;
+
 const state = vi.hoisted(() => ({
-  listeners: [] as Array<(msg: unknown) => unknown>,
+  listeners: [] as ReplyListener[],
 }));
 
 vi.mock("webextension-polyfill", () => ({
   default: {
     runtime: {
       sendMessage: async () => ({}),
-      onMessage: { addListener: (fn: (msg: unknown) => unknown) => state.listeners.push(fn) },
+      onMessage: { addListener: (fn: ReplyListener) => state.listeners.push(fn) },
     },
   },
 }));
 
 const MINIMAX_KEY = "leia:settings:minimaxKey";
+
+/** Load the offscreen doc, then deliver one message and return its reply. */
+async function reply(msg: unknown): Promise<unknown> {
+  const listener = state.listeners[0];
+  const sendResponse = vi.fn();
+  expect(listener(msg, {}, sendResponse)).toBe(true); // handled: channel held open
+  await new Promise<void>((resolve) => setTimeout(resolve, 0)); // flush delivery
+  return sendResponse.mock.calls[0][0];
+}
 
 async function loadOffscreen(): Promise<void> {
   vi.resetModules(); // fresh hub + keystore per test
@@ -47,18 +62,16 @@ describe("offscreen audio snapshot-apply (no chrome.storage)", () => {
 
   it("returns minimax voices after a message applies a snapshot with its key", async () => {
     await loadOffscreen();
-    const listener = state.listeners[0];
-    const withKey = (await listener({ type: "leia:audio:voices", keys: { [MINIMAX_KEY]: "mm-secret" } })) as VoiceInfo[];
+    const withKey = (await reply({ type: "leia:audio:voices", keys: { [MINIMAX_KEY]: "mm-secret" } })) as VoiceInfo[];
     expect(withKey.some((v) => v.family === "minimax")).toBe(true);
     // Next message carries no snapshot — the last one must stay applied.
-    const again = (await listener({ type: "leia:audio:voices" })) as VoiceInfo[];
+    const again = (await reply({ type: "leia:audio:voices" })) as VoiceInfo[];
     expect(again.some((v) => v.family === "minimax")).toBe(true);
   });
 
   it("yields no provider voices without a snapshot, but web-speech still answers", async () => {
     await loadOffscreen();
-    const listener = state.listeners[0];
-    const voices = (await listener({ type: "leia:audio:voices" })) as VoiceInfo[];
+    const voices = (await reply({ type: "leia:audio:voices" })) as VoiceInfo[];
     expect(voices.some((v) => v.family === "minimax")).toBe(false);
     expect(voices.some((v) => v.family === "web-speech")).toBe(true);
   });

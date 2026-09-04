@@ -10,6 +10,7 @@
  *   leia:probe-cancel — cancel any running utterance
  */
 import browser from "webextension-polyfill";
+import { addReplyListener } from "../messaging";
 import { handleKittenProbe } from "./kitten-probe";
 
 const SENTENCE = "hello world, this is leia.";
@@ -97,7 +98,10 @@ function probeCancel(): unknown {
   return data;
 }
 
-browser.runtime.onMessage.addListener((msg: unknown) => {
+// Respond-only-if-handled wiring (see messaging.ts for the WHY): probe arms
+// mix sync (cancel) and Promise (voices/speak) returns — both flow straight
+// through the wrapper; other message types get no reply from this doc.
+addReplyListener((msg: unknown) => {
   if (typeof msg !== "object" || msg === null || !("type" in msg)) return undefined;
   switch ((msg as { type: string }).type) {
     case "leia:probe-voices":

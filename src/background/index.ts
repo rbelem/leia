@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import browser from "webextension-polyfill";
+import { addReplyListener } from "../messaging";
 import { isRouterMessage, routeMessage, type RouterMessage, type RouterReply } from "./router";
 import { chromeOffscreen } from "../probes/chrome-apis";
 import { handleTtsProbe } from "../probes/tts-probe";
@@ -386,11 +387,6 @@ async function handleKittenProbeMessage(msg: { text?: string; voice?: string | n
 
 /** T2 spike probe entry points (no product behavior; see docs/spike-*.md). */
 async function handleProbeDispatch(msg: RouterMessage): Promise<RouterReply | undefined> {
-  if (msg.type === "leia:probe-result") {
-    // Streamed results from the offscreen document (and future probe contexts).
-    console.log("[leia probe]", (msg as { probe?: string }).probe, msg.data);
-    return undefined;
-  }
   if (msg.type === "leia:probe-voices" || msg.type === "leia:probe-speak" || msg.type === "leia:probe-cancel") {
     try {
       await ensureOffscreenDocument();
@@ -508,11 +504,6 @@ async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | un
     await broadcast({ type: "leia:theme:set", theme: msg.theme });
     return { ok: true, replyType: "leia:theme:set" };
   }
-  // --- Audio events from the Chrome offscreen document (ADR-0002) ---
-  if (msg.type === "leia:audio:event") {
-    chromeAudioEngine().pushEvent(msg as unknown as EngineEvent);
-    return undefined;
-  }
   // Firefox: the hidden background page idles into timer/media-event
   // throttling mid-read (chunk-end events then arrive minutes late, stalling
   // the session; per-word pushes lag the voice). While a read plays, every
@@ -525,8 +516,7 @@ async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | un
   return undefined;
 }
 
-browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply | undefined> => {
-  if (!isRouterMessage(msg)) return;
+async function handleBackgroundMessage(msg: RouterMessage): Promise<RouterReply | undefined> {
   if (msg.type === "leia:page-info") return handlePageInfo();
 
   const readerReply = (await handleReaderSession(msg)) ?? (await handleReaderPrefs(msg));
@@ -539,6 +529,27 @@ browser.runtime.onMessage.addListener(async (msg: unknown): Promise<RouterReply 
   if (probeReply !== undefined) return probeReply;
 
   return routeMessage(msg) ?? undefined;
+}
+
+// Respond-only-if-handled wiring (see messaging.ts for the WHY). The async
+// body is only reached AFTER the sync triage: non-router messages and the
+// fire-and-forget relays return undefined SYNCHRONOUSLY, so this context
+// never claims reply channels it doesn't answer. The relays move here from
+// the dispatchers because their senders (offscreen events, probe streams)
+// expect the port to close immediately, not hang open on a promised reply.
+addReplyListener((msg: unknown) => {
+  if (!isRouterMessage(msg)) return undefined;
+  // Audio events from the Chrome offscreen document (ADR-0002).
+  if (msg.type === "leia:audio:event") {
+    chromeAudioEngine().pushEvent(msg as unknown as EngineEvent);
+    return undefined;
+  }
+  // Streamed results from the offscreen probe document (and future contexts).
+  if (msg.type === "leia:probe-result") {
+    console.log("[leia probe]", (msg as { probe?: string }).probe, msg.data);
+    return undefined;
+  }
+  return handleBackgroundMessage(msg);
 });
 
 // --- Keyboard shortcut (T18): toggle reading. Configurable in

@@ -22,6 +22,7 @@ import { LocalEngine } from "../audio/engine-local";
 import { BUILT_IN_PROFILES, probeProfile } from "../audio/local-profiles";
 import { readProviderKey, setSnapshot, snapshotLocalProfiles, type KeystoreProfile } from "../audio/keystore";
 import { EngineHub, type EngineFamilyInfo } from "../audio/hub";
+import { addReplyListener } from "../messaging";
 import type { EngineCapabilities } from "../reader/contract";
 
 // Provider keys do NOT come from storage.local here: some Chrome builds
@@ -124,7 +125,12 @@ function handleAudioMessage(msg: unknown): unknown {
   }
 }
 
-browser.runtime.onMessage.addListener((msg: unknown) => {
+// Respond-only-if-handled wiring (see messaging.ts for the WHY): without the
+// sync triage this doc answered every runtime message (async listeners always
+// respond, even with undefined) and hijacked the popup/SW reply channels while
+// it was alive. handleAudioMessage already mixes plain and Promise returns —
+// both flow straight through the wrapper.
+addReplyListener((msg: unknown) => {
   if (typeof msg !== "object" || msg === null || !("type" in msg)) return undefined;
   applySnapshotFromMessage(msg); // first: refresh the in-memory key snapshot (if the message carries one)
   return handleAudioMessage(msg);
