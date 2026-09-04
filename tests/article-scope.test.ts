@@ -41,6 +41,25 @@ describe("article scope capture (T3)", () => {
     }
   });
 
+  it("dedupes a heading echoed as the leading body text (P2, heard-twice fix)", () => {
+    document.body.innerHTML =
+      "<main id='article'>" +
+      "<h1>X</h1>" +
+      "<p>X rest of the lead sentence.</p>" +
+      // isProbablyReaderable needs one node with sqrt(len-140) > 20.
+      `<p>${"Filler sentence for the readability check. ".repeat(14)}</p>` +
+      "</main>";
+    const scope = captureArticle(window);
+    expect(scope).not.toBeNull();
+    const joined = scope!.tokens.map((t) => t.text).join("");
+    // Echo string appears exactly once — as the heading token itself.
+    expect(joined.match(/X/g) ?? []).toHaveLength(1);
+    // Every token keeps the round-trip invariant (remainder ranges included).
+    for (const [i, token] of scope!.tokens.entries()) {
+      expect(token.text).toBe(scope!.ranges[i].toString());
+    }
+  });
+
   it("returns null when the page has no extractable article", () => {
     document.body.innerHTML = "<p>tiny</p>";
     expect(captureArticle(window)).toBeNull();

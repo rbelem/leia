@@ -230,7 +230,9 @@ export class ScopeHighlighter {
         const idx = wordIndexFromRange(full, locale);
         if (idx && idx.words.length > 0) {
           // Offsets derive from the same text + segmenter the index used;
-          // the round-trip invariant makes scope.tokens.join("") === range text.
+          // both indexes flow through the same capture walk (hidden-subtree
+          // and heading-echo filtering included), so
+          // scope.tokens.join("") === the word index's joined text.
           const spans = wordSpans(scope.tokens.map((t) => t.text).join(""), locale);
           this.wordMap = { words: idx.words, spans };
           this.prefix = sentenceCharPrefixes(scope.tokens);
