@@ -84,7 +84,7 @@ function captureArticleDetailed(win: Window): { scope: CapturedScope | null; rea
   }
   const norm = textContent.replace(/\s+/g, "");
   if (norm.length === 0) return { scope: null, reason: "Readability extracted no article text" };
-  const root = deepestCoveringElement(doc.body, norm.length);
+  const root = deepestCoveringElement(doc.body, norm);
   if (!root) return { scope: null, reason: "no element in the page covers the extracted article text" };
   const range = doc.createRange();
   range.selectNodeContents(root);
@@ -102,16 +102,30 @@ function captureArticleDetailed(win: Window): { scope: CapturedScope | null; rea
 }
 
 /**
- * Deepest element whose text covers `minLen` normalized (whitespace-free)
- * characters. Normalization only shrinks text, so the cheap length check
- * prunes whole subtrees first.
+ * Deepest element whose normalized text contains `articleText` (normalized,
+ * whitespace-free). Readability only ever removed text from a faithful
+ * clone, so the extracted article text is a subsequence of every true
+ * ancestor container — the deepest such element is the tightest superset,
+ * i.e. the article container. The cheap length check prunes whole subtrees
+ * first, but a bare length match is not containment: a deep <style> block
+ * or nav menu can reach the article's text length without holding it (real
+ * UOL regression), so candidates must contain the text as a subsequence.
+ * When no element contains the text (exotic extraction differences), fall
+ * back to the legacy deepest-length pick so those pages keep today's
+ * behavior instead of failing the capture.
  */
-function deepestCoveringElement(root: Element, minLen: number): Element | null {
+function deepestCoveringElement(root: Element, articleText: string): Element | null {
   let best: Element | null = null;
   let bestDepth = -1;
+  let loose: Element | null = null;
+  let looseDepth = -1;
   const walk = (el: Element, depth: number): void => {
-    if (el.textContent.length >= minLen) {
-      if (el.textContent.replace(/\s+/g, "").length >= minLen && depth > bestDepth) {
+    if (el.textContent.length >= articleText.length) {
+      if (depth > looseDepth) {
+        loose = el;
+        looseDepth = depth;
+      }
+      if (coversText(el.textContent.replace(/\s+/g, ""), articleText) && depth > bestDepth) {
         best = el;
         bestDepth = depth;
       }
@@ -119,7 +133,16 @@ function deepestCoveringElement(root: Element, minLen: number): Element | null {
     }
   };
   walk(root, 0);
-  return best;
+  return best ?? loose;
+}
+
+/** Greedy two-pointer subsequence test: does `text` contain all of `probe`? */
+function coversText(text: string, probe: string): boolean {
+  let i = 0;
+  for (let j = 0; j < text.length && i < probe.length; j += 1) {
+    if (text.charCodeAt(j) === probe.charCodeAt(i)) i += 1;
+  }
+  return i === probe.length;
 }
 
 /**
