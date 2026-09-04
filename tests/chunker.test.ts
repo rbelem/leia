@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { chunkTokens } from "../src/reader/chunker";
 import { MAX_TOKEN_CHARS, splitTokens, sentenceSpans, CJK_TOKEN_CHARS } from "../src/reader/sentences";
+import type { TokenText } from "../src/reader/session";
 
 const texts = (tokens: Array<{ text: string }>) => tokens.map((t) => t.text);
 const toTokens = (lines: string[]): Array<{ text: string }> => lines.map((text) => ({ text }));
@@ -152,5 +153,54 @@ describe("chunker", () => {
   it("handles selection-sized input in one pass", () => {
     const tokens = toTokens(["One. ", "Two. ", "Three. "]); // 3 tokens, ≤250 total
     expect(chunkTokens(tokens)).toEqual([{ from: 0, to: 2 }]);
+  });
+});
+
+// --- Property: randomized inputs always partition [0, n) ---
+
+/** Deterministic PRNG (mulberry32) — reproducible "random" inputs. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe("chunker property: chunks partition [0, n)", () => {
+  it("randomized token arrays partition with no overlaps and no gaps", () => {
+    const rand = mulberry32(0x1e2a);
+    for (let iter = 0; iter < 300; iter += 1) {
+      const n = Math.floor(rand() * 61); // 0..60 tokens
+      const tokens: TokenText[] = Array.from({ length: n }, () => {
+        const token: TokenText = { text: "t".repeat(1 + Math.floor(rand() * 300)) };
+        if (rand() < 0.25) token.blockStart = true;
+        if (rand() < 0.15) token.heading = true;
+        return token;
+      });
+      const cap = 1 + Math.floor(rand() * 400);
+
+      const chunks = chunkTokens(tokens, cap);
+
+      if (n === 0) {
+        expect(chunks).toEqual([]);
+        continue;
+      }
+      expect(chunks.length).toBeGreaterThan(0);
+      // Chain: starts at 0, each chunk begins exactly one past the previous.
+      expect(chunks[0].from).toBe(0);
+      for (let i = 1; i < chunks.length; i += 1) {
+        expect(chunks[i].from).toBe(chunks[i - 1].to + 1);
+      }
+      // Coverage: the last chunk ends at the final token.
+      expect(chunks[chunks.length - 1].to).toBe(n - 1);
+      for (const c of chunks) {
+        expect(c.from).toBeLessThanOrEqual(c.to);
+        expect(c.from).toBeGreaterThanOrEqual(0);
+        expect(c.to).toBeLessThan(n);
+      }
+    }
   });
 });

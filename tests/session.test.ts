@@ -788,3 +788,67 @@ describe("start() override hygiene (live Firefox NaN-rate bug)", () => {
     expect(st2.settings.rate).toBe(1.5);
   });
 });
+
+// --- Exact-once drive: every token spoken once, in order, one highlight per chunk ---
+
+/** 3 paragraphs × 8 sentence tokens (43 chars each) ⇒ each 344-char paragraph
+ * splits 5+3 under the 250-char cap: 6 chunks over 24 tokens. */
+const LONG_TOKENS: Array<{ text: string; blockStart?: true }> = [];
+for (let p = 0; p < 3; p += 1) {
+  for (let i = 0; i < 8; i += 1) {
+    LONG_TOKENS.push({
+      text: `${"z".repeat(40)}${p}${i}. `,
+      ...(i === 0 ? { blockStart: true as const } : {}),
+    });
+  }
+}
+const LONG_TOKEN_TEXT = LONG_TOKENS.map((t) => t.text).join("");
+// Independent oracle spans (43-char tokens: 215+129 chars per paragraph).
+const EXPECTED_CHUNKS = [
+  { from: 0, to: 4 },
+  { from: 5, to: 7 },
+  { from: 8, to: 12 },
+  { from: 13, to: 15 },
+  { from: 16, to: 20 },
+  { from: 21, to: 23 },
+];
+const sliceText = (from: number, to: number): string =>
+  LONG_TOKENS.slice(from, to + 1)
+    .map((t) => t.text)
+    .join("");
+
+const chunkLevelHighlights = (events: SessionEvent[]): SessionEvent[] =>
+  events.filter((e) => e.type === "highlight" && !("word" in e) && !("timeline" in e));
+
+describe("exact-once drive (stub engine over multi-paragraph multi-chunk tokens)", () => {
+  it("speaks the full token text exactly once, in order, with one highlight per chunk", async () => {
+    const { engine, events, emit } = makeSession();
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.start(LONG_TOKENS);
+    await tick();
+    const id = s.status().sessionId;
+    // One finish per chunk: each completes the playing chunk; the last one
+    // ends the final chunk and the session drains to a natural stop.
+    for (let i = 0; i < EXPECTED_CHUNKS.length; i += 1) {
+      engine.finishCurrent();
+      await tick();
+    }
+
+    // Every speak text, concatenated, is exactly the full token text: no
+    // repeats, no gaps.
+    expect(engine.speaks).toHaveLength(EXPECTED_CHUNKS.length);
+    expect(engine.speaks.map((c) => c.text).join("")).toBe(LONG_TOKEN_TEXT);
+    // Each utterance is the exact contiguous token slice for its chunk.
+    EXPECTED_CHUNKS.forEach((c, i) => {
+      expect(engine.speaks[i].text).toBe(sliceText(c.from, c.to));
+    });
+    // Chunk highlights: exactly one per chunk, in order.
+    expect(chunkLevelHighlights(events)).toEqual(
+      EXPECTED_CHUNKS.map((c) => ({ type: "highlight", sessionId: id, from: c.from, to: c.to })),
+    );
+    // The read ran to natural completion with no engine errors.
+    expect(events.filter((e) => e.type === "error")).toEqual([]);
+    expect(s.status().state).toBe("stopped");
+  });
+});
