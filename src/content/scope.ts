@@ -21,6 +21,12 @@ export interface CapturedScope {
   tokens: TokenText[];
   /** Range per token index — kept in the page, never serialized. */
   ranges: Range[];
+  /**
+   * Token index where the article body starts; tokens before it were
+   * captured from a separate title element (UOL pattern). Absent/0 when the
+   * whole scope is one contiguous range walk.
+   */
+  bodyFrom?: number;
 }
 
 export function captureSelection(win: Window): CapturedScope | null {
@@ -39,9 +45,13 @@ export function captureSelection(win: Window): CapturedScope | null {
  * runs on a detached body clone; the article container is then located on
  * the LIVE DOM as the deepest element whose normalized text still covers
  * the extracted text (Readability only ever removed text, so the container
- * is the tightest superset of it), and that container's full text range is
- * tokenized like any selection. See captureArticleDetailed for the
- * stage-tracked variant.
+ * is the tightest superset of it). The body container's range and the
+ * title's range are tokenized SEPARATELY and concatenated: one merged
+ * range (title start → body end) makes the index walk start at the two
+ * ranges' common ancestor and emit every visible text in between and
+ * beyond (kicker eyebrow, byline, sibling chunks — the UOL collapse), so
+ * the scope must be assembled from tight per-element ranges. See
+ * captureArticleDetailed for the stage-tracked variant.
  */
 export function captureArticle(win: Window): CapturedScope | null {
   return captureArticleDetailed(win).scope;
@@ -86,15 +96,19 @@ function captureArticleDetailed(win: Window): { scope: CapturedScope | null; rea
   if (norm.length === 0) return { scope: null, reason: "Readability extracted no article text" };
   const root = deepestCoveringElement(doc.body, norm);
   if (!root) return { scope: null, reason: "no element in the page covers the extracted article text" };
-  const range = doc.createRange();
-  range.selectNodeContents(root);
   // UOL pattern: the H1 lives in a separate container far above the body
   // root (ads/hero in between), so opening on the root reads mid-article
-  // with no headline. When a title qualifies, the range opens on it and
-  // the SAME walk tokenizes it first — flagged heading, read exactly once.
+  // with no headline. When a title qualifies it is tokenized as its own
+  // leading segment (heading flag, read exactly once) — unless the body
+  // root already opens with the title text (echo), which must not be read
+  // twice.
   const title = articleTitleElement(doc, root);
-  if (title) range.setStart(title, 0);
-  const tokens = tokenIndexFromRange(range);
+  const titleTokens =
+    title && !opensWithNormalized(root.textContent, title.textContent)
+      ? tokenIndexFromRange(tightRange(doc, title))
+      : [];
+  const bodyTokens = tokenIndexFromRange(tightRange(doc, root));
+  const tokens = [...titleTokens, ...bodyTokens];
   if (tokens.length === 0) return { scope: null, reason: "extracted article produced no readable tokens" };
   return {
     scope: {
@@ -102,9 +116,27 @@ function captureArticleDetailed(win: Window): { scope: CapturedScope | null; rea
         blockStart || heading ? { text, ...(blockStart && { blockStart }), ...(heading && { heading }) } : { text },
       ),
       ranges: tokens.map((t) => t.range),
+      ...(titleTokens.length > 0 && { bodyFrom: titleTokens.length }),
     },
     reason: "",
   };
+}
+
+/** Contents of `el` as a range (the only shape whose index walk emits
+ * exactly the element's own visible text — a wider range's walk starts at
+ * the common ancestor and leaks the siblings around it). */
+function tightRange(doc: Document, el: Element): Range {
+  const range = doc.createRange();
+  range.selectNodeContents(el);
+  return range;
+}
+
+/** True when `text`'s normalized form starts with `prefix`'s normalized
+ * form (the body root's first block already IS the title — an echo). */
+function opensWithNormalized(text: string | null, prefix: string | null): boolean {
+  const norm = (s: string | null) => (s ?? "").replace(/\s+/g, "").toLowerCase();
+  const p = norm(prefix);
+  return p.length > 0 && norm(text).startsWith(p);
 }
 
 /**
@@ -117,21 +149,33 @@ function captureArticleDetailed(win: Window): { scope: CapturedScope | null; rea
  * or nav menu can reach the article's text length without holding it (real
  * UOL regression), so candidates must contain the text as a subsequence.
  * When no element contains the text (exotic extraction differences), fall
- * back to the legacy deepest-length pick so those pages keep today's
- * behavior instead of failing the capture.
+ * back to the deepest element covering a substantial fraction of it
+ (LENGTH_COVER_FRACTION) — a deep widget that shares only stray words with
+ * the article must not win the cover just by being long. Only when even
+ * that finds nothing does the legacy deepest-length pick stand, so exotic
+ * pages keep today's behavior instead of failing the capture.
  */
+const LENGTH_COVER_FRACTION = 0.6;
+
 function deepestCoveringElement(root: Element, articleText: string): Element | null {
   let best: Element | null = null;
   let bestDepth = -1;
+  let partial: Element | null = null;
+  let partialDepth = -1;
   let loose: Element | null = null;
   let looseDepth = -1;
   const walk = (el: Element, depth: number): void => {
     if (el.textContent.length >= articleText.length) {
+      const covered = coversText(el.textContent.replace(/\s+/g, ""), articleText) / articleText.length;
       if (depth > looseDepth) {
         loose = el;
         looseDepth = depth;
       }
-      if (coversText(el.textContent.replace(/\s+/g, ""), articleText) && depth > bestDepth) {
+      if (covered >= LENGTH_COVER_FRACTION && depth > partialDepth) {
+        partial = el;
+        partialDepth = depth;
+      }
+      if (covered === 1 && depth > bestDepth) {
         best = el;
         bestDepth = depth;
       }
@@ -139,16 +183,17 @@ function deepestCoveringElement(root: Element, articleText: string): Element | n
     }
   };
   walk(root, 0);
-  return best ?? loose;
+  return best ?? partial ?? loose;
 }
 
-/** Greedy two-pointer subsequence test: does `text` contain all of `probe`? */
-function coversText(text: string, probe: string): boolean {
+/** Greedy two-pointer subsequence count: how many chars of `probe` appear
+ * in `text`, in order (probe.length = full containment). */
+function coversText(text: string, probe: string): number {
   let i = 0;
   for (let j = 0; j < text.length && i < probe.length; j += 1) {
     if (text.charCodeAt(j) === probe.charCodeAt(i)) i += 1;
   }
-  return i === probe.length;
+  return i;
 }
 
 /** Closest article/main ancestor, falling back to document.body. */
@@ -260,6 +305,13 @@ export class ScopeHighlighter {
   private wordMap: { words: Token[]; spans: TokenSpan[] } | null = null;
   /** Sentence token i → char offset of its start in the full scope text. */
   private prefix: Int32Array | null = null;
+  /**
+   * Body-segment bookkeeping (title-extended scopes): tokens before
+   * bodyFrom live in a separate title element; the word index covers only
+   * the body range, so word lookups re-base by the title's char length.
+   */
+  private bodyFrom = 0;
+  private titleChars = 0;
   /** Scope carries block structure (blockStart/heading flags) — enables whole-block washes. */
   private hasBlocks = false;
   /** Raw token texts+flags of the bound scope (block wash expansion). */
@@ -278,17 +330,30 @@ export class ScopeHighlighter {
     this.stale = false;
     this.wordMap = null;
     this.prefix = null;
+    this.bodyFrom = scope.bodyFrom ?? 0;
+    this.titleChars = scope.tokens
+      .slice(0, this.bodyFrom)
+      .reduce((n, t) => n + t.text.length, 0);
     this.hasBlocks = scope.tokens.some((t) => t.blockStart === true || t.heading === true);
     if (locale) {
-      const full = fullScopeRange(scope.ranges);
+      // The word index must flow through the same walk as the tokens it
+      // aligns with: title-extended scopes tokenize the title and the body
+      // as separate ranges, so only the body segment is one walk — index
+      // it alone and re-base word lookups past the title's characters.
+      const bodyRanges = this.bodyFrom > 0 ? scope.ranges.slice(this.bodyFrom) : scope.ranges;
+      const full = fullScopeRange(bodyRanges);
       if (full) {
         const idx = wordIndexFromRange(full, locale);
         if (idx && idx.words.length > 0) {
+          const bodyText = scope.tokens
+            .slice(this.bodyFrom)
+            .map((t) => t.text)
+            .join("");
           // Offsets derive from the same text + segmenter the index used;
           // both indexes flow through the same capture walk (hidden-subtree
           // and heading-echo filtering included), so
-          // scope.tokens.join("") === the word index's joined text.
-          const spans = wordSpans(scope.tokens.map((t) => t.text).join(""), locale);
+          // bodyText === the word index's joined text.
+          const spans = wordSpans(bodyText, locale);
           this.wordMap = { words: idx.words, spans };
           this.prefix = sentenceCharPrefixes(scope.tokens);
         }
@@ -369,8 +434,12 @@ export class ScopeHighlighter {
   /** Map chunk-relative engine word offsets onto the full-scope word map. */
   private wordRange(from: number, word?: { begin: number; end: number }): Range | null {
     if (!word || word.end <= word.begin || !this.wordMap || !this.prefix || from >= this.prefix.length) return null;
-    // Engine offsets are chunk-relative; map onto the full-scope word map.
-    const global = this.prefix[from] + word.begin;
+    // Title-segment tokens have no word mapping (the word index covers the
+    // body range only) — keep the previous underline instead.
+    if (from < this.bodyFrom) return null;
+    // Engine offsets are chunk-relative; map onto the body word map,
+    // re-based past the title's characters.
+    const global = this.prefix[from] - this.titleChars + word.begin;
     const i = findWordIndex(this.wordMap.spans, global);
     return i >= 0 ? this.wordMap.words[i].range : null;
   }
@@ -390,6 +459,8 @@ export class ScopeHighlighter {
     this.doc = null;
     this.wordMap = null;
     this.prefix = null;
+    this.bodyFrom = 0;
+    this.titleChars = 0;
     this.stale = false;
     this.stopObserving();
     clearHighlight();
