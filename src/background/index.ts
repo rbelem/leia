@@ -539,9 +539,11 @@ async function handleBackgroundMessage(msg: RouterMessage): Promise<RouterReply 
 // expect the port to close immediately, not hang open on a promised reply.
 addReplyListener((msg: unknown) => {
   if (!isRouterMessage(msg)) return undefined;
-  // Audio events from the Chrome offscreen document (ADR-0002).
+  // Audio events from the Chrome offscreen document (ADR-0002). The engine
+  // event rides the `event` field: the wire `type` is the routing key, the
+  // event's own `type` ("start"|"end"|...) drives pushEvent's terminal check.
   if (msg.type === "leia:audio:event") {
-    chromeAudioEngine().pushEvent(msg as unknown as EngineEvent);
+    chromeAudioEngine().pushEvent((msg as unknown as { event: EngineEvent }).event);
     return undefined;
   }
   // Streamed results from the offscreen probe document (and future contexts).

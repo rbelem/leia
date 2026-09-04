@@ -91,7 +91,10 @@ async function speakAndStream(msg: {
 }): Promise<void> {
   for await (const ev of engine.speak(msg.text, msg.speakId, { voiceName: msg.voiceName, rate: msg.rate })) {
     await browser.runtime
-      .sendMessage({ type: "leia:audio:event", ...(ev as object) })
+      // Envelope under `type` (the SW dispatches on it), engine event nested:
+      // EngineEvent carries its own `type` ("start"|"end"|...) which the SW's
+      // pushEvent needs intact — a top-level spread clobbers one or the other.
+      .sendMessage({ type: "leia:audio:event", event: ev })
       .catch(() => {
         // SW gone mid-stream; session state in storage.session covers recovery.
       });
