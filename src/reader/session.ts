@@ -11,7 +11,7 @@
  * a normal resume path — load() hydrates from storage.session.
  */
 import { chunkText, chunkTokens, type ChunkSpan } from "./chunker";
-import type { TextEngine, WordTimeline } from "./contract";
+import type { EngineCapabilities, TextEngine, WordTimeline } from "./contract";
 import { CJK_TOKEN_CHARS, isCjkLocale, MAX_TOKEN_CHARS } from "./sentences";
 
 export type ReaderState = "stopped" | "playing" | "paused";
@@ -96,6 +96,46 @@ export const PREFS_KEY = "leia:reader:prefs";
 
 const DEFAULT_PREFS: StoredPrefs = { voiceName: null, rate: 1, engine: null };
 
+/**
+ * Engines whose `capabilities` is a cold cache offer an awaitable variant
+ * (Chrome's offscreen ProxyEngine); absent on direct engines/hubs, where the
+ * sync read is already authoritative.
+ */
+interface AwaitableCapabilities {
+  awaitCapabilities?(timeoutMs?: number): Promise<EngineCapabilities>;
+}
+
+/** Upper bound on waiting for live capabilities. The ProxyEngine self-bounds
+ * at the same value; this guard covers duck-typed engines whose awaitable
+ * never settles — proceed with the sync (possibly default) view, never hang. */
+const AWAIT_CAPABILITIES_MS = 2000;
+
+/**
+ * Cold-start race (Chrome ProxyEngine): `engine.capabilities` answers with
+ * the conservative default — no maxUtteranceChars — until the offscreen
+ * round-trip lands ms later, and the session chunks exactly once, so a cold
+ * read would bake sentence-per-utterance into the whole session (never
+ * re-chunked: tokenPos mapping risk). Wait for the live reply when the
+ * engine offers the seam; a bounded no-op for engines without it.
+ */
+async function awaitLiveCapabilities(engine: TextEngine): Promise<void> {
+  const pending = (engine as AwaitableCapabilities).awaitCapabilities?.();
+  if (!pending) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      pending,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), AWAIT_CAPABILITIES_MS);
+      }),
+    ]);
+  } catch {
+    /* engine awaitable rejected: proceed with the sync capabilities view */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class ReaderSession {
   private sessionId: string | null = null;
   private state: ReaderState = "stopped";
@@ -147,6 +187,9 @@ export class ReaderSession {
     session.settings = { ...session.prefs, ...(s.settings ?? {}) };
     session.url = s.url ?? null;
     session.syncEngineFamily();
+    // Cold-start race: wait for live engine capabilities before the ONE
+    // chunking pass (see awaitLiveCapabilities).
+    await awaitLiveCapabilities(engine);
     session.chunks = chunkTokens(s.tokens, await session.resolveChunkCap());
     session.state = "paused";
     if (s.state === "playing") {
@@ -206,6 +249,9 @@ export class ReaderSession {
     this.settings = { ...this.prefs, ...settingsOverrides };
     this.url = url ?? null;
     this.lastError = null;
+    // Cold-start race: wait for live engine capabilities before the ONE
+    // chunking pass (see awaitLiveCapabilities).
+    await awaitLiveCapabilities(this.engine);
     this.chunks = chunkTokens(tokens, await this.resolveChunkCap());
     // Fresh start after any background restart: re-pin the stored family so
     // the stored voice routes to its own engine, not the hub default.

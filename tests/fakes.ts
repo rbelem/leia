@@ -37,26 +37,42 @@ export interface FakeEngineOptions {
   schedule?: "sync" | "tick";
   /** Optional selectFamily behavior; calls are recorded in selectFamilyCalls. */
   selectFamily?: (family: string) => void;
+  /**
+   * Cold-start model of Chrome's ProxyEngine capabilities round trip: the
+   * sync `capabilities` view starts at the bare default (no
+   * maxUtteranceChars) and `caps` land on the view + `awaitCapabilities()`
+   * after `delayMs` (default 50). "never" models a wedged round trip — the
+   * awaitable never settles; callers must time-box it. Absent = no
+   * awaitCapabilities (direct-engine shape: sync view authoritative).
+   */
+  asyncCapabilities?: { caps: Partial<EngineCapabilities>; delayMs?: number } | "never";
 }
 
 export class FakeEngine implements TextEngine {
   readonly family: string;
-  readonly capabilities: EngineCapabilities;
   readonly selectFamily?: (family: string) => void;
+  /** Present only when asyncCapabilities is set — the ProxyEngine-shaped
+   * seam the session duck-types on. */
+  readonly awaitCapabilities?: (timeoutMs?: number) => Promise<EngineCapabilities>;
 
   voices: VoiceInfo[];
   speakCalls: Array<{ text: string; speakId: number; options: SpeakOptions }> = [];
   cancelCount = 0;
   selectFamilyCalls: string[] = [];
 
+  private capsView: EngineCapabilities;
   private script?: (speakId: number) => EngineEvent[];
   private schedule: "sync" | "tick";
   private streams = new Map<number, EventStream<EngineEvent>>();
   private active: number | null = null;
 
+  get capabilities(): EngineCapabilities {
+    return this.capsView;
+  }
+
   constructor(family: string, opts: FakeEngineOptions = {}) {
     this.family = family;
-    this.capabilities = { ...DEFAULT_CAPABILITIES, ...opts.capabilities };
+    this.capsView = { ...DEFAULT_CAPABILITIES, ...opts.capabilities };
     this.voices = opts.voices ?? [];
     this.script = opts.script;
     this.schedule = opts.schedule ?? "sync";
@@ -65,6 +81,29 @@ export class FakeEngine implements TextEngine {
         this.selectFamilyCalls.push(f);
         opts.selectFamily!(f);
       };
+    }
+    if (opts.asyncCapabilities) {
+      // Cold start: the sync view answers defaults until the "round trip"
+      // lands (or never, for the wedged variant).
+      this.capsView = { ...DEFAULT_CAPABILITIES };
+      if (opts.asyncCapabilities === "never") {
+        this.awaitCapabilities = (): Promise<EngineCapabilities> => new Promise(() => {});
+      } else {
+        const live: EngineCapabilities = {
+          ...DEFAULT_CAPABILITIES,
+          ...opts.capabilities,
+          ...opts.asyncCapabilities.caps,
+        };
+        let land: (c: EngineCapabilities) => void = () => {};
+        const landed = new Promise<EngineCapabilities>((resolve) => {
+          land = resolve;
+        });
+        this.awaitCapabilities = (): Promise<EngineCapabilities> => landed;
+        setTimeout(() => {
+          this.capsView = live;
+          land(live);
+        }, opts.asyncCapabilities.delayMs ?? 50);
+      }
     }
   }
 

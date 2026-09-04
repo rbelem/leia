@@ -101,18 +101,45 @@ export class ProxyEngine implements TextEngine {
    * flight); the offscreen reply refreshes the cache.
    */
   get capabilities(): EngineCapabilities {
-    if (!this.capsPromise) {
-      this.capsPromise = ensureOffscreen()
-        .then(
-          () => browser.runtime.sendMessage({ type: "leia:audio:capabilities" }) as Promise<EngineCapabilities>,
-        )
-        .then((c) => {
-          this.caps = c;
-          return c;
-        })
-        .catch(() => this.caps ?? DEFAULT_CAPABILITIES);
-    }
+    void this.kickCapabilities();
     return this.caps ?? DEFAULT_CAPABILITIES;
+  }
+
+  /**
+   * Live capabilities: resolves with the offscreen reply once the in-flight
+   * round trip completes (immediately when cached). Session start awaits
+   * this so its one chunking pass never bakes in the cold default (no
+   * maxUtteranceChars). Bounded: on timeout resolves with the cached or
+   * default view — never rejects, never hangs, even when the offscreen
+   * document wedges.
+   */
+  async awaitCapabilities(timeoutMs = 2000): Promise<EngineCapabilities> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const caps = await Promise.race([
+        this.kickCapabilities(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), timeoutMs);
+        }),
+      ]);
+      return caps ?? this.caps ?? DEFAULT_CAPABILITIES;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Kick (or reuse) the capabilities round trip; the chain never rejects. */
+  private kickCapabilities(): Promise<EngineCapabilities> {
+    this.capsPromise ??= ensureOffscreen()
+      .then(
+        () => browser.runtime.sendMessage({ type: "leia:audio:capabilities" }) as Promise<EngineCapabilities>,
+      )
+      .then((c) => {
+        this.caps = c;
+        return c;
+      })
+      .catch(() => this.caps ?? DEFAULT_CAPABILITIES);
+    return this.capsPromise;
   }
 
   /** Switch the offscreen engine family; next capabilities/families read re-queries. */
