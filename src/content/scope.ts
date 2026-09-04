@@ -88,6 +88,12 @@ function captureArticleDetailed(win: Window): { scope: CapturedScope | null; rea
   if (!root) return { scope: null, reason: "no element in the page covers the extracted article text" };
   const range = doc.createRange();
   range.selectNodeContents(root);
+  // UOL pattern: the H1 lives in a separate container far above the body
+  // root (ads/hero in between), so opening on the root reads mid-article
+  // with no headline. When a title qualifies, the range opens on it and
+  // the SAME walk tokenizes it first — flagged heading, read exactly once.
+  const title = articleTitleElement(doc, root);
+  if (title) range.setStart(title, 0);
   const tokens = tokenIndexFromRange(range);
   if (tokens.length === 0) return { scope: null, reason: "extracted article produced no readable tokens" };
   return {
@@ -143,6 +149,55 @@ function coversText(text: string, probe: string): boolean {
     if (text.charCodeAt(j) === probe.charCodeAt(i)) i += 1;
   }
   return i === probe.length;
+}
+
+/** Closest article/main ancestor, falling back to document.body. */
+function sharedArticleContainer(el: Element, doc: Document): Element {
+  return el.closest("article, main") ?? doc.body;
+}
+
+/**
+ * Title element to read before the article body root: the nearest preceding
+ * h1 (fallback h2) in document order that (a) shares the root's article/main
+ * ancestor (document.body fallback), (b) is not already inside the root (it
+ * is read first by the root walk there), (c) is visible, and (d) has
+ * non-blank text. null when no heading qualifies — capture stays
+ * byte-identical.
+ */
+function articleTitleElement(doc: Document, root: Element): Element | null {
+  const container = sharedArticleContainer(root, doc);
+  for (const tag of ["h1", "h2"]) {
+    let nearest: Element | null = null;
+    for (const el of container.querySelectorAll(tag)) {
+      if (root.contains(el)) continue;
+      if (sharedArticleContainer(el, doc) !== container) continue;
+      // Nearest preceding in document order: keep the last one before root.
+      if (!(el.compareDocumentPosition(root) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      if (isHiddenElement(el) || el.textContent.trim().length === 0) continue;
+      nearest = el;
+    }
+    if (nearest) return nearest;
+  }
+  return null;
+}
+
+/** Mirror of the capture walk's hidden-subtree test ([hidden],
+ * aria-hidden="true", inline or computed display:none): a title the reader
+ * cannot see must not be read. Kept local — token-index does not export it. */
+function isHiddenElement(el: Element): boolean {
+  if (el.hasAttribute("hidden")) return true;
+  if (el.getAttribute("aria-hidden") === "true") return true;
+  const inline = (el as HTMLElement).style;
+  if (inline && inline.display === "none") return true;
+  const view = el.ownerDocument?.defaultView;
+  if (view && typeof view.getComputedStyle === "function") {
+    try {
+      if (view.getComputedStyle(el).display === "none") return true;
+    } catch {
+      // exotic element/view — the attribute and inline checks above stand
+    }
+  }
+  return false;
 }
 
 /**

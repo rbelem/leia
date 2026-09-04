@@ -60,6 +60,57 @@ describe("article scope capture (T3)", () => {
     }
   });
 
+  it("opens the scope with the article title when it sits above the body root (UOL)", () => {
+    // UOL pattern: the H1 lives in a separate container far above the body
+    // root, with junk between them — the read must open on the headline.
+    document.body.innerHTML =
+      "<h1>Title here</h1>" +
+      "<div>ad junk</div>" +
+      "<div><p>Body text here. Second sentence. " +
+      // isProbablyReaderable needs one node with sqrt(len-140) > 20.
+      `${"Filler sentence for the readability check. ".repeat(14)}</p></div>`;
+    const scope = captureArticle(window);
+    expect(scope).not.toBeNull();
+    expect(scope!.tokens[0]!.text).toBe("Title here");
+    expect(scope!.tokens[0]!.heading).toBe(true);
+    // The body follows the title, in document order.
+    const joined = scope!.tokens.map((t) => t.text).join("");
+    expect(joined.indexOf("Body text here")).toBeGreaterThan(0);
+    expect(joined.indexOf("Second sentence")).toBeGreaterThan(joined.indexOf("Body text here"));
+    // Every token keeps the round-trip invariant (title range included).
+    for (const [i, token] of scope!.tokens.entries()) {
+      expect(token.text).toBe(scope!.ranges[i].toString());
+    }
+  });
+
+  it("keeps capture unchanged when no preceding heading exists", () => {
+    document.body.innerHTML =
+      "<div><p>Body text here. Second sentence. " +
+      `${"Filler sentence for the readability check. ".repeat(14)}</p></div>`;
+    const scope = captureArticle(window);
+    expect(scope).not.toBeNull();
+    const joined = scope!.tokens.map((t) => t.text).join("");
+    expect(joined).toContain("Body text here");
+    expect(joined).not.toContain("Title here");
+    expect(joined.indexOf("Body text here")).toBe(0); // body opens the scope
+    for (const [i, token] of scope!.tokens.entries()) {
+      expect(token.text).toBe(scope!.ranges[i].toString());
+    }
+  });
+
+  it("keeps a title already inside the root untouched (read once, in place)", () => {
+    articleFixture();
+    const scope = captureArticle(window)!;
+    const joined = scope.tokens.map((t) => t.text).join("");
+    // The in-root heading is still the scope's first token, exactly once.
+    expect(scope.tokens[0]!.text).toBe("Reading aloud on the web");
+    expect(scope.tokens[0]!.heading).toBe(true);
+    expect(joined.match(/Reading aloud on the web/gi) ?? []).toHaveLength(1);
+    for (const [i, token] of scope.tokens.entries()) {
+      expect(token.text).toBe(scope.ranges[i].toString());
+    }
+  });
+
   it("returns null when the page has no extractable article", () => {
     document.body.innerHTML = "<p>tiny</p>";
     expect(captureArticle(window)).toBeNull();
