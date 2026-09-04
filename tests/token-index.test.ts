@@ -89,6 +89,91 @@ describe("token ↔ range index (en + CJK)", () => {
   });
 });
 
+describe("heading echo dedupe (P2: UOL titles heard twice)", () => {
+  it("cuts a heading repeated verbatim as the leading text of the next block", () => {
+    document.body.innerHTML = "<h1>X</h1><p>X rest of the lead sentence.</p>";
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const tokens = tokenIndexFromRange(range);
+    const joined = tokens.map((t) => t.text).join("");
+    // The echo string appears exactly once — as the heading itself.
+    expect(joined.match(/X/g) ?? []).toHaveLength(1);
+    // The body block keeps only the remainder, with its exact DOM range.
+    expect(tokens.map((t) => t.text)).toContain(" rest of the lead sentence.");
+    for (const t of tokens) {
+      expect(t.range.toString()).toBe(t.text);
+    }
+  });
+
+  it("compares echoes whitespace/case-insensitively across inline markup", () => {
+    document.body.innerHTML = "<h2>Guia do bolsa</h2><p><b>guia</b>  DO BOLSA hoje valendo.</p>";
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const tokens = tokenIndexFromRange(range);
+    const joined = tokens.map((t) => t.text).join("").toLowerCase();
+    expect(joined.match(/guia do bolsa/g) ?? []).toHaveLength(1);
+    expect(joined).toContain("hoje valendo.");
+    for (const t of tokens) {
+      expect(t.range.toString()).toBe(t.text);
+    }
+  });
+
+  it("leaves partial echoes and mid-body repeats untouched", () => {
+    document.body.innerHTML =
+      "<h1>Casa</h1>" +
+      "<p>Casamento civil é o tema de hoje.</p>" + // mid-word: no echo cut
+      "<p>Depois Casa volta ao pauta mais tarde.</p>"; // echo not at block start
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const tokens = tokenIndexFromRange(range);
+    const joined = tokens.map((t) => t.text).join("");
+    expect(joined).toContain("Casamento civil é o tema de hoje.");
+    expect(joined).toContain("Depois Casa volta ao pauta mais tarde.");
+    for (const t of tokens) {
+      expect(t.range.toString()).toBe(t.text);
+    }
+  });
+
+  it("applies the same filter to the word index (bind()'s word map stays aligned)", () => {
+    document.body.innerHTML = "<h1>X</h1><p>X rest of the lead sentence.</p>";
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const idx = wordIndexFromRange(range, "en");
+    expect(idx).not.toBeNull();
+    // The echo never becomes a word token — only the heading's own "X".
+    const xs = idx!.words.filter((w) => w.text.toLowerCase() === "x");
+    expect(xs).toHaveLength(1);
+    expect(idx!.words.map((w) => w.text)).toContain("rest");
+    for (const w of idx!.words) {
+      expect(w.range.toString()).toBe(w.text);
+    }
+  });
+});
+
+describe("hidden-subtree capture (P2: display:none / [hidden] / aria-hidden)", () => {
+  it("skips hidden subtrees and keeps visible text byte-identical", () => {
+    document.body.innerHTML =
+      "<div style='display:none'>Hidden by inline style</div>" +
+      "<div hidden><p>Hidden by attribute</p></div>" +
+      "<div aria-hidden='true'><p>Hidden from assistive tech</p></div>" +
+      "<p>Visible intro <span style='display:none'>silent span</span> and visible tail.</p>";
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const tokens = tokenIndexFromRange(range);
+    const joined = tokens.map((t) => t.text).join("");
+    expect(joined).not.toContain("Hidden by inline style");
+    expect(joined).not.toContain("Hidden by attribute");
+    expect(joined).not.toContain("Hidden from assistive tech");
+    expect(joined).not.toContain("silent span");
+    expect(joined).toContain("Visible intro");
+    expect(joined).toContain("and visible tail.");
+    // Ranges never bridge a hidden gap: each token stringifies to its text.
+    for (const t of tokens) {
+      expect(t.range.toString()).toBe(t.text);
+    }
+  });
+});
+
 describe("word ↔ range index (T4)", () => {
   it("word-segments a Latin + CJK selection into real words, round-tripping each range", () => {
     const doc = fixture();
@@ -197,5 +282,38 @@ describe("re-layout validity (live ranges)", () => {
     // its text, and a fresh index over the (now shifted) range agrees.
     for (const t of before) expect(t.range.toString()).toBe(t.text);
     expect(tokenIndexFromRange(range).map((t) => t.text)).toEqual(texts);
+  });
+});
+describe("walk tolerates non-element nodes (live DOM shapes)", () => {
+  it("skips comment nodes without throwing", () => {
+    document.body.innerHTML =
+      "<p id='c'>First sentence. <!-- ad marker -->Second sentence.</p>";
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("c")!);
+    const tokens = tokenIndexFromRange(range);
+    const joined = tokens.map((t) => t.text).join("");
+    expect(joined).toContain("First sentence.");
+    expect(joined).toContain("Second sentence.");
+    for (const t of tokens) expect(t.range.toString()).toBe(t.text);
+  });
+
+  it("accepts a whole-document range root without throwing", () => {
+    document.body.innerHTML = "<p>Only paragraph here.</p>";
+    const range = document.createRange();
+    range.selectNodeContents(document);
+    const tokens = tokenIndexFromRange(range);
+    expect(tokens.map((t) => t.text).join("")).toContain("Only paragraph here.");
+  });
+
+  it("accepts a DocumentFragment root (shadow-dom shape) without throwing", () => {
+    const frag = document.createDocumentFragment();
+    const p = document.createElement("p");
+    p.textContent = "Fragment paragraph one. Fragment paragraph two.";
+    frag.appendChild(p);
+    const range = document.createRange();
+    range.selectNodeContents(frag);
+    const tokens = tokenIndexFromRange(range);
+    expect(tokens.length).toBeGreaterThan(0);
+    expect(tokens.map((t) => t.text).join("")).toContain("Fragment paragraph one.");
   });
 });
