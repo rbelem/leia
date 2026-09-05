@@ -3,3 +3,5 @@ dist/
 config.db*
 graphify-out/
 coverage/
+.scratch/
+result
