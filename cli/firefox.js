@@ -106,6 +106,18 @@ function discoverExtensionUuid(profileDir) {
   }
 }
 
+/** Find the PID listening on a TCP port via `ss` (Linux). Returns null if none. */
+function pidOnPort(port) {
+  try {
+    const out = spawnSync("ss", ["-ltnp"]).stdout?.toString() || "";
+    const line = out.split("\n").find((l) => l.includes(`:${port}`));
+    const m = line?.match(/pid=(\d+)/);
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export class FirefoxAdapter extends BrowserAdapter {
   constructor(opts = {}) {
     super(opts);
@@ -114,22 +126,35 @@ export class FirefoxAdapter extends BrowserAdapter {
     this.firefoxBin = opts.firefoxBin || detectFirefoxBinary();
     this.headless = opts.headless ?? true;
     this.gecko = null; // spawned geckodriver child (if we started it)
+    this._spawnedGecko = false; // whether WE spawned it (vs reused an existing one)
+    this._geckoPid = null; // geckodriver PID on the gecko port (owned or reused)
     this.wd = null; // WebDriverClient
     this.extensionUuid = "";
     this._attached = false;
   }
 
   async _ensureGeckodriver() {
-    // If geckodriver is already serving on the port (e.g. MCP's copy), reuse it.
+    // If geckodriver is already serving and ready, reuse it (often the case
+    // when the firefox-devtools-MCP's copy is up). Mark that we did NOT spawn it.
     try {
       const r = await fetch(`http://127.0.0.1:${this.geckoPort}/status`);
       const j = await r.json();
-      if (j.value?.ready) return;
+      if (j.value?.ready) {
+        this._spawnedGecko = false;
+        this._geckoPid = this.gecko?.pid || pidOnPort(this.geckoPort);
+        return;
+      }
     } catch {}
+    // A geckodriver may be running but stale (session torn down, not ready).
+    // We cannot safely kill one we didn't spawn here, so just spawn our own on
+    // a fresh process; the reusable-path handling below is enough for the
+    // normal reused-ready case.
     // Otherwise spawn our own.
     try {
       this.gecko = spawn(this.geckoPath, ["--port", String(this.geckoPort), "--log", "warn"], { stdio: "ignore" });
       this.gecko.unref();
+      this._spawnedGecko = true;
+      this._geckoPid = this.gecko.pid;
     } catch (e) {
       throw new Error(`could not start geckodriver (${this.geckoPath}): ${e.message}`);
     }
@@ -163,6 +188,7 @@ export class FirefoxAdapter extends BrowserAdapter {
       sessionId: this.wd.sessionId,
       extensionUuid: this.extensionUuid,
       pid: this.gecko?.pid || null,
+      geckoPid: this._geckoPid,
     });
   }
 
@@ -254,10 +280,17 @@ export class FirefoxAdapter extends BrowserAdapter {
       await this.wd.deleteSession();
       this.wd = null;
     }
+    const st = loadState();
+    const geckoPid = this._geckoPid || this.gecko?.pid || st?.geckoPid || null;
+    if (geckoPid) {
+      try { process.kill(geckoPid, "SIGTERM"); } catch {}
+    }
     if (this.gecko) {
       try { this.gecko.kill("SIGTERM"); } catch {}
       this.gecko = null;
     }
+    this._spawnedGecko = false;
+    this._geckoPid = null;
     this._attached = false;
     clearState();
   }
