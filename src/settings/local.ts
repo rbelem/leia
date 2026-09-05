@@ -65,6 +65,7 @@ export function buildServerRow(profile: LocalProfile, probe: ServerProbe, remova
 /** Update a row's probe state in place after a probe answers. */
 export function setServerProbe(row: HTMLElement, probe: ServerProbe): void {
   const state = row.querySelector<HTMLElement>(".provider-state");
+  /* v8 ignore next -- rows come from buildServerRow, which always renders .provider-state */
   if (!state) return;
   state.classList.toggle("ok", probe?.online === true);
   state.textContent = serverStatusText(probe);

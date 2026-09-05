@@ -69,6 +69,7 @@ void browser.storage.session.get(STORAGE_KEY).then((stored) => {
 });
 
 function finish(reason: string): void {
+  /* v8 ignore next -- finish is only wired after activeStart() sets state */
   if (!state) return;
   state.active = false;
   state.endedAt = Date.now();

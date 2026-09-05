@@ -487,6 +487,7 @@ export class ScopeHighlighter {
   }
 
   private markStale(): void {
+    /* v8 ignore next -- every caller pre-checks stale, so the re-check cannot hit */
     if (this.stale) return;
     this.stale = true;
     this.stopObserving();
@@ -517,6 +518,7 @@ export class ScopeHighlighter {
   }
 
   private onMutations(records: MutationRecord[], root: Element): void {
+    /* v8 ignore next -- the observer is disconnected once stale, records can no longer arrive */
     if (this.stale) return;
     let nodes = 0;
     let chars = 0;

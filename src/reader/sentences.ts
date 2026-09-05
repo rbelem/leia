@@ -72,6 +72,7 @@ export function sentenceSpans(text: string, locale: string, cap: number = MAX_TO
   const seg = segmenter(locale, "sentence");
   const out: TokenSpan[] = [];
   const push = (start: number, end: number): void => {
+    /* v8 ignore next -- Intl.Segmenter never yields empty segments */
     if (end <= start) return;
     while (end - start > cap) {
       // Long sentence: split at the last space within the cap, else hard-cut.

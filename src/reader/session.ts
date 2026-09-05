@@ -534,6 +534,7 @@ export class ReaderSession {
   }
 
   private async persist(): Promise<void> {
+    /* v8 ignore next -- every persist caller runs on a started session */
     if (this.sessionId === null) return;
     const record: StoredSession = {
       sessionId: this.sessionId,

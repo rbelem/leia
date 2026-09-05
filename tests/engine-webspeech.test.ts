@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSpeechEngine, type SpeechSynthesisLike } from "../src/audio/engine-webspeech";
 
 // jsdom has no speechSynthesis — stub the utterance class the engine builds.
@@ -193,6 +193,121 @@ describe("WebSpeechEngine", () => {
       streaming: false,
       costClass: "free",
       privacyClass: "local",
+    });
+  });
+
+  // Boundary re-anchor: utterance.onboundary re-anchors the estimated word
+  // march at the engine's real charIndex; timers orphaned by the re-anchor
+  // (or by cancel) are dropped via the `i !== next` / dead guards.
+  describe("boundary re-anchor (word march)", () => {
+    const TEXT = "one two three four five."; // words at 0–3, 4–7, 8–13, 14–18, 19–24
+    // Estimated march at rate 1 (75ms/char clamped 60–800ms): 225, 225, 375,
+    // 300, 375 → cumulative fire times [225, 450, 825, 1125] for words 1–4.
+    const expectTimers = (timers: Array<{ ms: number }>): void => {
+      expect(timers.map((t) => t.ms)).toEqual([225, 450, 825, 1125]);
+    };
+
+    let captured: Array<{ ms: number; fn: () => void }> = [];
+    let spy: { mockRestore: () => void } | null = null;
+    /** Capture the engine's scheduled timer callbacks while leaving them live. */
+    const captureTimers = (): Array<{ ms: number; fn: () => void }> => {
+      captured = [];
+      const fakeST = globalThis.setTimeout;
+      const s = vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
+        captured.push({ ms: ms ?? 0, fn });
+        return fakeST(fn, ms);
+      }) as unknown as typeof setTimeout);
+      spy = s;
+      return captured;
+    };
+
+    afterEach(() => {
+      spy?.mockRestore();
+      spy = null;
+      vi.useRealTimers();
+    });
+
+    const queued = async (): Promise<FakeUtterance> => {
+      await vi.advanceTimersByTimeAsync(0); // flush the voices gate → synth.speak
+      const u = synth.utterances[0];
+      expect(u).toBeDefined();
+      return u;
+    };
+
+    it("a boundary event mid-speak re-anchors the march to the reported charIndex", async () => {
+      vi.useFakeTimers();
+      const events = collect(engine.speak(TEXT, 21, { voiceName: null, rate: 1 }));
+      const u = await queued();
+
+      u.onstart!(new Event("start")); // word 0 emitted; timers at 225/450/825/1125
+      await vi.advanceTimersByTimeAsync(300); // estimate fires "two" at 225
+      // The engine is really at "four" (14–18) while the estimate still says
+      // "three" — the boundary snaps the cursor forward, dropping "three".
+      u.onboundary!({ charIndex: 14, charLength: 4 });
+      await vi.advanceTimersByTimeAsync(300); // "five." re-timed: 300ms after the new anchor, not at 1125
+      u.onend!(new Event("end"));
+
+      const evs = await events;
+      expect(evs).toEqual([
+        { type: "start", speakId: 21 },
+        { type: "word", speakId: 21, begin: 0, end: 3 },
+        { type: "word", speakId: 21, begin: 4, end: 7 },
+        { type: "word", speakId: 21, begin: 14, end: 18 }, // "four" (boundary snap)
+        { type: "word", speakId: 21, begin: 19, end: 24 }, // "five." from the re-anchored schedule
+        { type: "end", speakId: 21 },
+      ]);
+      expect(evs).not.toContainEqual({ type: "word", speakId: 21, begin: 8, end: 13 }); // "three" dropped
+    });
+
+    it("a stale timer (index mismatch after re-anchor) is dropped — no duplicate word", async () => {
+      vi.useFakeTimers();
+      const timers = captureTimers();
+      const events = collect(engine.speak(TEXT, 22, { voiceName: null, rate: 1 }));
+      const u = await queued();
+
+      u.onstart!(new Event("start"));
+      expectTimers(timers);
+      const staleOne = timers[0].fn; // fireWord(1) "two"
+      const staleTwo = timers[1].fn; // fireWord(2) "three"
+
+      await vi.advanceTimersByTimeAsync(300); // "two" fires normally → next=2
+      u.onboundary!({ charIndex: 14, charLength: 4 }); // snap to "four" → next=4, old timers cleared
+      staleOne(); // orphaned callback: 1 !== next(4) → dropped
+      staleTwo(); // orphaned callback: 2 !== next(4) → "three" never double-counts
+      await vi.advanceTimersByTimeAsync(300); // "five." fires from the re-anchored schedule only
+      u.onend!(new Event("end"));
+
+      const evs = await events;
+      expect(evs.filter((e) => (e as { type: string }).type === "word")).toEqual([
+        { type: "word", speakId: 22, begin: 0, end: 3 },
+        { type: "word", speakId: 22, begin: 4, end: 7 },
+        { type: "word", speakId: 22, begin: 14, end: 18 },
+        { type: "word", speakId: 22, begin: 19, end: 24 },
+      ]);
+      expect(evs.at(-1)).toEqual({ type: "end", speakId: 22 });
+      expect(evs).not.toContainEqual({ type: "word", speakId: 22, begin: 8, end: 13 });
+    });
+
+    it("boundary and orphaned timers after cancel are ignored (dead march)", async () => {
+      vi.useFakeTimers();
+      const timers = captureTimers();
+      const events = collect(engine.speak(TEXT, 23, { voiceName: null, rate: 1 }));
+      const u = await queued();
+
+      u.onstart!(new Event("start"));
+      expectTimers(timers);
+      await vi.advanceTimersByTimeAsync(300); // "two" fired
+      engine.cancel(); // dead: timers cleared, stream closed cancelled
+      const staleTwo = timers[1].fn; // fireWord(2) — orphaned by stopMarch
+      expect(() => staleTwo()).not.toThrow(); // dead guard → dropped, nothing pushed
+      expect(() => u.onboundary!({ charIndex: 14, charLength: 4 })).not.toThrow(); // dead guard
+      expect(await events).toEqual([
+        { type: "start", speakId: 23 },
+        { type: "word", speakId: 23, begin: 0, end: 3 }, // emitted before cancel
+        { type: "word", speakId: 23, begin: 4, end: 7 },
+        { type: "cancelled", speakId: 23 },
+      ]);
+      expect(synth.cancelCount).toBe(1);
     });
   });
 });

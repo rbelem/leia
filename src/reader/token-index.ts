@@ -309,8 +309,10 @@ function locateForward(parts: TextPart[], abs: number): { node: Text; offset: nu
       return { node: p.node, offset: p.nodeStart + (abs - p.start) };
     }
   }
+  /* v8 ignore start -- parts are contiguous, the offset always lands inside one */
   const last = parts[parts.length - 1];
   return { node: last.node, offset: last.nodeStart + (last.end - last.start) };
+  /* v8 ignore stop */
 }
 
 function locateBackward(parts: TextPart[], abs: number): { node: Text; offset: number } {
@@ -319,8 +321,10 @@ function locateBackward(parts: TextPart[], abs: number): { node: Text; offset: n
       return { node: p.node, offset: p.nodeStart + (abs - p.start) };
     }
   }
+  /* v8 ignore start -- parts are contiguous, the offset always lands inside one */
   const last = parts[parts.length - 1];
   return { node: last.node, offset: last.nodeStart + (last.end - last.start) };
+  /* v8 ignore stop */
 }
 
 function partText(p: TextPart): string {
@@ -336,6 +340,7 @@ function partAt(parts: TextPart[], abs: number): TextPart {
   for (const p of parts) {
     if (abs >= p.start && abs < p.end) return p;
   }
+  /* v8 ignore next -- parts are contiguous, the offset always lands inside one */
   return parts[parts.length - 1];
 }
 
@@ -391,6 +396,7 @@ export function tokenIndexFromRange(range: Range): Token[] {
   const parts = textParts(range);
   if (parts.length === 0) return [];
   const doc = ownerDocOf(range.startContainer);
+  /* v8 ignore next -- range boundary nodes always carry an ownerDocument */
   if (!doc) return [];
   const full = joinedText(parts);
   return buildTokens(parts, splitTokens(full), doc, full);
@@ -402,6 +408,7 @@ export function wordIndexFromRange(range: Range, locale: string): WordIndex | nu
   const parts = textParts(range);
   if (parts.length === 0) return null;
   const doc = ownerDocOf(range.startContainer);
+  /* v8 ignore next -- range boundary nodes always carry an ownerDocument */
   if (!doc) return null;
   const fullText = joinedText(parts);
   const spans = wordSpans(fullText, locale);

@@ -57,6 +57,7 @@ export function readProviderKey(storageKey: string): () => Promise<string | null
       const v = snapshot.keys[storageKey];
       return typeof v === "string" && v.length > 0 ? v : null;
     } catch {
+      /* v8 ignore next -- property read on a plain object cannot throw */
       return null;
     }
   };
@@ -67,6 +68,7 @@ export function snapshotLocalProfiles(): KeystoreProfile[] {
   try {
     return snapshot.localProfiles ? [...snapshot.localProfiles] : [];
   } catch {
+    /* v8 ignore next -- array copy of a plain snapshot value cannot throw */
     return [];
   }
 }

@@ -152,6 +152,7 @@ const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 /** paper's underline-only variant — safe on any background. */
 export function fallbackVariant(): Variant {
   const v = THEMES.paper.variants.find((x) => x.textDecoration && !x.background);
+  /* v8 ignore next -- static THEMES data always ships paper's underline variant */
   if (!v) throw new Error("paper theme is missing its underline fallback variant");
   return v;
 }

@@ -179,22 +179,48 @@ interface Harness {
   /** Latest spawned worker (shorthand). */
   worker(): FakeKittenWorker;
   playCalls: Array<{ bytes: Uint8Array; mime: string }>;
+  /** Live playbacks — populated only in controllablePlayback mode. */
+  playbacks: StubPlayback[];
 }
 
-function makeHarness(opts?: { failAudioHost?: boolean }): Harness {
+/** Playback whose done stays pending until stop()/finish() — lets tests gate
+ * mid-play races (race-matrix StubPlayback pattern). */
+interface StubPlayback {
+  stopCalls: number;
+  stop(): void;
+  done: Promise<void>;
+  finish(): void;
+}
+
+function makeHarness(opts?: { failAudioHost?: boolean; controllablePlayback?: boolean }): Harness {
   const spawned: FakeKittenWorker[] = [];
   const playCalls: Array<{ bytes: Uint8Array; mime: string }> = [];
+  const playbacks: StubPlayback[] = [];
   const engine = new KittenEngine({
     workerFactory: () => new FakeKittenWorker((w) => spawned.push(w)) as unknown as Worker,
     audioHost: {
       play(bytes: Uint8Array, mime: string) {
         if (opts?.failAudioHost) throw new Error("audio host down");
         playCalls.push({ bytes, mime });
+        if (opts?.controllablePlayback) {
+          let resolveDone!: () => void;
+          const pb: StubPlayback = {
+            stopCalls: 0,
+            done: new Promise<void>((r) => (resolveDone = r)),
+            stop: () => {
+              pb.stopCalls += 1;
+              resolveDone();
+            },
+            finish: () => resolveDone(),
+          };
+          playbacks.push(pb);
+          return pb;
+        }
         return { stop: () => {}, done: Promise.resolve() };
       },
     },
   });
-  return { engine, spawned, worker: () => spawned[spawned.length - 1], playCalls };
+  return { engine, spawned, worker: () => spawned[spawned.length - 1], playCalls, playbacks };
 }
 
 /** Drive a speak() through init + synth with the given samples. */
@@ -270,6 +296,65 @@ describe("KittenEngine contract behavior", () => {
     h.worker().reply({ type: "audio", reqId: 1, audio: Float32Array.of(0).buffer }); // arrives after cancel
     expect(await events).toEqual([{ type: "cancelled", speakId: 7 }]);
     expect(h.playCalls).toHaveLength(0);
+  });
+
+  it("mid-synth preempt: newer speak plays live while the orphan's late worker reply is discarded", async () => {
+    // B preempts while A's synth request is still pending in the worker (no
+    // playback exists yet — cancel() has nothing to stop). B's audio reply
+    // arrives first and opens a live (pending-done) playback; A's reply
+    // lands afterwards and must be dropped by the isCurrent() guard without
+    // a second play.
+    const h = makeHarness({ controllablePlayback: true });
+    const first = collect(h.engine.speak("one", 1, { voiceName: null, rate: 1 }));
+    await tick();
+    h.worker().reply({ type: "ready", inputNames: [] });
+    await tick();
+    expect(h.worker().sent[1]).toMatchObject({ type: "synth", reqId: 1 }); // A mid-synth
+
+    const second = collect(h.engine.speak("two", 2, { voiceName: null, rate: 1 }));
+    await tick(); // B posts synth reqId 2 on the same ready worker
+    expect(h.worker().sent[2]).toMatchObject({ type: "synth", reqId: 2 });
+
+    // B's audio first: playback opens and holds (done pending).
+    h.worker().reply({ type: "audio", reqId: 2, audio: Float32Array.of(0).buffer });
+    await tick();
+    expect(h.playCalls).toHaveLength(1);
+    expect(h.playbacks).toHaveLength(1);
+
+    // A's reply lands AFTER B's playback is live — discarded, never played.
+    h.worker().reply({ type: "audio", reqId: 1, audio: Float32Array.of(0).buffer });
+    await tick();
+    expect(h.playCalls).toHaveLength(1); // A's late audio never reached the host
+    expect(await first).toEqual([{ type: "cancelled", speakId: 1 }]);
+
+    // B proceeds normally to end.
+    h.playbacks[0].finish();
+    await tick();
+    expect(await second).toEqual([
+      { type: "start", speakId: 2 },
+      { type: "end", speakId: 2 },
+    ]);
+  });
+
+  it("cancel mid-play stops the live playback and closes with cancelled", async () => {
+    // cancel() during an active playback: the engine stops the orphan (the
+    // stop itself resolves playback.done, so run() never pushes end).
+    const h = makeHarness({ controllablePlayback: true });
+    const events = collect(h.engine.speak("slow", 7, { voiceName: null, rate: 1 }));
+    await tick();
+    h.worker().reply({ type: "ready", inputNames: [] });
+    await tick();
+    h.worker().reply({ type: "audio", reqId: 1, audio: Float32Array.of(0).buffer });
+    await tick();
+    expect(h.playCalls).toHaveLength(1); // audio playing
+
+    h.engine.cancel();
+    expect(h.playbacks[0].stopCalls).toBe(1);
+    await tick();
+    expect(await events).toEqual([
+      { type: "start", speakId: 7 },
+      { type: "cancelled", speakId: 7 },
+    ]);
   });
 
   it("surfaces init failure as an error event and respawns a fresh worker next speak", async () => {
