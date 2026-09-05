@@ -28,7 +28,7 @@
     "open_in_tab": true
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; default-src 'self'; connect-src 'self' ws://127.0.0.1:9333 ws://localhost:9333 http://127.0.0.1:9333 http://localhost:9333"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; default-src 'self'; connect-src 'self' ws://127.0.0.1:9333 ws://localhost:9333 http://127.0.0.1:9333 http://localhost:9333 https://raw.githubusercontent.com https://huggingface.co"
   },
   "offscreen": {
     "scripts": ["offscreen/audio.js"],

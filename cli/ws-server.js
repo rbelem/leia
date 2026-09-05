@@ -33,6 +33,7 @@ export class WsServer {
     this.helloSeen = false; // whether we ever received a hello on this run
     this._authorized = new Set(); // sockets that passed the token handshake
     this.pending = new Map(); // id -> {resolve, reject, timer, name}
+    this._connectionWaiters = new Set(); // {resolve, reject, timer} awaiting the harness connect
     this.eventListeners = new Set();
     this.helloListeners = new Set();
     this.connectionListeners = new Set();
@@ -53,6 +54,12 @@ export class WsServer {
 
   _onConnection(sock) {
     this.client = sock;
+    // Resolve anyone waiting for the harness to (re)connect.
+    for (const w of this._connectionWaiters) {
+      clearTimeout(w.timer);
+      w.resolve();
+    }
+    this._connectionWaiters.clear();
     sock.on("message", (d) => this._onMessage(sock, d));
     sock.on("close", () => {
       if (this.client === sock) {
@@ -112,12 +119,33 @@ export class WsServer {
   }
 
   /**
+   * Wait (bounded) for the harness socket to be connected, so the first
+   * command after a bridge start doesn't race the harness's ~1s reconnect.
+   * @param {number} [timeoutMs]
+   * @returns {Promise<void>}
+   */
+  async waitConnected(timeoutMs = 3000) {
+    if (this.connected) return;
+    await new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null };
+      entry.timer = setTimeout(() => {
+        this._connectionWaiters.delete(entry);
+        reject(new Error("no harness connected — run `leia up` first"));
+      }, timeoutMs);
+      this._connectionWaiters.add(entry);
+    });
+  }
+
+  /**
    * Send a `{type:'command'}` and await the matching `{type:'reply'}`.
    * @param {string} name
    * @param {Record<string, unknown>} [args]
    * @returns {Promise<{ok:boolean, replyType?:string, data?:unknown, error?:string}>}
    */
   async sendCommand(name, args = {}) {
+    // The harness reconnects ~1s after the bridge starts; give it a bounded
+    // grace so the first command doesn't race the reconnect.
+    await this.waitConnected(3000);
     const sock = this.client;
     if (!sock || sock.readyState !== WebSocket.OPEN) {
       throw new Error("no harness connected — run `leia up` first");
@@ -144,6 +172,11 @@ export class WsServer {
   /** Close the server and any live connection. */
   close() {
     this._rejectAll("server closed");
+    for (const w of this._connectionWaiters) {
+      clearTimeout(w.timer);
+      w.reject(new Error("server closed"));
+    }
+    this._connectionWaiters.clear();
     try {
       this.client?.close();
     } catch {}

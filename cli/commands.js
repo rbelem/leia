@@ -61,8 +61,23 @@ function num(v) {
 
 /** Ensure the harness is connected (start bridge + wait for hello in one-shots). */
 async function ensureConnected(adapter) {
-  await adapter.ensureReady();
-  if (!adapter.connected) {
+  try {
+    await adapter.ensureReady();
+  } catch (e) {
+    // `ensureReady` may throw "not connected" during the ~1s reconnect window.
+    // Instead of surfacing it immediately, give the harness a bounded grace to
+    // (re)connect — the bridge is already up and the harness retries every 1s.
+    if (!String(e.message || e).includes("not connected")) throw e;
+  }
+  const ws = adapter.ws;
+  if (ws?.waitConnected) {
+    try {
+      await ws.waitConnected(3000);
+    } catch {
+      // fall through to the explicit check below for a clear message
+    }
+  }
+  if (!adapter.connected && !(ws?.helloSeen)) {
     throw new Error("harness not connected — run `leia up` first");
   }
 }
