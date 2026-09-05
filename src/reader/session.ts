@@ -156,7 +156,7 @@ export class ReaderSession {
     private readonly emit: (ev: SessionEvent) => void,
     /** Durable user-preference area (storage.local). Defaults to `storage`;
      * session-backed storage would wipe voice/engine on every restart. */
-    private readonly prefsStorage: SessionStorage = storage,
+    private readonly prefsStorage: Pick<SessionStorage, "get" | "set"> = storage,
   ) {}
 
   /** Hydrate the singleton from storage.session (owner-vanished resume). */
@@ -164,7 +164,7 @@ export class ReaderSession {
     engine: TextEngine,
     storage: SessionStorage,
     emit: (ev: SessionEvent) => void,
-    prefsStorage: SessionStorage = storage,
+    prefsStorage: Pick<SessionStorage, "get" | "set"> = storage,
   ): Promise<ReaderSession> {
     const session = new ReaderSession(engine, storage, emit, prefsStorage);
     const [stored, prefs] = await Promise.all([

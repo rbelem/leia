@@ -53,7 +53,6 @@ const sessionStorage = {
 const prefsStorage = {
   get: (key: string) => browser.storage.local.get(key) as Promise<Record<string, unknown>>,
   set: (items: Record<string, unknown>) => browser.storage.local.set(items),
-  remove: (key: string) => browser.storage.local.remove(key),
 };
 
 let sessionPromise: Promise<ReaderSession> | null = null;
