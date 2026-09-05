@@ -15,6 +15,11 @@ const readabilityPatch = {
   },
 };
 
+// Dev-only harness page (src/harness/): an extension-context page that opens a
+// loopback WebSocket to the leia-ctl CLI and forwards commands to the runtime.
+// It is intentional dev tooling and must NOT ship in production bundles.
+const DEV = process.argv.includes("--dev");
+
 const ENTRIES = [
   "src/background/index.ts",
   "src/content/index.ts",
@@ -26,6 +31,7 @@ const ENTRIES = [
   // kitten-local (ticket 06): dedicated classic worker hosting ORT-web +
   // phonemizer so inference never blocks the audio-owner context.
   "src/audio/kitten/worker.ts",
+  ...(DEV ? ["src/harness/harness.ts"] : []),
 ];
 const BROWSERS = ["chrome", "firefox"];
 
@@ -46,6 +52,7 @@ for (const browser of BROWSERS) {
 
   cpSync("src/popup/popup.html", `dist/${browser}/popup/popup.html`);
   cpSync("src/options/options.html", `dist/${browser}/options/options.html`);
+  if (DEV) cpSync("src/harness/harness.html", `dist/${browser}/harness/harness.html`);
   cpSync("src/ui", `dist/${browser}/ui`, { recursive: true });
   cpSync("src/probes/offscreen.html", `dist/${browser}/probes/offscreen.html`);
   cpSync("src/offscreen/audio.html", `dist/${browser}/offscreen/audio.html`);
@@ -69,7 +76,11 @@ for (const browser of BROWSERS) {
     manifest.background = { scripts: ["background/index.js"] };
     // Firefox's default extension-pages CSP carries `upgrade-insecure-requests`
     // (Chrome's does not); keep it when overriding for wasm (ticket 06).
-    manifest.content_security_policy.extension_pages += "; upgrade-insecure-requests";
+    // EXCEPT in the dev build (--dev) that includes the harness: that directive
+    // upgrades the harness's `ws://127.0.0.1:9333` loopback WebSocket to `wss://`,
+    // which is not in connect-src and would block the harness entirely. Drop it
+    // for the dev-only build; production stays hardened.
+    if (!DEV) manifest.content_security_policy.extension_pages += "; upgrade-insecure-requests";
     manifest.browser_specific_settings = {
       gecko: {
         id: "leia@rclb.dev",

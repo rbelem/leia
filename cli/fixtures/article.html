@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Leia fixture article</title>
+  <style>
+    body { font: 18px/1.6 Georgia, serif; color: #222; max-width: 640px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 1.6em; color: #111; }
+    h2 { font-size: 1.2em; color: #333; }
+    .highlight { background: #ffe9a8; }
+  </style>
+</head>
+<body>
+  <h1>A Fixture for Reading Aloud</h1>
+  <p>
+    This is a deterministic article used by the leia-ctl CLI to exercise the reader
+    transport end to end. It has a heading, a few paragraphs, and a couple of
+    subheadings so the marching highlight has tokens to walk.
+  </p>
+  <p>
+    The quick brown fox jumps over the lazy dog. The five boxing wizards jump
+    quickly. Pack my box with five dozen liquor jugs. Sphinx of black quartz,
+    judge my vow.
+  </p>
+  <h2>Second Section</h2>
+  <p>
+    Reading a page aloud means walking its text tokens in order, speaking each,
+    and moving a highlight from phrase to phrase at the pace of the voice. That
+    is the core of Leia.
+  </p>
+  <p>
+    When a session starts, the background captures the active tab's scope, splits
+    it into tokens, and hands each token to the selected voice engine. The engine
+    streams audio back; the highlight follows.
+  </p>
+  <h2>How to Verify</h2>
+  <p>
+    From the CLI, run <code>leia open-fixture</code> to open this page, then
+    <code>leia start</code> to read it. Observe the <code>leia:session:state</code>
+    and <code>leia:audio:event</code> stream with <code>leia events</code>.
+  </p>
+</body>
+</html>

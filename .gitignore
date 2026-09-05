@@ -6,3 +6,6 @@ coverage/
 .scratch/
 result
 .codegraph/
+# leia-ctl research/prototype scratch (superseded by cli/ + cli/SPEC.md)
+prototype/
+ff-research/

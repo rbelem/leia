@@ -1,0 +1,271 @@
+// SPDX-License-Identifier: MPL-2.0
+/**
+ * Firefox BrowserAdapter — attaches via geckodriver (WebDriver classic).
+ *
+ * Firefox cannot be spawned by this adapter directly (the flatpak build fails
+ * with a user-namespace EPERM; the repo documents manual launch). Instead the
+ * adapter drives a geckodriver process that launches/holds Firefox and exposes
+ * the WebDriver-classic HTTP API (which is the proven mechanism the
+ * firefox-devtools-MCP uses under the hood).
+ *
+ * WHY geckodriver/WebDriver-classic, NOT raw BiDi (chosen after live testing):
+ *   - A Firefox instance permits only ONE active WebDriver session. A raw BiDi
+ *     client that calls `session.new` on an instance that already has a session
+ *     is rejected ("Maximum number of active sessions"), and a transient CLI
+ *     process strands the session it created. geckodriver correctly creates a
+ *     session and `DELETE /session` frees it, so each CLI run owns + releases
+ *     the session cleanly.
+ *   - geckodriver's WebDriver-classic path is PROVEN to navigate a
+ *     `moz-extension://` URL and to execute `browser.runtime.sendMessage` in the
+ *     extension page (verified live: session → Moz:InstallAddon → navigate the
+ *     harness → execute ping → reply).
+ *
+ * geckodriver is required on PATH (or via GECKODRIVER env / opts.geckodriverPath).
+ * A known-good binary is at /tmp/geckodriver (0.37.1) in this dev env; the
+ * firefox-devtools-MCP also bundles one. The Firefox binary is supplied via
+ * `moz:firefoxOptions.binary` — the CLI must know which build to use. This env
+ * uses the Nix playwright-firefox build:
+ *   /nix/store/nvqkhvdw9xqk948rq5rx8nwb5rwmkzry-playwright-firefox/firefox/firefox
+ * (falls back to $FIREFOX_BIN or `which firefox`).
+ */
+import { spawn, spawnSync } from "node:child_process";
+import { readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { BrowserAdapter } from "./adapter.js";
+import { loadState, saveState, clearState } from "./state.js";
+
+const REPO = new URL("..", import.meta.url).pathname;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Firefox MV3 needs CSP connect-src for the extension page's loopback WS.
+const CSP_ALLOWED_PORTS = new Set([9333]);
+
+/** Known-good Firefox binary for this dev env; env/path fallbacks follow. */
+function detectFirefoxBinary() {
+  if (process.env.FIREFOX_BIN) return process.env.FIREFOX_BIN;
+  const nix = "/nix/store/nvqkhvdw9xqk948rq5rx8nwb5rwmkzry-playwright-firefox/firefox/firefox";
+  if (existsSync(nix)) return nix;
+  const which = spawnSync("which", ["firefox"]).stdout?.toString().trim();
+  return which || "firefox";
+}
+function detectGeckodriver() {
+  if (process.env.GECKODRIVER) return process.env.GECKODRIVER;
+  const which = spawnSync("which", ["geckodriver"]).stdout?.toString().trim();
+  if (which) return which;
+  return "/tmp/geckodriver"; // known-good in this dev env
+}
+
+/** Minimal WebDriver-classic HTTP client for geckodriver (W3C JSON Wire). */
+class WebDriverClient {
+  constructor(base) {
+    this.base = base;
+    this.sessionId = null;
+  }
+  async req(method, path, body) {
+    const r = await fetch(`${this.base}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.value && j.value.error) throw new Error(`${j.value.error}: ${j.value.message}`);
+    return j.value;
+  }
+  async newSession(binary, headless) {
+    const args = headless ? ["-headless"] : [];
+    const v = await this.req("POST", "/session", {
+      capabilities: { alwaysMatch: { browserName: "firefox", "moz:firefoxOptions": { binary, args } } },
+    });
+    this.sessionId = v.sessionId;
+    this.sessionProfile = v.capabilities?.["moz:profile"] || "";
+    return v;
+  }
+  installAddon(path, temporary = true) {
+    return this.req("POST", `/session/${this.sessionId}/moz/addon/install`, { path, temporary });
+  }
+  navigate(url) {
+    return this.req("POST", `/session/${this.sessionId}/url`, { url });
+  }
+  execute(script, args = []) {
+    return this.req("POST", `/session/${this.sessionId}/execute/sync`, { script, args });
+  }
+  async deleteSession() {
+    if (!this.sessionId) return;
+    try { await this.req("DELETE", `/session/${this.sessionId}`); } catch {}
+    this.sessionId = null;
+  }
+}
+
+function discoverExtensionUuid(profileDir) {
+  try {
+    const dirs = readdirSync(join(profileDir, "storage", "default"));
+    const e = dirs.find((d) => d.startsWith("moz-extension+++") && d.includes("^userContextId"));
+    return e ? e.replace("moz-extension+++", "").split("^")[0] : "";
+  } catch {
+    return "";
+  }
+}
+
+export class FirefoxAdapter extends BrowserAdapter {
+  constructor(opts = {}) {
+    super(opts);
+    this.geckoPort = opts.geckoPort ?? 4444;
+    this.geckoPath = opts.geckodriverPath || detectGeckodriver();
+    this.firefoxBin = opts.firefoxBin || detectFirefoxBinary();
+    this.headless = opts.headless ?? true;
+    this.gecko = null; // spawned geckodriver child (if we started it)
+    this.wd = null; // WebDriverClient
+    this.extensionUuid = "";
+    this._attached = false;
+  }
+
+  async _ensureGeckodriver() {
+    // If geckodriver is already serving on the port (e.g. MCP's copy), reuse it.
+    try {
+      const r = await fetch(`http://127.0.0.1:${this.geckoPort}/status`);
+      const j = await r.json();
+      if (j.value?.ready) return;
+    } catch {}
+    // Otherwise spawn our own.
+    try {
+      this.gecko = spawn(this.geckoPath, ["--port", String(this.geckoPort), "--log", "warn"], { stdio: "ignore" });
+      this.gecko.unref();
+    } catch (e) {
+      throw new Error(`could not start geckodriver (${this.geckoPath}): ${e.message}`);
+    }
+    // Wait for readiness.
+    for (let i = 0; i < 40; i++) {
+      try {
+        const r = await fetch(`http://127.0.0.1:${this.geckoPort}/status`);
+        const j = await r.json();
+        if (j.value?.ready) return;
+      } catch {}
+      await sleep(250);
+    }
+    throw new Error(`geckodriver did not become ready on 127.0.0.1:${this.geckoPort}`);
+  }
+
+  async start() {
+    if (this.opts.port && !CSP_ALLOWED_PORTS.has(this.opts.port)) {
+      console.warn(`[firefox] port ${this.opts.port} is not in the extension CSP connect-src; use 9333.`);
+    }
+    await this._startBridge();
+    await this._ensureGeckodriver();
+    this.wd = new WebDriverClient(`http://127.0.0.1:${this.geckoPort}`);
+    const profile = await this._createSessionAndInstall();
+    this.extensionUuid = await this._discoverUuid(profile);
+    await this._navigateHarness();
+    await this._connectHarness();
+    saveState({
+      browser: "firefox",
+      geckoPort: this.geckoPort,
+      profileDir: profile,
+      sessionId: this.wd.sessionId,
+      extensionUuid: this.extensionUuid,
+      pid: this.gecko?.pid || null,
+    });
+  }
+
+  async _createSessionAndInstall() {
+    try {
+      await this.wd.newSession(this.firefoxBin, this.headless);
+    } catch (e) {
+      throw new Error(`could not create Firefox WebDriver session: ${e.message}`);
+    }
+    const dist = join(REPO, "dist", "firefox");
+    try {
+      await this.wd.installAddon(dist, true);
+    } catch (e) {
+      console.warn(`[firefox] addon install: ${e.message}`);
+    }
+    this._attached = true;
+    return this.wd.sessionProfile || "";
+  }
+
+  async _discoverUuid(profile) {
+    let uuid = discoverExtensionUuid(profile);
+    if (!uuid) {
+      // storage dir may briefly lag the addon install
+      await sleep(2000);
+      uuid = discoverExtensionUuid(profile);
+    }
+    return uuid || "";
+  }
+
+  async _navigateHarness() {
+    const tokenQ = this.opts.token ? `&token=${encodeURIComponent(this.opts.token)}` : "";
+    const harnessUrl = `moz-extension://${this.extensionUuid}/harness/harness.html?ws=${encodeURIComponent(this.wsUrl)}${tokenQ}`;
+    await this.wd.navigate(harnessUrl);
+  }
+
+  async _connectHarness() {
+    let gotHello = await this._waitForHello(8000);
+    if (!gotHello) {
+      await this._retriggerConnect();
+      gotHello = await this._waitForHello(3000);
+    }
+  }
+
+  /** One-shot command path: start the bridge + wait for the harness to connect. */
+  async ensureReady(timeoutMs = 8000) {
+    if (!this.ws) await this._startBridge();
+    const st = loadState();
+    if (st?.browser === "firefox") {
+      this.geckoPort = st.geckoPort;
+      this.extensionUuid = st.extensionUuid || this.extensionUuid;
+    }
+    const gotHello = await this._waitForHello(timeoutMs);
+    if (!gotHello) await this._waitForHello(2000);
+    if (!this.ws?.helloSeen && !this.connected) {
+      throw new Error("harness not connected — run `leia up` first");
+    }
+  }
+
+  _waitForHello(timeoutMs) {
+    if (this.ws?.helloSeen) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const off = this.ws?.onHello(() => { off?.(); resolve(true); });
+      setTimeout(() => { off?.(); resolve(false); }, timeoutMs);
+    });
+  }
+
+  async _retriggerConnect() {
+    const expr = `(function(){ if (globalThis.__leiaRestart) globalThis.__leiaRestart(); return 'ok'; })()`;
+    try { await this.wd?.execute(expr); } catch { /* WS-only path is primary */ }
+  }
+
+  async eval(js) {
+    if (!this.wd?.sessionId) throw new Error("no Firefox WebDriver session");
+    const res = await this.wd.execute(`return (${js});`);
+    return res;
+  }
+
+  async openTab(url) {
+    // WebDriver classic navigates the current window; for a new tab we'd need
+    // window handles + a new window. Keep it simple: navigate the current one.
+    if (this.wd?.sessionId) await this.wd.navigate(url);
+  }
+
+  async stop() {
+    // Destructive teardown: free the geckodriver session (releasing the
+    // marionette session — the key anti-stranding behavior) and stop any
+    // geckodriver we spawned. This is the explicit `leia down`.
+    if (this.wd) {
+      await this.wd.deleteSession();
+      this.wd = null;
+    }
+    if (this.gecko) {
+      try { this.gecko.kill("SIGTERM"); } catch {}
+      this.gecko = null;
+    }
+    this._attached = false;
+    clearState();
+  }
+
+  close() {
+    // NON-destructive: only release the WS bridge. The browser + geckodriver
+    // session must persist so a later `status`/`start` reconnects the harness.
+    // Use `stop()` (`leia down`) for explicit teardown.
+    super.close();
+  }
+}

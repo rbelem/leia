@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs",
+    "leia": "node cli/index.js"
   },
   "devDependencies": {
     "@types/webextension-polyfill": "^0.12.5",
