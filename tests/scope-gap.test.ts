@@ -216,6 +216,21 @@ describe("articleTitleElement qualification (title segment assembly)", () => {
     expect(scope!.tokens.map((t) => t.text).join("")).not.toContain("Foreign headline");
   });
 
+  it("ignores a heading in a nested article inside the root's own container", () => {
+    // The heading IS enumerated by the container walk (a nested <article>
+    // sits under the same <main>), but its own closest article/main ancestor
+    // is the nested article — a different container than the root's.
+    readabilityState.parse = { textContent: "First block of prose here. Second block of prose here." };
+    document.body.innerHTML =
+      "<main><article><h1>Nested headline</h1></article>" +
+      "<section><div><p>First block of prose here.</p><p>Second block of prose here.</p></div></section></main>";
+    const scope = captureBody();
+    expect(scope).not.toBeNull();
+    const joined = scope!.tokens.map((t) => t.text).join("");
+    expect(joined).not.toContain("Nested headline");
+    expect(scope!.tokens[0]!.heading).toBeUndefined(); // no title segment at all
+  });
+
   it("falls back to a qualifying h2 when no h1 precedes the root", () => {
     readabilityState.parse = { textContent: "Body prose lives here." };
     document.body.innerHTML = "<h2>Sub headline</h2><div id='root'><p>Body prose lives here.</p></div>";

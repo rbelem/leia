@@ -196,6 +196,37 @@ describe("WebSpeechEngine", () => {
     });
   });
 
+  it("rethrows when the SpeechSynthesisUtterance constructor throws", () => {
+    const g = globalThis as { SpeechSynthesisUtterance?: unknown };
+    const real = g.SpeechSynthesisUtterance;
+    g.SpeechSynthesisUtterance = class {
+      constructor() {
+        throw new Error("utterance ctor exploded");
+      }
+    };
+    try {
+      // The ctor-throw catch logs and rethrows — speak() fails synchronously,
+      // before any stream is produced.
+      expect(() => engine.speak("Hello.", 30, { voiceName: null, rate: 1 })).toThrow("utterance ctor exploded");
+    } finally {
+      g.SpeechSynthesisUtterance = real;
+    }
+    expect(synth.utterances).toHaveLength(0); // nothing was queued
+  });
+
+  it("cancel during the voices wait closes cancelled and never queues the utterance", async () => {
+    vi.useFakeTimers();
+    synth.voices = []; // voices not populated — the shared wait is pending
+    const events = collect(engine.speak("Hello.", 31, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(100); // wait still pending
+    expect(synth.utterances).toHaveLength(0); // the utterance is not queued yet
+    engine.cancel();
+    await vi.advanceTimersByTimeAsync(2000); // the wait resolves — but the speak was cancelled
+    expect(await events).toEqual([{ type: "cancelled", speakId: 31 }]);
+    expect(synth.utterances).toHaveLength(0); // the queued-speak callback bailed (active cleared)
+    expect(synth.cancelCount).toBe(1);
+  });
+
   // Boundary re-anchor: utterance.onboundary re-anchors the estimated word
   // march at the engine's real charIndex; timers orphaned by the re-anchor
   // (or by cancel) are dropped via the `i !== next` / dead guards.
@@ -286,6 +317,94 @@ describe("WebSpeechEngine", () => {
       ]);
       expect(evs.at(-1)).toEqual({ type: "end", speakId: 22 });
       expect(evs).not.toContainEqual({ type: "word", speakId: 22, begin: 8, end: 13 });
+    });
+
+    it("a boundary behind the estimate re-times the rest without marching backward", async () => {
+      vi.useFakeTimers();
+      const timers = captureTimers();
+      const events = collect(engine.speak(TEXT, 24, { voiceName: null, rate: 1 }));
+      const u = await queued();
+
+      u.onstart!(new Event("start"));
+      expectTimers(timers); // words 1–4 at 225/450/825/1125
+      await vi.advanceTimersByTimeAsync(300); // "two" fired → next=2 ("three")
+      // The engine is really still at "two" (4–7) — behind the estimate. The
+      // highlight never marches backward; the rest is just re-timed from now.
+      u.onboundary!({ charIndex: 4, charLength: 3 });
+      // Remaining words 2–4 re-anchored at now(300), anchor=word1: 300+450−225=225,
+      // 300+825−225=600, 300+1125−225=900 — no snap-back re-emit of "two".
+      expect(timers.slice(4).map((t) => t.ms)).toEqual([225, 600, 900]);
+      await vi.advanceTimersByTimeAsync(225); // "three" at 525
+      await vi.advanceTimersByTimeAsync(375); // "four" at 900
+      await vi.advanceTimersByTimeAsync(300); // "five." at 1200
+      u.onend!(new Event("end"));
+
+      const evs = await events;
+      expect(evs.filter((e) => (e as { type: string }).type === "word")).toEqual([
+        { type: "word", speakId: 24, begin: 0, end: 3 },
+        { type: "word", speakId: 24, begin: 4, end: 7 }, // not re-emitted by the backward boundary
+        { type: "word", speakId: 24, begin: 8, end: 13 },
+        { type: "word", speakId: 24, begin: 14, end: 18 },
+        { type: "word", speakId: 24, begin: 19, end: 24 },
+      ]);
+      expect(evs.at(-1)).toEqual({ type: "end", speakId: 24 });
+    });
+
+    it("a boundary past the text end is dropped (schedule untouched)", async () => {
+      vi.useFakeTimers();
+      const timers = captureTimers();
+      const events = collect(engine.speak(TEXT, 25, { voiceName: null, rate: 1 }));
+      const u = await queued();
+
+      u.onstart!(new Event("start"));
+      expectTimers(timers);
+      await vi.advanceTimersByTimeAsync(300); // "two" fired
+      u.onboundary!({ charIndex: 999, charLength: 0 }); // past the last span (ends at 24)
+      expect(timers).toHaveLength(4); // no re-anchor: the original timers still stand
+      await vi.advanceTimersByTimeAsync(150); // "three" at its original 450
+      await vi.advanceTimersByTimeAsync(375); // "four" at 825
+      await vi.advanceTimersByTimeAsync(300); // "five." at 1125
+      u.onend!(new Event("end"));
+
+      const evs = await events;
+      expect(evs.filter((e) => (e as { type: string }).type === "word")).toEqual([
+        { type: "word", speakId: 25, begin: 0, end: 3 },
+        { type: "word", speakId: 25, begin: 4, end: 7 },
+        { type: "word", speakId: 25, begin: 8, end: 13 },
+        { type: "word", speakId: 25, begin: 14, end: 18 },
+        { type: "word", speakId: 25, begin: 19, end: 24 },
+      ]);
+      expect(evs.at(-1)).toEqual({ type: "end", speakId: 25 });
+    });
+
+    it("a boundary within one word of the estimate is noise and is dropped", async () => {
+      vi.useFakeTimers();
+      const timers = captureTimers();
+      const events = collect(engine.speak(TEXT, 26, { voiceName: null, rate: 1 }));
+      const u = await queued();
+
+      u.onstart!(new Event("start")); // next=1, estimate expects "two" at char 4
+      expectTimers(timers);
+      // charIndex 3 ("one"/"two" edge) is 1 char from the expected 4 — within
+      // "two".length → engine jitter, not drift; the boundary is rejected and
+      // the original schedule stands.
+      u.onboundary!({ charIndex: 3, charLength: 3 });
+      expect(timers).toHaveLength(4); // no re-anchor
+      await vi.advanceTimersByTimeAsync(225); // "two" at its original 225
+      await vi.advanceTimersByTimeAsync(225); // "three" at 450
+      await vi.advanceTimersByTimeAsync(375); // "four" at 825
+      await vi.advanceTimersByTimeAsync(300); // "five." at 1125
+      u.onend!(new Event("end"));
+
+      const evs = await events;
+      expect(evs.filter((e) => (e as { type: string }).type === "word")).toEqual([
+        { type: "word", speakId: 26, begin: 0, end: 3 },
+        { type: "word", speakId: 26, begin: 4, end: 7 },
+        { type: "word", speakId: 26, begin: 8, end: 13 },
+        { type: "word", speakId: 26, begin: 14, end: 18 },
+        { type: "word", speakId: 26, begin: 19, end: 24 },
+      ]);
+      expect(evs.at(-1)).toEqual({ type: "end", speakId: 26 });
     });
 
     it("boundary and orphaned timers after cancel are ignored (dead march)", async () => {

@@ -400,6 +400,72 @@ describe("probe dispatch (offscreen / kitten / tts / ff)", () => {
   });
 });
 
+describe("probe dispatch timeouts", () => {
+  /**
+   * dispatch() under fake timers: the probe forward hangs, so the ONLY
+   * settle path is the timeout reject — `advance` drives the clock and
+   * flushes the reply chain's microtasks along the way.
+   */
+  async function dispatchUnderTimers(msg: unknown, timeoutMs: number): Promise<DispatchResult> {
+    const pending = new Promise<DispatchResult>((resolve) => {
+      let done = false;
+      const finish = (reply: unknown): void => {
+        if (!done) {
+          done = true;
+          resolve({ handled: true, reply });
+        }
+      };
+      const ret = listener()(msg, {}, finish);
+      if (ret === false || ret === undefined) {
+        done = true;
+        resolve({ handled: false, reply: undefined });
+      }
+    });
+    const advanced = vi.advanceTimersByTimeAsync(timeoutMs).then(() => null);
+    return (await Promise.race([pending, advanced])) ?? { handled: true, reply: undefined };
+  }
+
+  /** Replace the runtime send with one that never settles (dead offscreen doc). */
+  function hangRuntimeSend(): () => void {
+    const runtime = browser.runtime as unknown as { sendMessage: unknown };
+    const original = runtime.sendMessage;
+    runtime.sendMessage = () => new Promise(() => {});
+    return () => {
+      runtime.sendMessage = original;
+    };
+  }
+
+  it("rejects the kitten probe after the 600s model-download ceiling", async () => {
+    state.chrome = true; // offscreen forward path
+    state.offscreenCreate = async () => {};
+    const restore = hangRuntimeSend();
+    try {
+      vi.useFakeTimers();
+      const r = await dispatchUnderTimers({ type: "leia:probe-kitten", text: "hi" }, 600_000);
+      expect(r.reply).toMatchObject({ ok: false, replyType: "leia:probe-kitten" });
+      expect(replyError(r)).toContain("kitten probe timed out after 600s");
+    } finally {
+      restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects the spike-probe forward after the 30s ceiling", async () => {
+    state.chrome = true;
+    state.offscreenCreate = async () => {};
+    const restore = hangRuntimeSend();
+    try {
+      vi.useFakeTimers();
+      const r = await dispatchUnderTimers({ type: "leia:probe-voices" }, 30_000);
+      expect(r.reply).toMatchObject({ ok: false, replyType: "leia:probe-voices" });
+      expect(replyError(r)).toContain("probe timed out after 30s");
+    } finally {
+      restore();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("audio dispatch, page-info relay, and triage fallthrough", () => {
   it("answers leia:audio:families from the engine seam when present", async () => {
     state.familiesResult = [{ family: "minimax", caps: true }];

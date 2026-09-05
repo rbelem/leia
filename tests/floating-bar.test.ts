@@ -352,6 +352,31 @@ describe("play button", () => {
     expect(play().classList.contains("loading")).toBe(false);
     vi.useRealTimers();
   });
+
+  it("a second beginLoading replaces (not stacks) the pending failsafe timer", async () => {
+    h.capture = { tokens: [{ text: "x" }], ranges: [document.createRange()] };
+    h.handlers["leia:reader:start"] = () => okReply({ ...makeStatus({ state: "playing" }) });
+    await loadBar();
+    vi.useFakeTimers();
+    play().click(); // beginLoading #1: failsafe armed for t=30s
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(play().classList.contains("loading")).toBe(true);
+
+    // A user cannot re-click a disabled Play, but the guard must hold when
+    // beginLoading runs twice anyway (the click listener is still wired).
+    // The listener runs synchronously here (t=10s), so its failsafe is due
+    // at t=40s — 10s after the first timer's deadline.
+    play().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // t=30s — the FIRST timer's deadline: it must have been cleared, not
+    // stacked, or the loading state would drop here.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(play().classList.contains("loading")).toBe(true);
+    // t=40s — the replacement timer's deadline.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(play().classList.contains("loading")).toBe(false);
+    vi.useRealTimers();
+  });
 });
 
 describe("secondary transport", () => {
@@ -416,6 +441,32 @@ describe("reply-listener cases", () => {
     await settle();
     expect(inst.show).toHaveBeenCalledWith("s1", 2, 3, undefined);
     expect(play().classList.contains("loading")).toBe(false);
+  });
+
+  it("reply listeners fire safely while the bar is unmounted (render early-return)", async () => {
+    h.capture = { tokens: [{ text: "x" }], ranges: [document.createRange()] };
+    h.handlers["leia:reader:start"] = () => okReply({ ...makeStatus({ state: "playing" }) });
+    await loadBar();
+    play().click();
+    await settle();
+    expect(play().classList.contains("loading")).toBe(true);
+
+    // Unmount mid-pending: broadcast renderers must bail on the missing els
+    // instead of touching removed DOM.
+    setSurface(false);
+    expect(document.getElementById("leia-floating-bar")).toBeNull();
+    expect(() =>
+      broadcast({ type: "leia:session:state", status: makeStatus({ state: "playing" }) }),
+    ).not.toThrow(); // render() early-returns (els null), loading stays pending
+    await settle();
+    // highlight:set clears the pending state — through the same early-return.
+    broadcast({ type: "leia:highlight:set", sessionId: "s1", from: 0, to: 0 });
+    await settle();
+
+    // Remount: loading was cleared while unmounted → an enabled Play button.
+    setSurface(true);
+    expect(play().classList.contains("loading")).toBe(false);
+    expect(play().disabled).toBe(false);
   });
 
   it("highlight:set renders and ends pending; highlight:clear resets", async () => {

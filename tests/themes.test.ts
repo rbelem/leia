@@ -11,6 +11,7 @@ import {
   pickVariant,
   relativeLuminance,
   type Rgba,
+  type Theme,
   type Variant,
 } from "../src/content/themes";
 import {
@@ -111,6 +112,30 @@ describe("theme palettes", () => {
     expect(v.color).toBeUndefined(); // page text untouched → always safe
     // paper itself dead-zones on the same gray (light 3.72, dark 2.66).
     expect(pickVariant(THEMES.paper, "#808080")).toBe(fallbackVariant());
+  });
+
+  it("never picks paper's colorless underline variant, even as the only variant", () => {
+    // The variant-selection loop must skip the underline fallback (no ink to
+    // contrast-judge) and land on the theme-external fallback instead.
+    const only: Theme = { id: "paper", label: "Only underline", variants: [fallbackVariant()] };
+    expect(pickVariant(only, "#ffffff")).toBe(fallbackVariant());
+    expect(pickVariant(only, "#ffffff").color).toBeUndefined();
+  });
+
+  it("skips variants with unparseable ink and judges wash-less ink on the bare page", () => {
+    const custom: Theme = {
+      id: "sun",
+      label: "Custom",
+      variants: [
+        { band: "any", color: "rebeccapurple" }, // unparseable ink → skipped, not a crash
+        { band: "light", color: "#000000" }, // ink with no wash → ground is the page itself
+      ],
+    };
+    // Unparseable page background is judged against plain white; black on
+    // white clears AA at 21:1 → the wash-less variant is picked.
+    const v = pickVariant(custom, "not-a-color");
+    expect(v).toBe(custom.variants[1]);
+    expect(effectiveRatio(v, "#ffffff")).toBeGreaterThanOrEqual(4.5);
   });
 });
 

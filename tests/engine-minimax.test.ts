@@ -22,10 +22,14 @@ function jsonResponse(data: unknown): Response {
   return { ok: true, json: async () => data } as unknown as Response;
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (err: unknown) => void } {
   let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => (resolve = r));
-  return { promise, resolve };
+  let reject!: (err: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 interface StubPlayback extends Playback {
@@ -479,6 +483,38 @@ describe("MiniMaxEngine — failure and edge paths (100% coverage)", () => {
     expect(await events).toEqual([{ type: "cancelled", speakId: 14 }]);
   });
 
+  it("double-finish in one speak: natural end then a late stop — end pushes exactly once", async () => {
+    // Two triggers fire against the same playback: finish() resolves done
+    // (engine pushes end + closes), then a late stop() re-resolves the same
+    // done promise — a no-op that must not duplicate events or throw.
+    const { fetchImpl } = makeFetch([() => jsonResponse(ENVELOPE_OK)]);
+    const host = makeHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const iterable = engine.speak("Twice.", 45, { voiceName: null, rate: 1 });
+    const seen: unknown[] = [];
+    void (async () => {
+      for await (const ev of iterable) seen.push(ev);
+    })();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.played).toHaveLength(1);
+
+    host.playbacks[0].finish(); // trigger 1: natural end
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toEqual([
+      { type: "start", speakId: 45 },
+      { type: "end", speakId: 45 },
+    ]);
+
+    host.playbacks[0].stop(); // trigger 2: late stop — done already resolved
+    host.playbacks[0].finish(); // (and a second finish too)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toEqual([
+      { type: "start", speakId: 45 },
+      { type: "end", speakId: 45 },
+    ]); // no duplicate end, no crash — the closed stream swallowed nothing
+  });
+
   it("idle cancel (no active speak) is a safe no-op", () => {
     const engine = new MiniMaxEngine({ getKey: async () => null, fetchImpl: makeFetch([]).fetchImpl });
     expect(() => engine.cancel()).not.toThrow();
@@ -818,6 +854,28 @@ describe("MiniMaxEngine — HTTP-chunked streaming (progressive hosts)", () => {
       { type: "start", speakId: 33 },
       { type: "cancelled", speakId: 33 },
     ]);
+  });
+
+  it("streaming fetch rejects after cancel(): silent exit, cancelled stays the only event", async () => {
+    // cancel() lands while the streaming fetch is still pending, then the
+    // fetch rejects. runStreamed's catch sees !isCurrent (L421) and exits
+    // silently — no error event on top of the cancelled close, and the
+    // engine's await keeps the rejection handled (no unhandled rejection).
+    const held = deferred<Response>();
+    const { fetchImpl } = makeFetch([() => held.promise]);
+    const { host, playbacks } = makeProgressiveHost();
+    const engine = new MiniMaxEngine({ getKey: async () => "k", fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hello world.", 43, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0); // parked awaiting the streaming fetch
+    expect(playbacks).toHaveLength(0);
+
+    engine.cancel();
+    held.reject(new Error("net down")); // rejection lands after the cancel
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(playbacks).toHaveLength(0);
+    expect(await events).toEqual([{ type: "cancelled", speakId: 43 }]);
   });
 
   it("a new speak preempts mid-stream: old cancelled + stopped, new streams", async () => {

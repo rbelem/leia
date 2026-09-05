@@ -172,6 +172,48 @@ describe("probeProfile", () => {
     expect(await probeProfile(base, fetchImpl)).toEqual({ online: false, caps: DEGRADED_CAPS });
     expect(calls).toHaveLength(2); // cache served the offline result
   });
+
+  // --- error-path gap coverage (doProbe L169 / probeCaps L186-187 / parseCaps L192-202) ---
+
+  it("health 200 whose json() throws → offline, caps never probed", async () => {
+    const throwingJson = (): Response =>
+      ({ ok: true, status: 200, json: async () => { throw new Error("body stream reset"); } } as unknown as Response);
+    const r = await probeProfile(
+      "http://127.0.0.1:9101",
+      routedFetch(throwingJson, () => { throw new Error("caps must not be probed"); }, []),
+    );
+    expect(r).toEqual({ online: false, caps: DEGRADED_CAPS }); // probe never throws
+  });
+
+  it("caps fetch network reject → still online with degraded defaults, never throws", async () => {
+    // Health succeeded, so the profile is reachable; the caps probe failing
+    // degrades capabilities without flipping online off.
+    const r = await probeProfile(
+      "http://127.0.0.1:9102",
+      routedFetch(HEALTH_OK, () => Promise.reject(new Error("ECONNRESET")), []),
+    );
+    expect(r).toEqual({ online: true, caps: DEGRADED_CAPS });
+  });
+
+  it("caps 200 with non-object / voices-not-array / non-object-entry bodies → degraded defaults", async () => {
+    const scalar = await probeProfile(
+      "http://127.0.0.1:9103",
+      routedFetch(HEALTH_OK, () => jsonResponse("nope"), []),
+    );
+    expect(scalar).toEqual({ online: true, caps: DEGRADED_CAPS }); // parseCaps: non-object
+
+    const nonArray = await probeProfile(
+      "http://127.0.0.1:9104",
+      routedFetch(HEALTH_OK, () => jsonResponse({ wordTiming: true, voices: { a: 1 } }), []),
+    );
+    expect(nonArray).toEqual({ online: true, caps: DEGRADED_CAPS }); // parseCaps: voices not an array
+
+    const garbageEntries = await probeProfile(
+      "http://127.0.0.1:9105",
+      routedFetch(HEALTH_OK, () => jsonResponse({ wordTiming: true, voices: ["garbage", null] }), []),
+    );
+    expect(garbageEntries).toEqual({ online: true, caps: DEGRADED_CAPS }); // entries skipped → 0 voices
+  });
 });
 
 describe("validateBaseUrl", () => {

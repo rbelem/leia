@@ -522,6 +522,33 @@ describe("play button loading state machine", () => {
     expect(q<HTMLButtonElement>("pp-play").textContent).toBe("⏸ Pause");
     vi.useRealTimers();
   });
+
+  it("a second beginLoading replaces (not stacks) the pending failsafe timer", async () => {
+    // An ok start reply with no status data leaves the button pending without
+    // applying a "playing" state — so a second click computes "start" again.
+    h.handlers["leia:reader:start"] = () => okReply(undefined);
+    await loadPopup();
+    vi.useFakeTimers();
+    const play = q<HTMLButtonElement>("pp-play");
+    play.click(); // beginLoading #1: failsafe armed for t=30s
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(play.classList.contains("loading")).toBe(true);
+
+    // A user cannot re-click a disabled Play, but the guard must hold when
+    // beginLoading runs twice anyway (the click listener is still wired).
+    // The listener runs synchronously here (t=10s), so its failsafe is due
+    // at t=40s — 10s after the first timer's deadline.
+    play.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // t=30s — the FIRST timer's deadline: it must have been cleared, not
+    // stacked, or the loading state would drop here.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(play.classList.contains("loading")).toBe(true);
+    // t=40s — the replacement timer's deadline.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(play.classList.contains("loading")).toBe(false);
+    vi.useRealTimers();
+  });
 });
 
 describe("pickers", () => {
