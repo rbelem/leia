@@ -42,6 +42,19 @@
           <input id="custom-url" type="text" placeholder="http://127.0.0.1:8880" autocomplete="off" spellcheck="false" aria-describedby="custom-error" />
         </label>
       </div>
+      <div class="form-row">
+        <label>
+          <span>API</span>
+          <select id="custom-protocol" aria-label="Server API dialect">
+            <option value="leia">leia shim</option>
+            <option value="openai">OpenAI-compatible</option>
+          </select>
+        </label>
+        <label>
+          <span>Model id</span>
+          <input id="custom-model" type="text" placeholder="openbmb/VoxCPM2" autocomplete="off" spellcheck="false" />
+        </label>
+      </div>
       <div class="install-hint" id="custom-hint" hidden></div>
       <p class="hint error" id="custom-error" role="alert" hidden></p>
       <div class="form-actions">

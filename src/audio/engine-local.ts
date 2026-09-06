@@ -67,7 +67,7 @@ export class LocalEngine implements TextEngine {
   }
 
   async getVoices(): Promise<VoiceInfo[]> {
-    const { online, caps } = await probeProfile(this.profile.baseUrl, this.fetchImpl);
+    const { online, caps } = await probeProfile(this.profile, this.fetchImpl);
     if (!online) return [];
     return caps.voices.map((v) => ({ name: v.name, lang: v.lang, localService: true, family: this.family }));
   }
@@ -111,7 +111,7 @@ export class LocalEngine implements TextEngine {
 
     // TTL-cached probe: a fresh result is instant; a stale one re-probes
     // (30 s TTL, 500 ms abort) so a server that just came up is picked up.
-    const { online } = await probeProfile(this.profile.baseUrl, this.fetchImpl);
+    const { online } = await probeProfile(this.profile, this.fetchImpl);
     if (!this.isCurrent(speakId)) return;
     if (!online) {
       fail(`local server offline — check ${this.profile.baseUrl}`);
@@ -119,6 +119,48 @@ export class LocalEngine implements TextEngine {
     }
 
     const voice = options.voiceName ?? this.caps.voices[0]?.id ?? "default";
+    if (this.profile.kind === "openai") {
+      // OpenAI-compatible TTS: POST /v1/audio/speech → raw audio bytes
+      // (mp3 by default — vLLM-Omni, LocalAI and Kokoro-FastAPI all encode
+      // it). No word timing exists on this API; the media-clock poll the
+      // reader arms for timing-less engines keeps the highlight marching.
+      let resp: Response;
+      try {
+        resp = await this.fetchImpl(`${this.profile.baseUrl}/v1/audio/speech`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: text,
+            voice,
+            response_format: "mp3",
+            ...(this.profile.model ? { model: this.profile.model } : {}),
+          }),
+        });
+      } catch (err) {
+        // Server died mid-session — mark offline NOW so the picker reacts.
+        markProfileOffline(this.profile.baseUrl);
+        fail(`local server request failed: ${String(err)}`);
+        return;
+      }
+      if (!this.isCurrent(speakId)) return;
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        fail(`${resp.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await resp.arrayBuffer());
+      } catch (err) {
+        fail(`local server returned malformed audio payload: ${String(err)}`);
+        return;
+      }
+      if (!this.isCurrent(speakId)) return;
+      const mime = resp.headers?.get?.("content-type")?.split(";")[0] || "audio/mpeg";
+      await this.deliver(bytes, mime, speakId, stream);
+      return;
+    }
+
     let resp: Response;
     try {
       resp = await this.fetchImpl(`${this.profile.baseUrl}/leia/v1/synthesize`, {
@@ -159,7 +201,18 @@ export class LocalEngine implements TextEngine {
       fail("local server returned malformed audio payload");
       return;
     }
-    const playback = this.audioHost.play(bytes, "audio/wav");
+    await this.deliver(bytes, "audio/wav", speakId, stream, envelope.words);
+  }
+
+  /** Shared playback tail: play, emit start/word/end, close. */
+  private async deliver(
+    bytes: Uint8Array,
+    mime: string,
+    speakId: number,
+    stream: EventStream<EngineEvent>,
+    words?: LocalVoiceWord[],
+  ): Promise<void> {
+    const playback = this.audioHost.play(bytes, mime);
     if (!this.isCurrent(speakId)) {
       playback.stop();
       return;
@@ -168,7 +221,7 @@ export class LocalEngine implements TextEngine {
     const playResolvedAt = Date.now();
     stream.push({ type: "start", speakId });
 
-    if (this.caps.wordTiming) this.scheduleWords(envelope.words, speakId, stream, playResolvedAt);
+    if (this.caps.wordTiming) this.scheduleWords(words, speakId, stream, playResolvedAt);
     await playback.done;
     if (this.active?.speakId === speakId) this.active = null;
     stream.push({ type: "end", speakId });
@@ -232,7 +285,7 @@ function base64ToBytes(b64: string): Uint8Array {
 export async function registerLocalEngines(hub: EngineHub): Promise<void> {
   const profiles = [...BUILT_IN_PROFILES, ...(await readLocalProfiles())];
   for (const profile of profiles) {
-    const { online, caps } = await probeProfile(profile.baseUrl);
+    const { online, caps } = await probeProfile(profile);
     if (online) hub.register(`local-${profile.id}`, new LocalEngine(profile, caps));
   }
 }

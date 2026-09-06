@@ -37,6 +37,8 @@ if (document.getElementById("providers")) {
   const presetSelect = document.getElementById("custom-preset") as HTMLSelectElement;
   const nameInput = document.getElementById("custom-name") as HTMLInputElement;
   const urlInput = document.getElementById("custom-url") as HTMLInputElement;
+  const protocolSelect = document.getElementById("custom-protocol") as HTMLSelectElement;
+  const modelInput = document.getElementById("custom-model") as HTMLInputElement;
   const hintEl = document.getElementById("custom-hint") as HTMLDivElement;
   const errorEl = document.getElementById("custom-error") as HTMLParagraphElement;
   const addBtn = document.getElementById("custom-add") as HTMLButtonElement;
@@ -46,7 +48,7 @@ if (document.getElementById("providers")) {
   function renderServer(container: HTMLElement, profile: LocalProfile, removable: boolean): HTMLElement {
     const row = buildServerRow(profile, null, removable);
     container.appendChild(row);
-    void probeProfile(profile.baseUrl).then((probe) => setServerProbe(row, probe));
+    void probeProfile(profile).then((probe) => setServerProbe(row, probe));
     return row;
   }
 
@@ -84,15 +86,18 @@ if (document.getElementById("providers")) {
       return;
     }
     showError(null);
+    const kind = protocolSelect.value === "openai" ? "openai" : "leia";
+    const model = modelInput.value.trim();
     const profile: LocalProfile = {
       id: newCustomId(),
       name: nameInput.value.trim() || "Custom server",
       // Store the normalized address (no path/trailing slash), not raw input.
       baseUrl: validateBaseUrl(urlInput.value.trim())!,
+      ...(kind === "openai" ? { kind, ...(model ? { model } : {}) } : {}),
     };
     await writeLocalProfiles([...customs, profile]);
     presetSelect.value = "";
-    applyPreset(null, { name: nameInput, url: urlInput, hint: hintEl });
+    applyPreset(null, { name: nameInput, url: urlInput, model: modelInput, protocol: protocolSelect, hint: hintEl });
     await renderCustoms();
     nameInput.focus();
   }
@@ -134,7 +139,7 @@ if (document.getElementById("providers")) {
   }
   presetSelect.addEventListener("change", () => {
     const preset = BUILT_IN_PROFILES.find((p) => p.id === presetSelect.value) ?? null;
-    applyPreset(preset, { name: nameInput, url: urlInput, hint: hintEl });
+    applyPreset(preset, { name: nameInput, url: urlInput, model: modelInput, protocol: protocolSelect, hint: hintEl });
     showError(null);
   });
   addBtn.addEventListener("click", () => void addCustom());

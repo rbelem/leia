@@ -57,7 +57,7 @@ engine.register("kitten-local", new KittenEngine());
 async function registerLocalEnginesFromSnapshot(hub: EngineHub): Promise<void> {
   const profiles = [...BUILT_IN_PROFILES, ...snapshotLocalProfiles()];
   for (const profile of profiles) {
-    const { online, caps } = await probeProfile(profile.baseUrl);
+    const { online, caps } = await probeProfile(profile);
     if (online) hub.register(`local-${profile.id}`, new LocalEngine(profile, caps));
   }
 }

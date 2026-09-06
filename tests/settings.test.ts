@@ -232,9 +232,17 @@ describe("local server rows", () => {
 
 describe("add-a-server form", () => {
   function fields() {
+    const protocol = document.createElement("select");
+    for (const v of ["leia", "openai"]) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      protocol.appendChild(opt);
+    }
     return {
       name: document.createElement("input"),
       url: document.createElement("input"),
+      model: document.createElement("input"),
+      protocol,
       hint: document.createElement("div"),
     };
   }
@@ -245,8 +253,19 @@ describe("add-a-server form", () => {
     applyPreset(piper, f);
     expect(f.name.value).toBe("Piper");
     expect(f.url.value).toBe("http://127.0.0.1:8881");
+    expect(f.protocol.value).toBe("leia");
+    expect(f.model.value).toBe("");
     expect(f.hint.hidden).toBe(false);
     expect(f.hint.textContent).toBe(piper.install);
+  });
+
+  it("an OpenAI-API preset fills the dialect and model id", () => {
+    const vox = BUILT_IN_PROFILES.find((p) => p.id === "voxcpm2")!;
+    const f = fields();
+    applyPreset(vox, f);
+    expect(f.protocol.value).toBe("openai");
+    expect(f.model.value).toBe("openbmb/VoxCPM2");
+    expect(f.hint.textContent).toBe(vox.install);
   });
 
   it("clearing the preset empties the form and hides the hint", () => {
@@ -255,6 +274,8 @@ describe("add-a-server form", () => {
     applyPreset(null, f);
     expect(f.name.value).toBe("");
     expect(f.url.value).toBe("");
+    expect(f.protocol.value).toBe("leia");
+    expect(f.model.value).toBe("");
     expect(f.hint.hidden).toBe(true);
   });
 
@@ -272,7 +293,7 @@ describe("add-a-server form", () => {
     // Normalization: path and trailing slash don't dodge the duplicate check.
     expect(baseUrlProblem("http://127.0.0.1:8880/", existing)).toBe("This address is already listed.");
     expect(baseUrlProblem("http://localhost:9999/some/path", existing)).toBe("This address is already listed.");
-    expect(baseUrlProblem("http://127.0.0.1:8885", existing)).toBeNull();
+    expect(baseUrlProblem("http://127.0.0.1:9990", existing)).toBeNull(); // 9990 unassigned
   });
 });
 

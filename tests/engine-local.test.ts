@@ -98,6 +98,7 @@ const WORDS = [
   { begin: 6, end: 12, time_ms: 457 },
 ];
 const SYNC_OK = (words?: unknown[]): Response => jsonResponse({ audio_b64: btoa("RIFF"), ...(words ? { words } : {}) });
+const DEGRADED: LocalCapabilities = { wordTiming: false, voices: [{ id: "default", lang: "en", name: "Default" }] };
 
 function makeProfile(port: number, id = `eng${port}`): LocalProfile {
   return { id, name: `Engine ${port}`, baseUrl: `http://127.0.0.1:${port}` };
@@ -394,5 +395,146 @@ describe("LocalEngine", () => {
     expect(await engine.getVoices()).toHaveLength(2); // stale → re-probe, still online
     expect(calls).toHaveLength(4);
     expect(calls[2].url.endsWith("/leia/v1/health")).toBe(true);
+  });
+});
+describe("LocalEngine — openai dialect", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  interface OpenAiHandlers {
+    models?: () => Response | Promise<Response>;
+    voices?: () => Response | Promise<Response>;
+    speech?: (init?: RequestInit) => Response | Promise<Response>;
+  }
+
+  function makeOpenAiFetch(handlers: OpenAiHandlers): {
+    fetchImpl: typeof fetch;
+    calls: Array<{ url: string; init?: RequestInit }>;
+    speechBodies: unknown[];
+  } {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const speechBodies: unknown[] = [];
+    const route = (url: string, init?: RequestInit): Response | Promise<Response> => {
+      calls.push({ url, init });
+      if (url.endsWith("/v1/models")) return handlers.models ? handlers.models() : jsonResponse({ data: [{ id: "m" }] });
+      if (url.endsWith("/v1/audio/voices")) {
+        if (!handlers.voices) return jsonResponse({}, 404);
+        return handlers.voices();
+      }
+      if (url.endsWith("/v1/audio/speech")) {
+        if (!handlers.speech) throw new Error(`unexpected speech fetch: ${url}`);
+        if (init?.body) speechBodies.push(JSON.parse(String(init.body)));
+        return handlers.speech(init);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    return {
+      fetchImpl: (async (url: string, init?: RequestInit) => route(url, init)) as typeof fetch,
+      calls,
+      speechBodies,
+    };
+  }
+
+  function bytesResponse(bytes: Uint8Array, mime: string, status = 200): Response {
+    const buf = bytes.slice().buffer;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (k: string) => (k.toLowerCase() === "content-type" ? mime : null) },
+      arrayBuffer: async () => buf,
+      text: async () => "err",
+    } as unknown as Response;
+  }
+
+  function makeOpenAiProfile(port: number): LocalProfile {
+    return { id: `oa${port}`, name: `OA ${port}`, baseUrl: `http://127.0.0.1:${port}`, kind: "openai", model: "openbmb/VoxCPM2" };
+  }
+
+  it("speak posts the OpenAI speech body and plays the returned bytes with the server mime", async () => {
+    const { fetchImpl, calls, speechBodies } = makeOpenAiFetch({
+      speech: () => bytesResponse(new TextEncoder().encode("ID3audio"), "audio/mpeg; charset=utf-8"),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(makeOpenAiProfile(8895), DEGRADED, { fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hello there.", 7, { voiceName: "female", rate: 1.2 }));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(await events).toEqual([
+      { type: "start", speakId: 7 },
+      { type: "end", speakId: 7 },
+    ]);
+    expect(calls.map((c) => c.url)).toContain("http://127.0.0.1:8895/v1/audio/speech");
+    expect(speechBodies[0]).toEqual({ input: "Hello there.", voice: "female", response_format: "mp3", model: "openbmb/VoxCPM2" });
+    expect(host.played[0].mime).toBe("audio/mpeg"); // server mime, params stripped
+    expect(Array.from(host.played[0].bytes)).toEqual(Array.from(new TextEncoder().encode("ID3audio")));
+    expect(engine.capabilities.wordTiming).toBe(false);
+  });
+
+  it("no stored model → request omits the model field; voice falls back to the default", async () => {
+    const { fetchImpl, speechBodies } = makeOpenAiFetch({
+      speech: () => bytesResponse(new Uint8Array([1, 2, 3]), "audio/wav"),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(
+      { id: "plain", name: "Plain", baseUrl: "http://127.0.0.1:8896", kind: "openai" },
+      DEGRADED,
+      { fetchImpl, audioHost: host },
+    );
+    const events = collect(engine.speak("Hi.", 1, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events;
+    expect(speechBodies[0]).toEqual({ input: "Hi.", voice: "default", response_format: "mp3" });
+  });
+
+  it("speech error status → error event, no audio played", async () => {
+    const { fetchImpl } = makeOpenAiFetch({
+      speech: () => jsonResponse({ error: { message: "model not loaded" } }, 500),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(makeOpenAiProfile(8897), DEGRADED, { fetchImpl, audioHost: host });
+
+    const events = collect(engine.speak("Hi.", 2, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([{ type: "error", speakId: 2, message: expect.stringContaining("500") }]);
+    expect(host.played).toHaveLength(0);
+  });
+
+  it("network failure during speak marks the profile offline — next probe says offline", async () => {
+    const { fetchImpl } = makeOpenAiFetch({
+      speech: (): Response => {
+        throw new TypeError("connection refused");
+      },
+    });
+    const engine = new LocalEngine(makeOpenAiProfile(8898), DEGRADED, { fetchImpl, audioHost: makeHost() });
+
+    const events = collect(engine.speak("Hi.", 3, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([{ type: "error", speakId: 3, message: expect.stringContaining("failed") }]);
+
+    // markProfileOffline poisons the probe cache → getVoices reports offline
+    // without touching the network again (offline probes are cached too).
+    expect(await engine.getVoices()).toEqual([]);
+  });
+
+  it("getVoices lists /v1/audio/voices voices when the server exposes them", async () => {
+    const { fetchImpl, calls } = makeOpenAiFetch({
+      voices: () => jsonResponse({ voices: ["af_heart", "zf_xiaobei"] }),
+    });
+    const engine = new LocalEngine(makeOpenAiProfile(8899), DEGRADED, { fetchImpl, audioHost: makeHost() });
+
+    expect(await engine.getVoices()).toEqual([
+      { name: "af_heart", lang: "en", localService: true, family: "local-oa8899" },
+      { name: "zf_xiaobei", lang: "en", localService: true, family: "local-oa8899" },
+    ]);
+    expect(calls.map((c) => c.url.replace("http://127.0.0.1:8899", ""))).toEqual(["/v1/models", "/v1/audio/voices"]);
   });
 });

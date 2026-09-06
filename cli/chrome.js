@@ -68,7 +68,10 @@ export class ChromeAdapter extends BrowserAdapter {
         `--load-extension=${dist}`,
         "about:blank",
       ],
-      { stdio: "ignore" },
+      // detached: the browser must outlive `up` — one-shot commands re-attach
+      // to its CDP port via state.json (the firefox path survives through
+      // geckodriver; chromium's wrapper chain dies with the parent otherwise).
+      { stdio: "ignore", detached: true },
     );
     this.child.unref();
 
@@ -81,6 +84,12 @@ export class ChromeAdapter extends BrowserAdapter {
 
     await this._openHarnessAndConnect();
     saveState({ browser: "chrome", debugPort: this.debugPort, profileDir: this.profileDir, extensionId: extId, pid: this.child.pid });
+    // Let the CLI process exit after `up` like the firefox path: unref the
+    // bridge listener and the CDP socket so neither holds the event loop
+    // open. One-shot commands re-bind the bridge; the harness wake
+    // reconnects it.
+    if (this.ws?.wss?._server) this.ws.wss._server.unref();
+    this._targetWs?._socket?.unref?.();
   }
 
   /** One-shot command path: start the bridge + wait for the harness to connect. */
@@ -95,9 +104,11 @@ export class ChromeAdapter extends BrowserAdapter {
     }
     const gotHello = await this._waitForHello(timeoutMs);
     if (!gotHello) {
-      // The harness may need a nudge; but if no bridge bind was running the
-      // harness reconnects on its own within ~1s, so a single re-wait suffices.
-      await this._waitForHello(2000);
+      // Background-tab timer throttling can park the harness's reconnect
+      // loop for a minute — poke the page (CDP) like the firefox tiered
+      // wake, then wait once more.
+      await this._retriggerConnect();
+      await this._waitForHello(3000);
     }
     if (!this.ws?.helloSeen && !this.connected) {
       throw new Error("harness not connected — run `leia up` first");

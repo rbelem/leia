@@ -40,7 +40,7 @@ export function buildServerRow(profile: LocalProfile, probe: ServerProbe, remova
 
   const url = document.createElement("div");
   url.className = "server-url";
-  url.textContent = profile.baseUrl;
+  url.textContent = profile.kind === "openai" ? `${profile.baseUrl} · OpenAI API${profile.model ? ` · ${profile.model}` : ""}` : profile.baseUrl;
 
   row.append(head, url);
   if (profile.install) {
@@ -74,16 +74,21 @@ export function setServerProbe(row: HTMLElement, probe: ServerProbe): void {
 export interface PresetFields {
   name: HTMLInputElement;
   url: HTMLInputElement;
+  model: HTMLInputElement;
+  protocol: HTMLSelectElement;
   hint: HTMLElement;
 }
 
 /**
- * Fill the add-a-server form from a built-in preset — address plus the
- * install hint verbatim — or clear it back to a blank custom entry.
+ * Fill the add-a-server form from a built-in preset — address, dialect and
+ * model id plus the install hint verbatim — or clear it back to a blank
+ * custom entry.
  */
 export function applyPreset(profile: LocalProfile | null, fields: PresetFields): void {
   fields.name.value = profile?.name ?? "";
   fields.url.value = profile?.baseUrl ?? "";
+  fields.protocol.value = profile?.kind === "openai" ? "openai" : "leia";
+  fields.model.value = profile?.kind === "openai" ? (profile.model ?? "") : "";
   fields.hint.hidden = !profile?.install;
   fields.hint.textContent = profile?.install ?? "";
 }

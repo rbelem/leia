@@ -51,6 +51,11 @@ function buildOptionsDom(): void {
     <select id="custom-preset"></select>
     <input id="custom-name" />
     <input id="custom-url" />
+    <select id="custom-protocol">
+      <option value="leia">leia shim</option>
+      <option value="openai">OpenAI-compatible</option>
+    </select>
+    <input id="custom-model" />
     <div id="custom-hint" hidden></div>
     <p id="custom-error" hidden></p>
     <button id="custom-add"></button>

@@ -93,6 +93,10 @@ function fixtureUrl() {
 // ----- bring-up ---------------------------------------------------------
 async function up(ctx) {
   await ctx.adapter.start();
+  // Release the WS bridge so the CLI process can exit — `up` is not a
+  // daemon. The browser + session persist; one-shot commands re-bind the
+  // bridge and the harness wake reconnects it (close() is non-destructive).
+  ctx.adapter.close?.();
   return { ok: true, message: `adapter up (${ctx.adapter.constructor.name}); bridge ${ctx.adapter.wsUrl}` };
 }
 
