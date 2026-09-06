@@ -142,6 +142,15 @@ class WebDriverClient {
   execute(script, args = []) {
     return this.req("POST", `/session/${this.sessionId}/execute/sync`, { script, args });
   }
+  handles() {
+    return this.req("GET", `/session/${this.sessionId}/window/handles`);
+  }
+  switchWindow(handle) {
+    return this.req("POST", `/session/${this.sessionId}/window`, { handle });
+  }
+  currentWindow() {
+    return this.req("GET", `/session/${this.sessionId}/window`);
+  }
   async deleteSession() {
     if (!this.sessionId) return;
     try { await this.req("DELETE", `/session/${this.sessionId}`); } catch {}
@@ -214,7 +223,12 @@ export class FirefoxAdapter extends BrowserAdapter {
       } else {
         console.warn("[firefox] no libpulse found — Firefox may play audio silently");
       }
-      this.gecko = spawn(this.geckoPath, ["--port", String(this.geckoPort), "--log", "warn"], { stdio: "ignore", env });
+      const logLevel = process.env.GECKODRIVER_LOG;
+      this.gecko = spawn(this.geckoPath, ["--port", String(this.geckoPort), "--log", logLevel ?? "warn"], {
+        // Trace-level runs need the log on stderr — don't discard it.
+        stdio: logLevel ? ["ignore", "inherit", "inherit"] : "ignore",
+        env,
+      });
       this.gecko.unref();
       this._spawnedGecko = true;
       this._geckoPid = this.gecko.pid;
@@ -240,10 +254,15 @@ export class FirefoxAdapter extends BrowserAdapter {
     await this._startBridge();
     await this._ensureGeckodriver();
     this.wd = new WebDriverClient(`http://127.0.0.1:${this.geckoPort}`);
+    console.error("[firefox] stage: bridge+geckodriver ok, creating session");
     const profile = await this._createSessionAndInstall();
+    console.error("[firefox] stage: session+install ok");
     this.extensionUuid = await this._discoverUuid(profile);
+    console.error(`[firefox] stage: uuid=${this.extensionUuid}, navigating`);
     await this._navigateHarness();
+    console.error("[firefox] stage: navigated, waiting for harness hello");
     await this._connectHarness();
+    console.error("[firefox] stage: connected");
     saveState({
       browser: "firefox",
       geckoPort: this.geckoPort,
@@ -303,11 +322,42 @@ export class FirefoxAdapter extends BrowserAdapter {
       this.geckoPort = st.geckoPort;
       this.extensionUuid = st.extensionUuid || this.extensionUuid;
     }
-    const gotHello = await this._waitForHello(timeoutMs);
-    if (!gotHello) await this._waitForHello(2000);
-    if (!this.ws?.helloSeen && !this.connected) {
+    // Tiered wake. Background tabs freeze their JS, so a frozen harness never
+    // retries on its own — passive waiting alone never recovers it. The wake
+    // path pokes the page (cheap) and, failing that, hard-navigates just the
+    // harness tab (deterministic fresh load), restoring the user's tab after.
+    if (await this._waitForHello(2000)) return;
+    if (!(await this._wakeHarness())) {
       throw new Error("harness not connected — run `leia up` first");
     }
+  }
+
+  /** Poke the harness tab awake and, if needed, hard-reload just that tab. */
+  async _wakeHarness() {
+    if (!this.wd?.sessionId) return this.ws?.helloSeen === true;
+    const handles = await this.wd.handles().catch(() => []);
+    let previous = null;
+    try { previous = await this.wd.currentWindow(); } catch { /* optional */ }
+    let ok = false;
+    try {
+      for (const h of handles) {
+        await this.wd.switchWindow(h);
+        const url = await this.wd.execute("return location.href").catch(() => "");
+        if (!String(url).includes("harness")) continue;
+        await this._retriggerConnect();
+        ok = await this._waitForHello(2500);
+        if (!ok) {
+          await this._navigateHarness();
+          ok = await this._waitForHello(3000);
+        }
+        break;
+      }
+    } finally {
+      if (previous) {
+        try { await this.wd.switchWindow(previous); } catch { /* best effort */ }
+      }
+    }
+    return ok;
   }
 
   _waitForHello(timeoutMs) {
@@ -330,9 +380,27 @@ export class FirefoxAdapter extends BrowserAdapter {
   }
 
   async openTab(url) {
-    // WebDriver classic navigates the current window; for a new tab we'd need
-    // window handles + a new window. Keep it simple: navigate the current one.
-    if (this.wd?.sessionId) await this.wd.navigate(url);
+    if (!this.wd?.sessionId) return;
+    // W3C window/new: geckodriver creates the tab but ignores the url for
+    // Firefox — switch to the new handle, then navigate if needed.
+    try {
+      const created = await this.wd.req("POST", `/session/${this.wd.sessionId}/window/new`, { url }).catch(() => null);
+      if (created?.handle) {
+        await this.wd.switchWindow(created.handle);
+        const cur = String(await this.wd.execute("return location.href").catch(() => ""));
+        if (!cur.includes(url)) await this.wd.navigate(url);
+        return;
+      }
+    } catch { /* fall through to the legacy path */ }
+    // Legacy: window.open from the current page, then adopt the new handle.
+    await this.wd.execute(`window.open(${JSON.stringify(url)}, "_blank"); return true`);
+    await sleep(800);
+    const handles = await this.wd.handles();
+    for (const h of handles) {
+      await this.wd.switchWindow(h);
+      const cur = String(await this.wd.execute("return location.href").catch(() => ""));
+      if (cur.includes(url)) return;
+    }
   }
 
   async stop() {

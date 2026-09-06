@@ -265,6 +265,7 @@ function connect(): void {
     return;
   }
   socket = ws;
+  connectStartedAt = performance.now();
 
   ws.onopen = () => {
     reconnectFailures = 0;
@@ -299,20 +300,35 @@ function connect(): void {
  * page timers are throttled.
  */
 let reconnectFailures = 0;
-// Reload immediately on a lost bridge: a fresh page load is the one connect
-// path Firefox never gets wrong here, and in-place retries just add latency
-// to the reconnect cycle.
-const MAX_IN_PLACE_RETRIES = 0;
+// Prefer in-place retries: the worker tick drives them unthrottled and a
+// `new WebSocket` from a background tab connects instantly, while each
+// reload is slow (throttled background loads) and churns the page. A fresh
+// load is the last-resort path, not the first.
+const MAX_IN_PLACE_RETRIES = 5;
+/** A CONNECTING socket that outlives this is force-closed so the tick retries. */
+const CONNECT_TIMEOUT_MS = 3000;
+let connectStartedAt = 0;
 
 function scheduleReconnect(): void {
   reconnectFailures += 1;
   setTimeout(reconnectOrReload, RECONNECT_MS);
 }
 
-/** Shared decision: try in place, or reload for a clean connection. */
+/** Shared decision: retry in place, or reload for a clean connection. */
 function reconnectOrReload(): void {
-  if (socket && socket.readyState !== WebSocket.CLOSED) return; // healthy or in-flight
-  reconnectFailures += 1;
+  if (socket && socket.readyState === WebSocket.CONNECTING) {
+    if (performance.now() - connectStartedAt < CONNECT_TIMEOUT_MS) return; // young attempt, let it run
+    log("conn", "[connect attempt stalled — forcing close]");
+    socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+    try {
+      socket.close();
+    } catch {
+      /* already gone */
+    }
+    socket = null;
+  } else if (socket && socket.readyState !== WebSocket.CLOSED) {
+    return; // healthy
+  }
   if (reconnectFailures <= MAX_IN_PLACE_RETRIES) {
     connect();
     return;
@@ -342,13 +358,30 @@ let reconnectWorker: Worker | null = null;
 try {
   reconnectWorker = new Worker("reconnect-worker.js");
   reconnectWorker.onmessage = () => {
-    // Drive BOTH the in-place retry and the reload threshold from worker
-    // ticks (unthrottled), since page timers can stall on occluded windows.
-    if (!socket || socket.readyState === WebSocket.CLOSED) reconnectOrReload();
+    // Drive the reconnect decision from worker ticks (unthrottled). Safe to
+    // call on every tick: reconnectOrReload returns early for healthy or
+    // young in-flight sockets and self-manages the stalled-socket case.
+    reconnectOrReload();
   };
 } catch (e) {
   log("err", `[reconnect worker unavailable: ${String(e)}]`);
 }
+
+/**
+ * CLI-visible restart handle (see firefox.js `_retriggerConnect`): a frozen
+ * background tab runs no timers, so the CLI pokes this via geckodriver to
+ * force an immediate reconnect. Hard socket reset — no reload, no counters.
+ */
+(globalThis as { __leiaRestart?: () => void }).__leiaRestart = () => {
+  try {
+    socket?.close();
+  } catch {
+    /* already gone */
+  }
+  socket = null;
+  reconnectFailures = 0;
+  connect();
+};
 
 function main(): void {
   const urlEl = document.getElementById("url");
