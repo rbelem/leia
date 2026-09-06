@@ -124,6 +124,9 @@ class WebDriverClient {
               // allow autoplay.
               "media.autoplay.default": 0,
               "media.autoplay.block-webaudio": false,
+              // openTab relies on scripted window.open as its fallback — the
+              // default popup blocker swallows it silently.
+              "dom.disable_open_during_load": false,
             },
           },
         },
@@ -321,6 +324,13 @@ export class FirefoxAdapter extends BrowserAdapter {
     if (st?.browser === "firefox") {
       this.geckoPort = st.geckoPort;
       this.extensionUuid = st.extensionUuid || this.extensionUuid;
+      // One-shot commands must be able to DRIVE the live browser (openTab,
+      // the tiered harness wake) — attach to the session `up` created instead
+      // of leaving this.wd null, which made those paths silently no-op.
+      if (!this.wd && st.sessionId) {
+        this.wd = new WebDriverClient(`http://127.0.0.1:${this.geckoPort}`);
+        this.wd.sessionId = st.sessionId;
+      }
     }
     // Tiered wake. Background tabs freeze their JS, so a frozen harness never
     // retries on its own — passive waiting alone never recovers it. The wake
@@ -382,8 +392,10 @@ export class FirefoxAdapter extends BrowserAdapter {
   async openTab(url) {
     if (!this.wd?.sessionId) return;
     // W3C window/new: geckodriver creates the tab but ignores the url for
-    // Firefox — switch to the new handle, then navigate if needed.
-    try {
+    // Firefox — switch to the new handle, then navigate if needed. The
+    // endpoint can fail once while marionette is busy; retry before falling
+    // back to scripted window.open.
+    for (let attempt = 0; attempt < 2; attempt++) {
       const created = await this.wd.req("POST", `/session/${this.wd.sessionId}/window/new`, { url }).catch(() => null);
       if (created?.handle) {
         await this.wd.switchWindow(created.handle);
@@ -391,7 +403,8 @@ export class FirefoxAdapter extends BrowserAdapter {
         if (!cur.includes(url)) await this.wd.navigate(url);
         return;
       }
-    } catch { /* fall through to the legacy path */ }
+      await sleep(500);
+    }
     // Legacy: window.open from the current page, then adopt the new handle.
     await this.wd.execute(`window.open(${JSON.stringify(url)}, "_blank"); return true`);
     await sleep(800);
@@ -401,6 +414,7 @@ export class FirefoxAdapter extends BrowserAdapter {
       const cur = String(await this.wd.execute("return location.href").catch(() => ""));
       if (cur.includes(url)) return;
     }
+    throw new Error(`could not open a tab for ${url} (window/new failed and window.open was swallowed)`);
   }
 
   async stop() {
