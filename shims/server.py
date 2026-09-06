@@ -2,8 +2,9 @@
 """
 leia local-model shim server (ADR-0006, ticket 04): one FastAPI app that
 exposes the extension's local voice-server contract in front of exactly
-one TTS model at a time (--model piper|kittentts|neutts). Loopback-only,
-keyless — the same trust model as src/audio/local-profiles.ts.
+one TTS model at a time (--model kokoro|piper|kittentts|neutts|edge).
+Loopback-only, keyless — the same trust model as
+src/audio/local-profiles.ts.
 
 Contract (consumed by src/audio/engine-local.ts + local-profiles.ts):
 
@@ -38,6 +39,7 @@ log = logging.getLogger("leia-shim")
 SAMPLE_RATE = 24000  # contract: synthesize always returns 24 kHz mono 16-bit WAV
 
 DEFAULT_PORTS = {
+    "kokoro": 8880,
     "piper": 8881,
     "kittentts": 8882,
     "neutts": 8883,
@@ -93,9 +95,9 @@ def clamp_rate(rate: float) -> float:
 def pcm_at_24k(pcm: bytes, rate: int) -> bytes:
     """Resample mono int16 PCM to the 24 kHz contract rate (linear).
 
-    Only piper's stock medium voices are 22.05 kHz; kitten/neutts are
-    24 kHz natively. numpy ships with every real model stack, hence the
-    lazy import — the stub/test path never needs it.
+    Only piper's stock medium voices are 22.05 kHz; kitten/kokoro/neutts
+    are 24 kHz natively. numpy ships with every real model stack, hence
+    the lazy import — the stub/test path never needs it.
     """
     if rate == SAMPLE_RATE:
         return pcm

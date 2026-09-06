@@ -49,11 +49,15 @@ export interface ProbeResult {
 }
 
 /**
- * Built-ins (ADR-0006, tickets 05/07): Kokoro-FastAPI works unedited on its
- * stock port; the piper/kittentts/neutts entries run the shims/ podman images
- * and their install hints mirror shims/README.md verbatim. edge proxies the
- * free Microsoft Edge Read-Aloud service — audio leaves the machine, so its
- * privacy class is provider despite being a local profile.
+ * Built-ins (ADR-0006, tickets 05/07): the kokoro/piper/kittentts/neutts
+ * entries run the shims/ servers (Dockerfile.* or `shims/run.sh`) and
+ * their install hints mirror shims/README.md verbatim — kokoro speaks
+ * the leia dialect through `shims/server.py --model kokoro` (the old
+ * ghcr.io/hexgrad/kokoro-fastapi image is gone upstream and only spoke
+ * the OpenAI dialect; run it? add it as a custom profile). edge proxies
+ * the free Microsoft Edge Read-Aloud service — audio leaves the
+ * machine, so its privacy class is provider despite being a local
+ * profile.
  *
  * The OpenAI-dialect entries (8885+) are served by vLLM-Omni's native
  * /v1/audio/speech — the highest-ranked open-weight models that ship a
@@ -65,7 +69,8 @@ export const BUILT_IN_PROFILES: LocalProfile[] = [
     id: "kokoro",
     name: "Kokoro",
     baseUrl: "http://127.0.0.1:8880",
-    install: "podman run --rm -p 8880:8880 ghcr.io/hexgrad/kokoro-fastapi",
+    install:
+      "uv run --with kokoro-onnx --with onnxruntime shims/server.py --model kokoro",
   },
   {
     id: "piper",

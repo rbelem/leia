@@ -1,0 +1,10 @@
+# leia local-model shim — kokoro (Apache-2.0). Best CPU quality in the
+# shim set (Speech Arena Elo ~1060); 50+ voices, ~9 languages. The model
+# (~350 MB) downloads into the volume on first start.
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi uvicorn kokoro-onnx onnxruntime
+COPY server.py adapters.py ./
+ENV KOKORO_HOME=/models
+EXPOSE 8880
+CMD ["python", "server.py", "--model", "kokoro", "--host", "0.0.0.0", "--port", "8880"]

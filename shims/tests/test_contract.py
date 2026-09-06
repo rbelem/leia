@@ -170,6 +170,67 @@ def test_edge_contract_via_stub() -> None:
     assert stub.calls[-1][:2] == ("olá", "pt-BR-AntonioNeural")
 
 
+# --- kokoro adapter glue (network-free; the ~350 MB download happens in __init__) ---
+
+
+class FakeKokoro:
+    """Stands in for kokoro_onnx.Kokoro at the synthesize() boundary."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, float, str]] = []
+
+    def get_voices(self) -> list[str]:
+        return ["zf_xiaobei", "af_heart", "am_michael"]  # unsorted on purpose
+
+    def create(
+        self, text: str, voice: str, speed: float, lang: str
+    ) -> tuple["object", int]:
+        self.calls.append((text, voice, speed, lang))
+        import numpy as np
+
+        return np.array([0.0, 0.5, -0.5], dtype=np.float32), SAMPLE_RATE
+
+
+def test_kokoro_glue_sorts_voices_and_maps_langs() -> None:
+    from adapters import KokoroModel
+
+    model = KokoroModel.__new__(KokoroModel)  # skip __init__: no model download
+    fake = FakeKokoro()
+    model.tts = fake
+    model.voice_ids = sorted(fake.get_voices())
+    assert [(v.id, v.lang, v.name) for v in model.voices()] == [
+        ("af_heart", "en-US", "af_heart"),
+        ("am_michael", "en-US", "am_michael"),
+        ("zf_xiaobei", "zh-CN", "zf_xiaobei"),
+    ]
+
+
+def test_kokoro_glue_wraps_create() -> None:
+    from adapters import KokoroModel
+
+    model = KokoroModel.__new__(KokoroModel)
+    fake = FakeKokoro()
+    model.tts = fake
+    model.voice_ids = sorted(fake.get_voices())
+    rate, pcm = model.synthesize("olá mundo", "zf_xiaobei", 1.5)
+    assert rate == SAMPLE_RATE
+    assert len(pcm) == 6  # 3 float32 samples -> 3 int16 frames * 2 bytes
+    # speed carries the contract rate; create() gets the espeak-style
+    # lowercase lang while voices() exposes BCP-47.
+    assert fake.calls == [("olá mundo", "zf_xiaobei", 1.5, "zh-cn")]
+
+
+def test_kokoro_unknown_voice_falls_back() -> None:
+    from adapters import KokoroModel
+
+    model = KokoroModel.__new__(KokoroModel)
+    fake = FakeKokoro()
+    model.tts = fake
+    model.voice_ids = sorted(fake.get_voices())
+    model.synthesize("x", "does-not-exist", 1.0)
+    assert fake.calls[-1][1] == "af_heart"  # first sorted voice
+
+
 # --- neutts adapter glue (network-free; weights are HF-gated upstream) ---
 
 

@@ -336,9 +336,14 @@ describe("built-in profiles + storage", () => {
     ]);
   });
 
-  it("shim built-ins use podman; OpenAI-dialect built-ins use vllm serve with their model id", () => {
+  it("shim built-ins carry documented run lines (kokoro: uv; rest: podman); OpenAI-dialect built-ins use vllm serve with their model id", () => {
     const byId = new Map(BUILT_IN_PROFILES.map((p) => [p.id, p]));
-    for (const id of ["kokoro", "piper", "kittentts", "neutts", "edge"]) {
+    // kokoro's verified install path is the uv launcher (the old
+    // Kokoro-FastAPI image is gone upstream); see shims/README.md.
+    expect(byId.get("kokoro")?.install).toBe(
+      "uv run --with kokoro-onnx --with onnxruntime shims/server.py --model kokoro",
+    );
+    for (const id of ["piper", "kittentts", "neutts", "edge"]) {
       expect(byId.get(id)?.install).toContain("podman");
     }
     for (const p of BUILT_IN_PROFILES.filter((x) => x.kind === "openai")) {

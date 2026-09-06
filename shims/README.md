@@ -6,20 +6,26 @@ One process serves one model; pick with `--model`:
 
 | `--model`    | Port | Package (`pip`) | Model license | Disk (download) | Speed on CPU (honest)                                   |
 | ------------ | ---- | --------------- | ------------- | --------------- | ------------------------------------------------------- |
+| `kokoro`     | 8880 | `kokoro-onnx`   | Apache-2.0    | ~350 MB         | ~2–3 s per sentence on CPU — best CPU quality in the set (Speech Arena Elo ~1060); 54 voices, 9 languages |
 | `piper`      | 8881 | `piper-tts`     | GPL-3.0       | ~65 MB/voice    | Fast — real-time or faster (medium voices)               |
 | `kittentts`  | 8882 | `kittentts==0.1.3` | Apache-2.0  | ~40 MB (nano)   | Fast on CPU; nano quality is modest                       |
 | `neutts`     | 8883 | `neutts==1.4.1` | Apache-2.0    | ~1 GB (nano backbone + codec) | **Slowest** — autoregressive backbone on CPU. Synthesize per sentence, not per paragraph. |
 | `edge`       | 8884 | `edge-tts==7.2.8` | MIT         | none (network service) | Real-time-ish (streams)                          |
 
-**Privacy:** piper/kittentts/neutts never leave your machine. **`edge` is the
-exception** — it sends the text to Microsoft's Read-Aloud service and returns
-synthesized audio (officially an undocumented browser feature, not an API).
+**Privacy:** kokoro/piper/kittentts/neutts never leave your machine.
+**`edge` is the exception** — it sends the text to Microsoft's Read-Aloud
+service and returns synthesized audio (officially an undocumented browser
+feature, not an API).
 
-**Tested here vs not** (updated 2026-09-01, after the podman smoke-test fixes —
-host: NixOS, rootless podman 5.8.4):
+**Tested here vs not** (updated 2026-09-06 — host: NixOS, rootless podman
+5.8.4, uv 0.12):
 
-- **Contract layer:** pytest suite green (13 tests); also verified live over
+- **Contract layer:** pytest suite green (16 tests); also verified live over
   HTTP via `--model stub` + curl.
+- **kokoro** — verified live: bare-metal uv run (CPU), real `en-US`
+  (`af_heart`) and `pt-BR` (`pf_dora`) synthesis → 24 kHz WAV; also drove a
+  full end-to-end leia reading session (engine picker → article playback),
+  see docs/local-tts.md.
 - **piper** — verified live: bare-metal venv and container (README run line),
   real synth → 24 kHz WAV (resampled from the voice's native 22.05 kHz).
 - **kittentts** — verified live: bare-metal venv and container, real nano
@@ -35,6 +41,24 @@ host: NixOS, rootless podman 5.8.4):
   acceptance to go live (see the gating note).
 - **Not tested anywhere:** audio *quality* judgments (intelligibility, voice
   naturalness) and long-session behavior — listen once per model yourself.
+
+## Run without containers (uv)
+
+Every model in the table also runs bare-metal with zero setup beyond
+[uv](https://docs.astral.sh/uv/) — no venv, no podman, identical on Linux,
+macOS and Windows:
+
+```sh
+shims/run.sh kokoro        # Linux / macOS   -> http://127.0.0.1:8880
+shims\run.ps1 kokoro       # Windows
+```
+
+The launcher creates an ephemeral environment holding exactly the model's
+dependencies (`uv run --with …`), so nothing pollutes your system Python.
+Extra `server.py` args are forwarded: `shims/run.sh piper --port 8890`.
+neutts still needs `HF_TOKEN` + license acceptance (gating note below).
+New to leia's local voices? Follow docs/local-tts.md instead — it walks
+through the whole path for non-developers.
 
 ## Contract
 
@@ -60,6 +84,32 @@ POST /leia/v1/synthesize    {"text": "hello", "voice": "<voice id>", "rate": 1.0
 Build each image once from this directory (`shims/`), then run. The
 `podman run` line for each model is the string the extension embeds verbatim
 as the built-in profile install hint (ticket 05) — keep them copy-pasteable.
+
+### kokoro — http://127.0.0.1:8880
+
+The quality pick for CPU machines (Artificial Analysis Speech Arena Elo
+~1060 — #6 open-weight overall): 54 voice packs across 9 languages
+(`en-US`/`en-GB`, `es`, `fr-FR`, `pt-BR` — try `pf_dora` — `zh-CN`, `ja`,
+`it`, `hi`), 24 kHz output. Roughly 2–3 s of synthesis per sentence on a
+modern CPU; the engine feeds it per sentence, so playback is near
+real-time with a short lead-in.
+
+```sh
+# no containers (needs uv: https://docs.astral.sh/uv/)
+shims/run.sh kokoro
+
+# containers
+podman build -t leia-shim-kokoro -f Dockerfile.kokoro .
+podman run --rm -p 127.0.0.1:8880:8880 -v leia-shim-kokoro:/models leia-shim-kokoro
+```
+
+First start downloads ~350 MB (ONNX model + voices pack) into the volume
+or `KOKORO_HOME` (default `~/.cache/leia/kokoro`).
+
+Install hint (extension): `uv run --with kokoro-onnx --with onnxruntime shims/server.py --model kokoro`
+
+Verify: the curl block below against `:8880` with `"voice":"af_heart"` —
+prints `24000 <n> frames`.
 
 ### piper — http://127.0.0.1:8881
 

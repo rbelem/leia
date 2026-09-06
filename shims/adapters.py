@@ -6,9 +6,11 @@ whole contract layer — works on a bare venv without the multi-GB model
 stacks. That is what keeps the pytest contract suite runnable anywhere.
 
 NOTE: these adapters are written against the documented public APIs of
-piper1-gpl, KittenTTS and neutts-air and were NOT executed in the
-authoring environment (no containers, no model downloads). Run each
-image once per README and check the curl block before trusting it.
+piper1-gpl, KittenTTS, kokoro-onnx and neutts-air. The kokoro adapter (and
+only it) WAS executed live in the authoring environment (bare-metal CPU
+synthesis verified 2026-09-06); the others were NOT executed (no
+containers, no model downloads) — run each image once per README and
+check the curl block before trusting it.
 """
 
 import io
@@ -29,6 +31,8 @@ def build_model(name: str) -> TTSModel:
         return PiperModel()
     if name == "kittentts":
         return KittenTTSModel()
+    if name == "kokoro":
+        return KokoroModel()
     if name == "neutts":
         return NeuTTSModel()
     if name == "edge":
@@ -190,6 +194,83 @@ class NeuTTSModel:
     def synthesize(self, text: str, voice: str, rate: float) -> tuple[int, bytes]:
         wav = self.tts.infer(text, self.ref, self.ref_text)
         return 24000, float_to_pcm16(wav)
+
+
+class KokoroModel:
+    """Kokoro-82M v1.0 via kokoro-onnx (Apache-2.0) — the best-quality
+    CPU model in the shim set (Artificial Analysis Speech Arena Elo
+    ~1060): 50+ voice packs across ~9 languages, 24 kHz output, and
+    roughly 2–3 s of synthesis per sentence on a modern CPU. Feeds it
+    per sentence, not per paragraph.
+
+    First __init__ downloads ~350 MB (onnx model + voices pack) from the
+    kokoro-onnx GitHub release into KOKORO_HOME (default
+    ~/.cache/leia/kokoro) — plain HTTPS, no HF token needed.
+
+    Live-verified 2026-09-06 (bare-metal, NixOS, CPU): real synthesis at
+    24 kHz, both `en-US` and pt-BR voice packs; also drove a full
+    end-to-end leia reading session (see docs/local-tts.md)."""
+
+    BASE = (
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+    )
+    FILES = ("kokoro-v1.0.onnx", "voices-v1.0.bin")
+
+    # Voice ids are <lang><gender>_<name>; the lang letter maps to a
+    # BCP-47 tag for the picker (a/b = English US/GB, p = pt-BR, ...).
+    LANG_BY_PREFIX = {
+        "a": "en-US",
+        "b": "en-GB",
+        "e": "es",
+        "f": "fr-FR",
+        "h": "hi",
+        "i": "it",
+        "j": "ja",
+        "p": "pt-BR",
+        "z": "zh-CN",
+    }
+
+    def __init__(self) -> None:
+        from kokoro_onnx import Kokoro
+
+        home = Path(os.environ.get("KOKORO_HOME", "~/.cache/leia/kokoro")).expanduser()
+        home.mkdir(parents=True, exist_ok=True)
+        paths = [self._ensure(home, name) for name in self.FILES]
+        log.info("loading kokoro-onnx model from %s", home)
+        self.tts = Kokoro(str(paths[0]), str(paths[1]))
+        live = getattr(self.tts, "get_voices", None)
+        ids = list(live()) if callable(live) else ["af_heart"]
+        self.voice_ids = sorted(ids)  # deterministic order for the picker
+
+    @classmethod
+    def _ensure(cls, home: "Path", name: str) -> "Path":
+        import urllib.request
+
+        target = home / name
+        if target.exists() and target.stat().st_size > 0:
+            return target
+        url = f"{cls.BASE}/{name}"
+        log.info("downloading %s into %s (first run: ~350 MB total)", url, home)
+        urllib.request.urlretrieve(url, target)  # noqa: S310 - fixed https URL
+        return target
+
+    def lang_for(self, voice: str) -> str:
+        return self.LANG_BY_PREFIX.get(voice[:1].lower(), "en-US")
+
+    def voices(self) -> list[Voice]:
+        return [Voice(v, self.lang_for(v), v) for v in self.voice_ids]
+
+    def synthesize(self, text: str, voice: str, rate: float) -> tuple[int, bytes]:
+        used = voice if voice in self.voice_ids else self.voice_ids[0]
+        samples, native_rate = self.tts.create(
+            text,
+            voice=used,
+            speed=rate,
+            # create() phonemizes via espeak, which wants lowercase
+            # voice names ("en-us"); the picker above keeps BCP-47.
+            lang=self.lang_for(used).lower(),
+        )
+        return native_rate, float_to_pcm16(samples)
 
 
 # --- edge (Microsoft Read-Aloud via edge-tts) ---

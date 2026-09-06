@@ -8,7 +8,8 @@ position) is defined in CONTEXT.md; architecture decisions in docs/adr/.
 
 **Status — working product.** Select text or read the whole page; audio
 plays through the engine you pick and a marching highlight tracks the words.
-Eight provider engines, an on-device engine, and five built-in local-server
+Eight provider engines, an on-device engine, and nine built-in local-server
+profiles (five self-hosted models + four GPU-model presets)
 profiles ship in one TypeScript codebase that builds both MV3 packages.
 
 ## Layout
@@ -22,7 +23,7 @@ src/offscreen/    Chrome offscreen document: audio host + engine home
 src/popup/        action popup: voice picker, provider keys, local profiles
 src/manifest.json source manifest; scripts/build.mjs patches it per browser
 scripts/build.mjs esbuild bundler → dist/chrome + dist/firefox
-shims/            containerized local model servers (piper, kittentts, …)
+shims/            local model servers — run.sh/run.ps1 (any OS) or podman (kokoro, piper, kittentts, …)
 tests/            vitest (jsdom)
 docs/             permissions, engine contract, platform floor, spikes
 ```
@@ -84,15 +85,18 @@ copy-pasteable run line:
 
 | Profile | Port | What |
 |---|---|---|
-| Kokoro | 8880 | stock Kokoro-FastAPI image, works unedited |
+| Kokoro | 8880 | best CPU quality (Elo ~1060), 54 voices, 9 languages |
 | Piper | 8881 | fastest, GPL-3 server process |
 | Kittentts | 8882 | ~real-time on CPU |
 | Neutts | 8883 | LLM backbone, slowest, most expressive |
 | Edge | 8884 | free Microsoft voices — text leaves your machine |
+| VoxCPM2 / Qwen3 TTS / Step Audio EditX / Voxtral TTS | 8885–8888 | GPU presets (vLLM-Omni), light up when served |
 
-To run the four shim models you need [podman](https://podman.io) (or
-docker): `podman build` + `podman run` one-liners per model, the server
-contract, curl verification, and honest speed/license notes are all in
+Run one with **no containers** — install [uv](https://docs.astral.sh/uv),
+then from the repo root: `shims/run.sh kokoro` (Linux/macOS) or
+`shims\run.ps1 kokoro` (Windows). Step-by-step for non-developers:
+[docs/local-tts.md](docs/local-tts.md). Container one-liners, the server
+contract, curl verification, and honest speed/license notes:
 [shims/README.md](shims/README.md).
 
 ## Build from source (store submission)
