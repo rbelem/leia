@@ -142,4 +142,23 @@ CSP needs exact-origin `connect-src` (no port wildcards) — see manifest sectio
 - `npm run build` (with harness) produces both dists; `npm run typecheck` clean;
   `npm test` green (existing 833 tests).
 - Live smoke: `leia up` → `leia start` on fixture → observe `leia:session:state` /
-  `leia:audio:event` stream → `leia stop`. Repeat on Firefox via MCP.
+  `leia:audio:event` stream → `leia stop`. Repeat on Firefox via geckodriver.
+- **Expected browser gating** (validate these are the *reason* for any `ok:false`,
+  not a harness bug — see `docs/permissions.md` "Web Speech platform limitation"):
+  - `probe:voices` / `probe:speak` / `probe:cancel` use the **offscreen API**
+    (Chrome 109+ only) → work in Chrome, error in Firefox ("offscreen API
+    unavailable").
+  - `probe:tts` uses **`chrome.tts`** (Chrome-only + needs a real speech engine)
+    → errors in both on a headless/voiceless host.
+  - `probe:ff` uses **`speechSynthesis` in the event page** (Firefox-only) →
+    works in Firefox (`{stage:"started"}`), errors in Chrome.
+  - `probe:kitten` needs the model fetch to succeed (CSP `connect-src` must list
+    `raw.githubusercontent.com` + `huggingface.co`); it is otherwise a live,
+    on-device probe that works in both browsers.
+  - `audio:families` is richer in Firefox (full family catalog; the event page
+    has a DOM) than Chromium's service-worker context.
+  - Web Speech (`web-speech`) family reports "no speech voices available" on a
+    host where the browser doesn't surface voices — expected platform gap, not a
+    defect. Use `kitten-local` / provider families for on-device speech.
+  - First command after `up` is sent only after a bounded connect grace, so a
+    "harness not connected" is a real teardown, not a startup race.
