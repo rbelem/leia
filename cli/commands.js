@@ -72,7 +72,7 @@ async function ensureConnected(adapter) {
   const ws = adapter.ws;
   if (ws?.waitConnected) {
     try {
-      await ws.waitConnected(3000);
+      await ws.waitConnected(9000);
     } catch {
       // fall through to the explicit check below for a clear message
     }

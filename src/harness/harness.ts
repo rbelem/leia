@@ -261,12 +261,14 @@ function connect(): void {
   } catch (e) {
     setConn("ws constructor failed, retrying…");
     log("err", `[ws error] ${String(e)}`);
-    setTimeout(connect, RECONNECT_MS);
+    scheduleReconnect();
     return;
   }
   socket = ws;
 
   ws.onopen = () => {
+    reconnectFailures = 0;
+    sessionStorage.removeItem("leia:reloads");
     setConn("connected");
     log("conn", "[ws open]");
     send({ type: "hello", url: location.href, token: TOKEN });
@@ -283,9 +285,69 @@ function connect(): void {
   ws.onclose = () => {
     setConn("closed, retrying…");
     log("err", "[ws close]");
-    setTimeout(connect, RECONNECT_MS);
+    scheduleReconnect();
   };
   ws.onerror = () => log("err", "[ws error]");
+}
+
+/**
+ * Reconnect scheduling. Firefox's reconnect-from-a-dead-socket path is
+ * unreliable in long-lived extension tabs (timers stall, sockets hang in
+ * CLOSING/CONNECTING), while a FRESH page load always connects instantly.
+ * So: try in place a couple of times, then reload the page — the reload
+ * path is deterministic. The worker heartbeat (below) drives this even when
+ * page timers are throttled.
+ */
+let reconnectFailures = 0;
+// Reload immediately on a lost bridge: a fresh page load is the one connect
+// path Firefox never gets wrong here, and in-place retries just add latency
+// to the reconnect cycle.
+const MAX_IN_PLACE_RETRIES = 0;
+
+function scheduleReconnect(): void {
+  reconnectFailures += 1;
+  setTimeout(reconnectOrReload, RECONNECT_MS);
+}
+
+/** Shared decision: try in place, or reload for a clean connection. */
+function reconnectOrReload(): void {
+  if (socket && socket.readyState !== WebSocket.CLOSED) return; // healthy or in-flight
+  reconnectFailures += 1;
+  if (reconnectFailures <= MAX_IN_PLACE_RETRIES) {
+    connect();
+    return;
+  }
+  // Cap self-reloads so a long-gone CLI doesn't leave the page churning
+  // forever; sessionStorage survives reloads within the same tab.
+  const RELOAD_CAP = 30;
+  const reloaded = Number(sessionStorage.getItem("leia:reloads") ?? "0");
+  if (reloaded >= RELOAD_CAP) {
+    setConn("bridge down — reload the page to retry");
+    log("conn", "[reload cap reached — idle]");
+    return;
+  }
+  sessionStorage.setItem("leia:reloads", String(reloaded + 1));
+  log("conn", "[reloading page for a clean reconnect]");
+  location.reload();
+}
+
+/**
+ * Occlusion-proof heartbeat: Firefox pauses/throttles page timers when the
+ * window is occluded, which stalls the setTimeout reconnect loop above for
+ * tens of seconds (leia-ctl then sees "harness not connected" at random).
+ * Worker timers are not throttled, so a tick from reconnect-worker.js forces
+ * a reconnect attempt whenever the socket is fully closed.
+ */
+let reconnectWorker: Worker | null = null;
+try {
+  reconnectWorker = new Worker("reconnect-worker.js");
+  reconnectWorker.onmessage = () => {
+    // Drive BOTH the in-place retry and the reload threshold from worker
+    // ticks (unthrottled), since page timers can stall on occluded windows.
+    if (!socket || socket.readyState === WebSocket.CLOSED) reconnectOrReload();
+  };
+} catch (e) {
+  log("err", `[reconnect worker unavailable: ${String(e)}]`);
 }
 
 function main(): void {

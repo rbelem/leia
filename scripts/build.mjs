@@ -52,7 +52,12 @@ for (const browser of BROWSERS) {
 
   cpSync("src/popup/popup.html", `dist/${browser}/popup/popup.html`);
   cpSync("src/options/options.html", `dist/${browser}/options/options.html`);
-  if (DEV) cpSync("src/harness/harness.html", `dist/${browser}/harness/harness.html`);
+  if (DEV) {
+    cpSync("src/harness/harness.html", `dist/${browser}/harness/harness.html`);
+    // Occlusion-proof reconnect heartbeat for the harness page (see the
+    // worker's header comment). Dev-only, like the harness itself.
+    cpSync("src/harness/reconnect-worker.js", `dist/${browser}/harness/reconnect-worker.js`);
+  }
   cpSync("src/ui", `dist/${browser}/ui`, { recursive: true });
   cpSync("src/probes/offscreen.html", `dist/${browser}/probes/offscreen.html`);
   cpSync("src/offscreen/audio.html", `dist/${browser}/offscreen/audio.html`);
@@ -106,6 +111,10 @@ for (const browser of BROWSERS) {
     // which is not in connect-src and would block the harness entirely. Drop it
     // for the dev-only build; production stays hardened.
     if (!DEV) manifest.content_security_policy.extension_pages += "; upgrade-insecure-requests";
+    // Dev-only: the harness page styles itself with an inline <style> block;
+    // style-src falls back to default-src 'self', which blocks it. Prod keeps
+    // the lockdown (no extension page ships inline styles).
+    if (DEV) manifest.content_security_policy.extension_pages += "; style-src 'self' 'unsafe-inline'";
     manifest.browser_specific_settings = {
       gecko: {
         id: "leia@rclb.dev",

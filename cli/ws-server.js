@@ -145,7 +145,7 @@ export class WsServer {
   async sendCommand(name, args = {}) {
     // The harness reconnects ~1s after the bridge starts; give it a bounded
     // grace so the first command doesn't race the reconnect.
-    await this.waitConnected(3000);
+    await this.waitConnected(9000);
     const sock = this.client;
     if (!sock || sock.readyState !== WebSocket.OPEN) {
       throw new Error("no harness connected — run `leia up` first");
