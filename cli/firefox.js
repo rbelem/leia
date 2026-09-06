@@ -55,6 +55,29 @@ function detectGeckodriver() {
   return "/tmp/geckodriver"; // known-good in this dev env
 }
 
+/**
+ * Locate a libpulse.so.0 for Firefox's cubeb audio backend.
+ *
+ * The playwright-firefox build does not bundle libpulse: its audio backend
+ * dlopen("libpulse.so.0") fails at runtime, so EVERY media element plays
+ * silently (play() resolves, zero audio — YouTube/reader alike). The flatpak
+ * Firefox works because its runtime bundles libpulse. On Nix hosts a copy
+ * lives in the store; injecting it via LD_LIBRARY_PATH for the geckodriver →
+ * firefox process tree restores audio. Override with LEIA_LIBPULSE_DIR.
+ */
+function detectLibpulseDir() {
+  if (process.env.LEIA_LIBPULSE_DIR) return process.env.LEIA_LIBPULSE_DIR;
+  try {
+    const entries = readdirSync("/nix/store");
+    const dir = entries.find((d) => d.includes("libpulseaudio-") && !d.endsWith(".drv") && !d.includes(".tar"));
+    if (dir) {
+      const lib = join("/nix/store", dir, "lib");
+      if (existsSync(join(lib, "libpulse.so.0"))) return lib;
+    }
+  } catch {}
+  return null;
+}
+
 /** Minimal WebDriver-classic HTTP client for geckodriver (W3C JSON Wire). */
 class WebDriverClient {
   constructor(base) {
@@ -74,7 +97,37 @@ class WebDriverClient {
   async newSession(binary, headless) {
     const args = headless ? ["-headless"] : [];
     const v = await this.req("POST", "/session", {
-      capabilities: { alwaysMatch: { browserName: "firefox", "moz:firefoxOptions": { binary, args } } },
+      capabilities: {
+        alwaysMatch: {
+          browserName: "firefox",
+          "moz:firefoxOptions": {
+            binary,
+            args,
+            prefs: {
+              // WebSockets from extension pages to the loopback bridge hang in
+              // CONNECTING for 30-40s when Firefox resolves them through proxy
+              // auto-detection (fetch() on the same port is instant, WS is not
+              // — WS proxy resolution ignores the localhost bypass). Force
+              // direct connections: there is no proxy in the leia-ctl model.
+              "network.proxy.type": 0,
+              "network.proxy.allow_hijacking_localhost": true,
+              // WS is served by Firefox's SOCKET PROCESS; on this Nix host that
+              // process can't connect (user-namespace/sandbox EPERM — same
+              // class of issue flatpak hits), so every WebSocket hangs in
+              // CONNECTING forever while HTTP falls back to the parent and
+              // works. Run sockets in the parent process.
+              "network.process.enabled": false,
+              // The reader plays audio from the background EVENT PAGE, which
+              // has no user gesture — Firefox's autoplay policy blocks
+              // audio.play() there and the engine treats the rejection as a
+              // silent finish (no error, no sound). Automation launches must
+              // allow autoplay.
+              "media.autoplay.default": 0,
+              "media.autoplay.block-webaudio": false,
+            },
+          },
+        },
+      },
     });
     this.sessionId = v.sessionId;
     this.sessionProfile = v.capabilities?.["moz:profile"] || "";
@@ -151,7 +204,17 @@ export class FirefoxAdapter extends BrowserAdapter {
     // normal reused-ready case.
     // Otherwise spawn our own.
     try {
-      this.gecko = spawn(this.geckoPath, ["--port", String(this.geckoPort), "--log", "warn"], { stdio: "ignore" });
+      // Inject libpulse (if found) so the launched Firefox can actually output
+      // audio — geckodriver passes its environment down to the browser.
+      const env = { ...process.env };
+      const pulseDir = detectLibpulseDir();
+      if (pulseDir) {
+        env.LD_LIBRARY_PATH = [pulseDir, env.LD_LIBRARY_PATH].filter(Boolean).join(":");
+        console.log(`[firefox] LD_LIBRARY_PATH += ${pulseDir} (cubeb audio backend)`);
+      } else {
+        console.warn("[firefox] no libpulse found — Firefox may play audio silently");
+      }
+      this.gecko = spawn(this.geckoPath, ["--port", String(this.geckoPort), "--log", "warn"], { stdio: "ignore", env });
       this.gecko.unref();
       this._spawnedGecko = true;
       this._geckoPid = this.gecko.pid;
