@@ -316,6 +316,10 @@ export class ScopeHighlighter {
   private hasBlocks = false;
   /** Raw token texts+flags of the bound scope (block wash expansion). */
   private scopeTokens: TokenText[] | null = null;
+  /** Token index the viewport last followed — follow fires once per chunk start. */
+  private lastFollowFrom = -1;
+  /** Follow is suppressed until this time after the user scrolls (ms clock). */
+  private userScrollUntil = 0;
 
   constructor(options: ScopeHighlighterOptions = {}) {
     this.onStale = options.onStale;
@@ -361,6 +365,9 @@ export class ScopeHighlighter {
     }
     this.startObserving(scopeRangesRoot(scope.ranges));
     this.doc?.addEventListener("click", this.onClick);
+    this.lastFollowFrom = -1;
+    this.doc?.addEventListener("wheel", this.onUserScroll, { passive: true });
+    this.doc?.addEventListener("touchstart", this.onUserScroll, { passive: true });
   }
 
   /**
@@ -382,7 +389,13 @@ export class ScopeHighlighter {
     // previous underline instead of flickering it off for a frame.
     const wordRange = this.wordRange(from, word);
     if (wordRange !== null || !word) setWordHighlight(wordRange);
-    this.followReading(sentence[0] ?? null);
+    // Follow once per chunk start, not per word tick: each smooth scrollBy
+    // aborts the in-flight glide, so word-frequency calls never complete —
+    // the follow crawls and fights manual scrolling.
+    if (from !== this.lastFollowFrom) {
+      this.lastFollowFrom = from;
+      this.followReading(sentence[0] ?? null);
+    }
   }
 
   /**
@@ -417,6 +430,8 @@ export class ScopeHighlighter {
   private followReading(range: Range | null): void {
     const view = this.doc?.defaultView;
     if (!range || !view) return;
+    // The user scrolled recently — their scroll wins until the grace lapses.
+    if (performance.now() < this.userScrollUntil) return;
     // jsdom and friends lack range geometry — following is a live-page concern.
     if (typeof range.getBoundingClientRect !== "function") return;
     const rect = range.getBoundingClientRect();
@@ -456,6 +471,9 @@ export class ScopeHighlighter {
     this.scopeTokens = null;
     this.hasBlocks = false;
     this.doc?.removeEventListener("click", this.onClick);
+    this.doc?.removeEventListener("wheel", this.onUserScroll);
+    this.doc?.removeEventListener("touchstart", this.onUserScroll);
+    this.userScrollUntil = 0;
     this.doc = null;
     this.wordMap = null;
     this.prefix = null;
@@ -480,6 +498,11 @@ export class ScopeHighlighter {
     const token = tokenIndexAtPoint(this.ranges, ev.clientX, ev.clientY, this.doc);
     if (token === null) return;
     this.onSeek(token);
+  };
+
+  /** Any user scroll intent (wheel/touch) pauses follow for a grace period. */
+  private readonly onUserScroll = (): void => {
+    this.userScrollUntil = performance.now() + 4000;
   };
 
   private isLive(): boolean {
