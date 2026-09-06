@@ -47,13 +47,13 @@ describe("kitten voice mapping", () => {
     }
   });
 
-  it("declares free/local, no word timing, 1000-char utterance cap", () => {
+  it("declares free/local, no word timing, 350-char utterance cap", () => {
     expect(KITTEN_CAPABILITIES).toEqual({
       wordTiming: false,
       streaming: false,
       costClass: "free",
       privacyClass: "local",
-      maxUtteranceChars: 1000,
+      maxUtteranceChars: 350,
     });
   });
 

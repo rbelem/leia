@@ -42,8 +42,14 @@ export const KITTEN_ASSETS: Record<"model" | "voices" | "tokenizer", KittenAsset
 
 export const KITTEN_SAMPLE_RATE = 24_000;
 export const KITTEN_LANG = "en-US";
-/** nano quality degrades on long input; session chunks are ≤250 anyway. */
-export const KITTEN_MAX_UTTERANCE_CHARS = 1000;
+/**
+ * The kitten ONNX graph fails OrtRun outright above its phoneme ceiling
+ * (~510 tokens; 3 sentences ≈ 530 phonemes → "Expand: invalid expand
+ * shape", verified live — 2 sentences ≈ 350 phonemes pass). Chunks must
+ * stay safely under it: 350 text chars ≈ ~350 phonemes for normal prose,
+ * leaving headroom for expansion-heavy text (numbers, symbols).
+ */
+export const KITTEN_MAX_UTTERANCE_CHARS = 350;
 
 /**
  * The 8 real voices.json keys (verified live against the demo asset), girls
