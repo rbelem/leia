@@ -20,8 +20,10 @@ export function playAction(state: ReaderState): PlayAction {
   return state === "playing" ? "pause" : state === "paused" ? "resume" : "start";
 }
 
+/** Word for the Play/Pause button (and its aria-label); the icon is an
+ * inline SVG in the DOM — see setPlayState in icons.ts. */
 export function playLabel(state: ReaderState): string {
-  return state === "playing" ? "⏸ Pause" : "▶ Play";
+  return state === "playing" ? "Pause" : "Play";
 }
 
 /** Failsafe: never leave the Play button spinning, whatever the engine does. */

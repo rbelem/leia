@@ -132,7 +132,8 @@ describe("mount / unmount", () => {
     h.storage[CONTROLS_IN_PAGE_KEY] = true;
     await loadBar();
     expect(bar()).not.toBeNull();
-    expect(play().textContent).toBe("▶ Play");
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Play");
+    expect(play().querySelector("svg")).not.toBeNull();
     expect(q<HTMLButtonElement>("leia-cmd-stop").disabled).toBe(true);
     expect(q<HTMLButtonElement>("leia-cmd-back").disabled).toBe(true);
     expect(q<HTMLButtonElement>("leia-cmd-fwd").disabled).toBe(true);
@@ -210,7 +211,8 @@ describe("mount / unmount", () => {
     h.handlers["leia:reader:status"] = () =>
       makeStatus({ state: "playing", tokenPos: 1, tokenCount: 4, settings: { voiceName: null, rate: 2, engine: null } });
     await loadBar();
-    expect(play().textContent).toBe("⏸ Pause");
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Pause");
+    expect(play().querySelector("svg")).not.toBeNull();
     expect(q<HTMLButtonElement>("leia-cmd-stop").disabled).toBe(false);
     expect(q<HTMLSelectElement>("leia-speed").value).toBe("2");
     expect(q("leia-bar-status").textContent).toBe("playing · sentence 2/4");
@@ -248,13 +250,15 @@ describe("play button", () => {
     expect(play().classList.contains("loading")).toBe(false);
     // The start reply's status is NOT applied locally — the label stays the
     // stopped-state one until the first session:state broadcast arrives.
-    expect(play().textContent).toBe("▶ Play");
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Play");
+    expect(play().querySelector("svg")).not.toBeNull();
     broadcast({
       type: "leia:session:state",
       status: makeStatus({ state: "playing", tokenPos: 0, tokenCount: 3 }),
     });
     await settle();
-    expect(play().textContent).toBe("⏸ Pause");
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Pause");
+    expect(play().querySelector("svg")).not.toBeNull();
   });
 
   it("start failure clears the spinner and reports the error", async () => {
@@ -494,7 +498,8 @@ describe("reply-listener cases", () => {
 
     broadcast({ type: "leia:session:state", status: makeStatus({ state: "playing", tokenPos: 0, tokenCount: 2 }) });
     await settle();
-    expect(play().textContent).toBe("⏸ Pause");
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Pause");
+    expect(play().querySelector("svg")).not.toBeNull();
     expect(q("leia-bar-status").textContent).toBe("playing · sentence 1/2");
 
     broadcast({

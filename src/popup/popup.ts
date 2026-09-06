@@ -18,6 +18,7 @@ import type { SessionStatus } from "../reader/session";
 import type { EngineCapabilities, VoiceInfo } from "../reader/contract";
 import { BUILT_IN_PROFILES, readLocalProfiles } from "../audio/local-profiles";
 import { ACTIVE_THEME, THEME_IDS, THEMES, type ThemeId } from "../content/themes";
+import { setPlayState } from "../icons";
 import { PROVIDERS, keylessProviderHint, keylessProviderLabel } from "../settings/providers";
 import { localFamilyLabel, localProfileName, summarizeVoiceSources } from "../settings/local";
 import {
@@ -216,7 +217,7 @@ if (document.getElementById("voice")) {
       playBtn.disabled = false;
       playBtn.classList.remove("loading");
       playBtn.removeAttribute("aria-busy");
-      playBtn.textContent = playLabel(state);
+      setPlayState(playBtn, state);
       playBtn.setAttribute("aria-label", playLabel(state));
     }
     stopBtn.disabled = state === "stopped";

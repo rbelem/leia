@@ -134,6 +134,8 @@ button.loading { cursor: progress; }
 .voice-row select { flex: 1; min-width: 0; }
 
 .transport { display: flex; gap: 6px; margin-bottom: 6px; }
+.transport svg { vertical-align: -0.125em; }
+#pp-play svg { margin-right: 4px; }
 .transport .primary { flex: 1; width: auto; }
 #open-in-page { margin-bottom: 6px; }
 

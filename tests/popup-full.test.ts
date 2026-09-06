@@ -305,8 +305,10 @@ describe("refresh: voice picker assembly", () => {
     await loadPopup();
 
     expect(q("status").textContent).toBe("no active session");
-    expect(q<HTMLButtonElement>("pp-play").textContent).toBe("▶ Play");
-    expect(q<HTMLButtonElement>("pp-play").disabled).toBe(false);
+    const playBtn = q<HTMLButtonElement>("pp-play");
+    expect(playBtn.querySelector("span.play-label")?.textContent).toBe("Play");
+    expect(playBtn.querySelector("svg")).not.toBeNull();
+    expect(playBtn.disabled).toBe(false);
     expect(q<HTMLButtonElement>("pp-stop").disabled).toBe(true);
     expect(q<HTMLButtonElement>("pp-back").disabled).toBe(true);
     expect(q<HTMLButtonElement>("pp-fwd").disabled).toBe(true);
@@ -401,7 +403,7 @@ describe("transport buttons", () => {
     await settle();
     expect(h.sent).toContainEqual({ type: "leia:reader:stop" });
     expect(q("status").textContent).toBe("paused · sentence 2/3");
-    expect(q<HTMLButtonElement>("pp-play").textContent).toBe("▶ Play");
+    expect(q<HTMLButtonElement>("pp-play").querySelector("span.play-label")?.textContent).toBe("Play");
   });
 
   it("stop with no reply keeps the current status", async () => {
@@ -456,7 +458,8 @@ describe("play button loading state machine", () => {
     await settle();
     expect(play.disabled).toBe(false);
     expect(play.classList.contains("loading")).toBe(false);
-    expect(play.textContent).toBe("⏸ Pause");
+    expect(play.querySelector("span.play-label")?.textContent).toBe("Pause");
+    expect(play.querySelector("svg")).not.toBeNull();
     expect(q("status").textContent).toBe("playing · sentence 1/4");
     expect(q<HTMLButtonElement>("pp-stop").disabled).toBe(false);
   });
@@ -527,7 +530,7 @@ describe("play button loading state machine", () => {
     expect(q<HTMLButtonElement>("pp-play").classList.contains("loading")).toBe(true);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(q<HTMLButtonElement>("pp-play").classList.contains("loading")).toBe(false);
-    expect(q<HTMLButtonElement>("pp-play").textContent).toBe("⏸ Pause");
+    expect(q<HTMLButtonElement>("pp-play").querySelector("span.play-label")?.textContent).toBe("Pause");
     vi.useRealTimers();
   });
 

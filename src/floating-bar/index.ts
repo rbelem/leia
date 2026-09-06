@@ -37,6 +37,7 @@ import {
   shouldClearLoading,
   type LoadingKind,
 } from "../controls";
+import { ICON_BACK, ICON_CLOSE, ICON_FWD, ICON_STOP, setPlayState } from "../icons";
 
 const BAR_ID = "leia-floating-bar";
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.5, 2, 2.5, 3];
@@ -63,6 +64,8 @@ function ensureBarStyle(doc: Document): void {
     "#leia-floating-bar button:focus-visible,#leia-floating-bar select:focus-visible{" +
     "outline:2px solid #fbbf24;outline-offset:1px;}" +
     "#leia-floating-bar button:disabled{opacity:.4;cursor:default!important;}" +
+    "#leia-floating-bar button svg{vertical-align:-2px;}" +
+    "#leia-cmd-play svg{margin-right:5px;}" +
     "#leia-floating-bar select:hover:not(:disabled){background:#57534e!important;}" +
     "#leia-floating-bar button.loading{cursor:progress!important;}" +
     "#leia-floating-bar .leia-spin{display:inline-block;width:10px;height:10px;margin-right:5px;" +
@@ -151,7 +154,7 @@ function render(): void {
     els.play.disabled = false;
     els.play.classList.remove("loading");
     els.play.removeAttribute("aria-busy");
-    els.play.textContent = playLabel(status.state);
+    setPlayState(els.play, status.state);
     els.play.setAttribute("aria-label", playLabel(status.state));
   }
   els.stop.disabled = status.state === "stopped";
@@ -266,10 +269,9 @@ function buildBar(): BarElements {
     true,
   );
 
-  const makeButton = (id: string, label: string, title: string): HTMLButtonElement => {
+  const makeButton = (id: string, title: string): HTMLButtonElement => {
     const b = document.createElement("button");
     b.id = id;
-    b.textContent = label;
     b.title = title;
     b.setAttribute("aria-label", title);
     b.style.cssText =
@@ -278,11 +280,16 @@ function buildBar(): BarElements {
     return b;
   };
 
-  const back = makeButton("leia-cmd-back", "⏮", "Previous sentence");
-  const play = makeButton("leia-cmd-play", "▶ Play", "Play / pause");
-  const fwd = makeButton("leia-cmd-fwd", "⏭", "Next sentence");
-  const stop = makeButton("leia-cmd-stop", "⏹", "Stop");
-  const close = makeButton("leia-cmd-close", "✕", "Close — move controls to the popup");
+  const back = makeButton("leia-cmd-back", "Previous sentence");
+  back.innerHTML = ICON_BACK;
+  const play = makeButton("leia-cmd-play", "Play / pause");
+  setPlayState(play, status.state);
+  const fwd = makeButton("leia-cmd-fwd", "Next sentence");
+  fwd.innerHTML = ICON_FWD;
+  const stop = makeButton("leia-cmd-stop", "Stop");
+  stop.innerHTML = ICON_STOP;
+  const close = makeButton("leia-cmd-close", "Close — move controls to the popup");
+  close.innerHTML = ICON_CLOSE;
   close.style.padding = "3px 7px";
 
   const speed = document.createElement("select");

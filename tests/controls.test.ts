@@ -22,10 +22,10 @@ describe("playAction (one Play button)", () => {
     expect(playAction("playing")).toBe("pause");
   });
 
-  it("labels ⏸ only while playing", () => {
-    expect(playLabel("playing")).toBe("⏸ Pause");
-    expect(playLabel("paused")).toBe("▶ Play");
-    expect(playLabel("stopped")).toBe("▶ Play");
+  it("labels Pause only while playing", () => {
+    expect(playLabel("playing")).toBe("Pause");
+    expect(playLabel("paused")).toBe("Play");
+    expect(playLabel("stopped")).toBe("Play");
   });
 });
 
