@@ -71,6 +71,31 @@ for (const browser of BROWSERS) {
   );
 
   const manifest = JSON.parse(readFileSync("src/manifest.json", "utf8"));
+  // Guard: every provider origin the extension can fetch (optional_host_permissions)
+  // MUST be allowed by the extension-pages CSP connect-src, or the engine fetch
+  // fails at runtime with "NetworkError when attempting to fetch resource"
+  // (regression caught when the harness tightened the CSP in leia-ctl work).
+  // Wildcard hosts (`https://*.x.com/*`) are checked as `*.x` suffix match.
+  {
+    const csp = manifest.content_security_policy.extension_pages;
+    const connectSrc = csp
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith("connect-src"));
+    // Normalize both sides to bare hosts (strip scheme), so `https://api.x.io`
+    // in connect-src matches the `https://api.x.io/*` permission pattern.
+    const strip = (s) => s.replace(/^https?:\/\//, "");
+    const allowed = new Set((connectSrc ?? "").split(/\s+/).map(strip));
+    const missing = (manifest.optional_host_permissions ?? [])
+      .map((o) => o.replace(/^https?:\/\//, "").replace(/\/\*.*$/, ""))
+      .filter((host) => ![...allowed].some((a) => a === host || (a.startsWith("*.") && host.endsWith(a.slice(1)))));
+    if (missing.length > 0) {
+      throw new Error(
+        `build: connect-src is missing provider origins: ${missing.join(", ")}\n` +
+          `Runtime provider fetches would fail with NetworkError. Add them to connect-src in src/manifest.json.`,
+      );
+    }
+  }
   if (browser === "firefox") {
     // Firefox MV3 background is an event page, not a service worker (ADR-0002).
     manifest.background = { scripts: ["background/index.js"] };

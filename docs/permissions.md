@@ -37,12 +37,18 @@ access beyond this machine.
   WS is not upgraded to `wss://`; see `SPEC.md`). `default-src 'self'` and a
   `connect-src` are also set in `src/manifest.json`:
   - `connect-src` allows the extension's own loopback harness bridge
-    (`ws://127.0.0.1:9333`, `http://127.0.0.1:9333`, + localhost) **and** the
+    (`ws://127.0.0.1:9333`, `http://127.0.0.1:9333`, + localhost), the
     kitten-local asset origins (`https://raw.githubusercontent.com`,
-    `https://huggingface.co`). These origins MUST be listed: `connect-src`
-    governs the runtime `fetch()` the kitten worker uses for its model, and a
-    loopback-only `connect-src` silently blocks that first-use download
-    (regression caught in validation).
+    `https://huggingface.co`), **and every provider API origin** from
+    `optional_host_permissions` (minimax, elevenlabs, openai, xai, mistral,
+    gemini, azure/speech.microsoft, aliyuncs). These MUST be listed:
+    `connect-src` governs the runtime `fetch()` both the kitten worker (model
+    download) and the provider TTS engines (audio synthesis) use. A
+    loopback-only `connect-src` makes every engine fail at runtime with
+    "NetworkError when attempting to fetch resource" (regression caught in
+    validation — first with kitten, then with MiniMax). `scripts/build.mjs`
+    guards this: the build FAILS if any `optional_host_permissions` origin is
+    missing from `connect-src`.
   - `'wasm-unsafe-eval'` is required by the kitten-local engine (ticket 06):
     ONNX Runtime Web and the phonemizer's espeak-ng compile WebAssembly on
     device. It does NOT re-enable `eval()`/remote script — code is still

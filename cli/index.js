@@ -13,7 +13,7 @@ import { createAdapter } from "./adapter.js";
 import { getCommand, listCommandNames, splitArgs } from "./commands.js";
 import { runRepl } from "./repl.js";
 
-const GLOBAL_FLAGS = ["--browser", "-b", "--port", "-p", "--token", "--json", "--help", "--profile", "--chrome-bin"];
+const GLOBAL_FLAGS = ["--browser", "-b", "--port", "-p", "--token", "--json", "--help", "--profile", "--chrome-bin", "--headed"];
 
 function usage() {
   const cmds = listCommandNames().join(" ");
@@ -28,6 +28,7 @@ GLOBAL FLAGS
       --token     WS handshake token  (default: none for now)
       --profile   Firefox profile dir (attach-only; for extension UUID discovery)
       --chrome-bin  Chromium binary path (default: $CHROME or 'chromium')
+      --headed    launch the browser with a visible window (Firefox; default is headless)
       --json      machine output (print the reply/data as JSON)
 
 COMMANDS
@@ -71,6 +72,7 @@ function buildContext(globalFlags, rest, flags) {
     token: globalFlags.token || null,
     profileDir: globalFlags.profile,
     chromeBin: globalFlags["chrome-bin"],
+    headless: !globalFlags.headed,
   });
   // The ctx is built after the adapter resolves; we return a factory because
   // createAdapter is async.

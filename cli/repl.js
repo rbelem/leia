@@ -21,6 +21,7 @@ export async function runRepl(globalFlags = {}) {
     token: globalFlags.token || null,
     profileDir: globalFlags.profile,
     chromeBin: globalFlags["chrome-bin"],
+    headless: !globalFlags.headed,
   });
 
   const ctx = {
