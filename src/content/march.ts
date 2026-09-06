@@ -44,11 +44,19 @@ export function createMarch(opts: MarchOpts) {
   };
 
   return {
-    /** Arm (or re-arm) the march for a chunk whose wash just shipped. */
-    arm(sessionId: string, from: number, to: number, timeline: WordTimeline): void {
+    /**
+     * Arm (or re-arm) the march for a chunk whose wash just shipped.
+     * `timeline` is optional: engines without word timing (kitten-local,
+     * gemini, mistral) send chunk highlights only. The 250ms media-clock
+     * poll MUST still arm then — on Firefox that message traffic is the
+     * only thing keeping the background event page from idling out
+     * mid-read (its death parks the session as paused, silently).
+     */
+    arm(sessionId: string, from: number, to: number, timeline?: WordTimeline): void {
       if (!opts.owns(sessionId)) return; // the other script renders this session
       active = { sessionId, from, to };
-      clock.set(timeline);
+      if (timeline) clock.set(timeline);
+      else clock.stop();
       if (poll === null) {
         poll = window.setInterval(() => {
           void browser.runtime

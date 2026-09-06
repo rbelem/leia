@@ -79,7 +79,10 @@ interface HighlightSet {
 function handleHighlightSetMsg(msg: RouterMessage): undefined {
   const m = msg as unknown as HighlightSet;
   highlighter.show(m.sessionId, m.from, m.to, m.word);
-  if (m.timeline) march.arm(m.sessionId, m.from, m.to, m.timeline);
+  // Arm with or without a timeline: the march's clock poll doubles as the
+  // Firefox background keepalive, so word-timing-less engines (kitten) must
+  // arm too — highlight traffic alone otherwise idles the event page out.
+  march.arm(m.sessionId, m.from, m.to, m.timeline);
   return undefined;
 }
 

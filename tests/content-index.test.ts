@@ -144,7 +144,24 @@ async function captureBound(sessionId = "s1"): Promise<number> {
 }
 
 describe("content script entry (content/index.ts)", () => {
+  // Track window.setInterval ids so beforeEach can kill intervals created by
+  // the PREVIOUS module instance: vi.resetModules() orphans the old march,
+  // and since highlights now always arm the clock poll, an orphaned poll
+  // would keep ticking into later tests' counts.
+  const trackedIntervals: number[] = [];
+  const origSetInterval = window.setInterval.bind(window);
+  window.setInterval = ((fn: TimerHandler, ms?: number, ...rest: unknown[]) => {
+    const id = (origSetInterval as (fn: TimerHandler, ms?: number, ...r: unknown[]) => number)(
+      fn as TimerHandler,
+      ms,
+      ...rest,
+    );
+    trackedIntervals.push(id);
+    return id;
+  }) as typeof window.setInterval;
+
   beforeEach(() => {
+    for (const id of trackedIntervals.splice(0)) window.clearInterval(id);
     vi.resetModules();
     document.body.innerHTML = "";
     state.theme = "ocean";
@@ -274,17 +291,40 @@ describe("content script entry (content/index.ts)", () => {
     await import("../src/content/index");
     textScope();
     await captureBound("s1");
+    // Isolate from polls leaked by earlier tests: start disarmed.
+    await dispatch({ type: "leia:session:state", status: { state: "paused" } });
+    await new Promise((r) => setTimeout(r, 60));
 
     await dispatch({ type: "leia:highlight:set", sessionId: "s1", from: 0, to: 0, timeline: TIMELINE });
     // The march polls the background media clock at 250ms only while armed.
+    const pollsBefore = state.sent.filter((m) => m.type === "leia:audio:clock").length;
     await new Promise((r) => setTimeout(r, 300));
-    expect(state.sent.some((m) => m.type === "leia:audio:clock")).toBe(true);
+    expect(state.sent.filter((m) => m.type === "leia:audio:clock").length).toBeGreaterThan(pollsBefore);
 
     // Any non-playing state halts the poll (pause/stop/seek must halt it).
     await dispatch({ type: "leia:session:state", status: { state: "paused" } });
     const polls = state.sent.filter((m) => m.type === "leia:audio:clock").length;
     await new Promise((r) => setTimeout(r, 300));
     expect(state.sent.filter((m) => m.type === "leia:audio:clock").length).toBe(polls);
+  });
+
+  it("highlight:set without a timeline still arms the keepalive poll", async () => {
+    // Engines without word timing (kitten, gemini, mistral) emit chunk
+    // highlights only; the clock poll doubles as the Firefox background
+    // keepalive, so it must arm on the highlight alone.
+    installCaptureShim();
+    await import("../src/content/index");
+    textScope();
+    await captureBound("s1");
+    await dispatch({ type: "leia:session:state", status: { state: "paused" } });
+    await new Promise((r) => setTimeout(r, 60));
+
+    await dispatch({ type: "leia:highlight:set", sessionId: "s1", from: 0, to: 0 });
+    const pollsBefore = state.sent.filter((m) => m.type === "leia:audio:clock").length;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(state.sent.filter((m) => m.type === "leia:audio:clock").length).toBeGreaterThan(pollsBefore);
+    await dispatch({ type: "leia:session:state", status: { state: "paused" } });
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it("march stays armed while the session reports playing", async () => {
@@ -307,6 +347,9 @@ describe("content script entry (content/index.ts)", () => {
     await import("../src/content/index");
     textScope();
     await captureBound("s1");
+    // Isolate from polls leaked by earlier tests: start disarmed.
+    await dispatch({ type: "leia:session:state", status: { state: "paused" } });
+    await new Promise((r) => setTimeout(r, 60));
     await dispatch({ type: "leia:highlight:set", sessionId: "s1", from: 0, to: 0, timeline: TIMELINE });
     await new Promise((r) => setTimeout(r, 300));
     const polls = state.sent.filter((m) => m.type === "leia:audio:clock").length;
