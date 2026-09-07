@@ -184,8 +184,10 @@ if (document.getElementById("voice")) {
   function renderReader(): void {
     const s = currentStatus;
     if (s) {
-      const fam = s.settings.engine;
-      const famSuffix = fam && fam !== "web-speech" ? ` · ${fam}` : "";
+      // activeEngine: the family actually sounding when the preferred one
+      // fell back — show it even when it is the default family.
+      const fam = s.activeEngine ?? s.settings.engine;
+      const famSuffix = fam && (s.activeEngine || fam !== "web-speech") ? ` · ${fam}` : "";
       statusEl.textContent =
         s.state === "stopped"
           ? "no active session"

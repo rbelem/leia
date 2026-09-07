@@ -80,6 +80,7 @@ import { GeminiEngine } from "../src/audio/engine-gemini";
 import { MISTRAL_VOICES_URL, MistralEngine } from "../src/audio/engine-mistral";
 import { XaiEngine } from "../src/audio/engine-xai";
 import { LocalEngine, registerLocalEngines } from "../src/audio/engine-local";
+import { BUILT_IN_PROFILES, markProfileOffline } from "../src/audio/local-profiles";
 import { EngineHub } from "../src/audio/hub";
 import { KittenEngine } from "../src/audio/kitten/engine-kitten";
 import { buildProviderRow, PROVIDERS, type ProviderDef } from "../src/settings/providers";
@@ -1254,6 +1255,45 @@ describe("registerLocalEngines (boot probe)", () => {
       const families = hub.families().map((f) => f.family);
       expect(families).toEqual(["local-kokoro"]);
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("re-running after a server comes online registers the missing family without duplicates (re-scan)", async () => {
+    // Start every profile from a cached-offline probe (the earlier test in
+    // this file caches kokoro online); pass 1 then registers nothing, the
+    // 30 s probe TTL expires, and pass 2 re-probes with piper back up.
+    for (const p of BUILT_IN_PROFILES) markProfileOffline(p.baseUrl);
+    vi.useFakeTimers();
+    let piperUp = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.startsWith("http://127.0.0.1:8881/leia/v1/health")) {
+          if (!piperUp) throw new Error("offline");
+          return jsonResponse({ ok: true });
+        }
+        if (u.startsWith("http://127.0.0.1:8881/leia/v1/capabilities")) {
+          return jsonResponse({ wordTiming: false, voices: [{ id: "p", lang: "en", name: "Piper" }] });
+        }
+        throw new Error("offline");
+      }),
+    );
+    try {
+      const hub = new EngineHub();
+      await registerLocalEngines(hub);
+      expect(hub.families()).toEqual([]); // piper was down at boot
+
+      vi.setSystemTime(Date.now() + 31_000); // expire the offline probe cache
+      piperUp = true;
+      await registerLocalEngines(hub); // the hub rescan after the server came up
+      expect(hub.families().map((f) => f.family)).toEqual(["local-piper"]);
+
+      await registerLocalEngines(hub); // idempotent: no duplicate registrations
+      expect(hub.families().map((f) => f.family)).toEqual(["local-piper"]);
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });

@@ -84,6 +84,10 @@ async function ensureOffscreen(): Promise<void> {
  */
 export class ProxyEngine implements TextEngine {
   readonly family = "web-speech";
+  /** Last family the session pinned/ensured (selectFamily/ensureFamily) —
+   * backs the currentFamily read SessionStatus uses; the offscreen no-ops
+   * unknown families, so this is best-effort. */
+  private selectedFamily: string | null = null;
   private current: { speakId: number; stream: EventStream<EngineEvent> } | null = null;
   private capsPromise: Promise<EngineCapabilities> | null = null;
   private caps: EngineCapabilities | null = null;
@@ -142,8 +146,14 @@ export class ProxyEngine implements TextEngine {
     return this.capsPromise;
   }
 
+  /** Family the engine actually routes to (best-effort offscreen mirror). */
+  get currentFamily(): string {
+    return this.selectedFamily ?? this.family;
+  }
+
   /** Switch the offscreen engine family; next capabilities/families read re-queries. */
   selectFamily(family: string): void {
+    this.selectedFamily = family;
     this.caps = null;
     this.capsPromise = null;
     this.fams = null;
@@ -154,6 +164,26 @@ export class ProxyEngine implements TextEngine {
     void ensureOffscreen()
       .then(() => browser.runtime.sendMessage({ type: "leia:audio:family", family }))
       .catch(() => {});
+  }
+
+  /**
+   * Family switch with re-probe (session start/resume): forward to the
+   * offscreen hub — it re-scans local servers and selects the family when
+   * reachable. Cache resets match selectFamily: the current family's
+   * capabilities may have changed. Never rejects.
+   */
+  async ensureFamily(family: string): Promise<boolean> {
+    this.selectedFamily = family;
+    this.caps = null;
+    this.capsPromise = null;
+    this.fams = null;
+    this.famsPromise = null;
+    try {
+      await ensureOffscreen();
+      return (await browser.runtime.sendMessage({ type: "leia:audio:ensure-family", family })) === true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -274,6 +304,10 @@ export function resolveAudioEngine(): TextEngine {
   hub.register("gemini", new GeminiEngine({ getKey: () => readProviderKey("leia:settings:geminiKey") }));
   // kitten-local (ticket 06): lazy — the model worker spawns on first speak.
   hub.register("kitten-local", new KittenEngine());
+  // Re-scan hook (sticky-fallback fix): ensureFamily("local-…") re-runs the
+  // registration probe so a server that was down at boot recovers the family
+  // without a background restart.
+  hub.setRescan(() => registerLocalEngines(hub));
   void registerLocalEngines(hub); // lazy boot probe (ADR-0006) — never blocks web-speech
   return hub;
 }

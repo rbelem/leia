@@ -852,3 +852,91 @@ describe("exact-once drive (stub engine over multi-paragraph multi-chunk tokens)
     expect(s.status().state).toBe("stopped");
   });
 });
+
+// --- Sticky-fallback fix: re-probe the preferred family at start/resume ----
+
+/**
+ * Hub-shaped double: the preferred family may be unregistered (its local
+ * server was down at hub boot) so routing falls back to web-speech.
+ * `ensureFamily` models the re-probe — success only when the "server" is
+ * back — and `currentFamily` reports the family that actually routes (the
+ * member the session duck-types on).
+ */
+class HubFallbackEngine extends FakeEngine {
+  online = false;
+  currentFamily: string | null = "web-speech";
+  ensureFamilyCalls: string[] = [];
+
+  ensureFamily(family: string): Promise<boolean> {
+    this.ensureFamilyCalls.push(family);
+    if (!this.online) return Promise.resolve(false);
+    this.currentFamily = family;
+    return Promise.resolve(true);
+  }
+}
+
+const KOKORO_PREFS = { voiceName: null, rate: 1, engine: "local-kokoro" };
+
+describe("ReaderSession engine re-probe (start/resume)", () => {
+  it("resume re-probes the preferred family and recovers it once the server is back", async () => {
+    const engine = new HubFallbackEngine();
+    const { storage, emit } = makeSession(engine);
+    await storage.set({ [PREFS_KEY]: KOKORO_PREFS });
+    const s = await ReaderSession.load(engine, storage, emit);
+
+    // Server down at start: the re-probe fails, the hub keeps its fallback…
+    await s.start(TOKENS);
+    await tick();
+    expect(engine.ensureFamilyCalls).toEqual(["local-kokoro"]);
+    expect(engine.currentFamily).toBe("web-speech");
+
+    await s.pause(); // park; the server comes back before the next resume
+
+    // …but the fallback is not sticky: resuming re-probes and the preferred
+    // family takes over.
+    engine.online = true;
+    const resumed = await s.resume();
+    await tick();
+    expect(engine.ensureFamilyCalls).toEqual(["local-kokoro", "local-kokoro"]);
+    expect(engine.currentFamily).toBe("local-kokoro");
+    expect(resumed.activeEngine).toBeNull(); // sounding engine matches the preference again
+    expect(engine.speaks.length).toBeGreaterThan(0); // playback resumed through it
+
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+  });
+
+  it("status reports the actually-routing family while a fallback is active", async () => {
+    const engine = new HubFallbackEngine(); // stays offline the whole test
+    const { storage, emit } = makeSession(engine);
+    await storage.set({ [PREFS_KEY]: KOKORO_PREFS });
+    const s = await ReaderSession.load(engine, storage, emit);
+
+    const started = await s.start(TOKENS);
+    await tick();
+    expect(started.activeEngine).toBe("web-speech");
+    expect(s.status().activeEngine).toBe("web-speech");
+    // The preference itself is never clobbered by the fallback.
+    expect(started.settings.engine).toBe("local-kokoro");
+    expect(s.status().settings.engine).toBe("local-kokoro");
+    const stored = storage.read(PREFS_KEY) as { engine: string | null };
+    expect(stored.engine).toBe("local-kokoro");
+
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+  });
+
+  it("an engine-default preference never reports a divergence and probes nothing", async () => {
+    const engine = new HubFallbackEngine();
+    const { emit } = makeSession(engine);
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    const started = await s.start(TOKENS);
+    await tick();
+    expect(started.activeEngine).toBeNull();
+    expect(engine.ensureFamilyCalls).toEqual([]); // nothing to re-probe
+
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+  });
+});

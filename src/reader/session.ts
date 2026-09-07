@@ -36,6 +36,13 @@ export interface SessionStatus {
   url?: string | null;
   /** Transient engine failure detail (T17); null unless a drive error parked the session. */
   lastError?: string | null;
+  /**
+   * Engine family actually sounding when it diverges from settings.engine
+   * (the preferred family was unavailable and a fallback took over); null =
+   * the preferred family is in use (or there is no preference). Computed at
+   * each start/resume when the engine selection re-probes.
+   */
+  activeEngine?: string | null;
 }
 
 /** Live-session position view the background saves into the per-URL resume store. */
@@ -146,6 +153,8 @@ export class ReaderSession {
   private prefs: StoredPrefs = { ...DEFAULT_PREFS };
   private url: string | null = null;
   private lastError: string | null = null;
+  /** Family actually routing when it diverges from settings.engine (see SessionStatus). */
+  private activeEngine: string | null = null;
   private currentChunk: ChunkSpan | null = null;
   private speakSeq = 0;
   private driveGen = 0;
@@ -210,6 +219,7 @@ export class ReaderSession {
       settings: { ...this.settings },
       url: this.url,
       lastError: this.lastError,
+      activeEngine: this.activeEngine,
     };
   }
 
@@ -253,9 +263,10 @@ export class ReaderSession {
     // chunking pass (see awaitLiveCapabilities).
     await awaitLiveCapabilities(this.engine);
     this.chunks = chunkTokens(tokens, await this.resolveChunkCap());
-    // Fresh start after any background restart: re-pin the stored family so
-    // the stored voice routes to its own engine, not the hub default.
-    this.syncEngineFamily();
+    // Fresh start after any background restart: re-evaluate the stored family
+    // so the stored voice routes to its own engine, not the hub default —
+    // and a family that fell back while unavailable is re-probed (below).
+    await this.reprobeEngine();
     this.tokenPos = Math.max(0, Math.min(resumeAt ?? 0, tokens.length - 1));
     this.state = "playing";
     await this.persist();
@@ -282,6 +293,10 @@ export class ReaderSession {
     this.lastError = null;
     this.state = "playing";
     this.driveGen += 1;
+    // Sticky-fallback fix: re-evaluate the preferred family on every resume —
+    // a local server that was down at pick/restart time may be back (cheap
+    // health probe); when reachable again it takes over the fallback.
+    await this.reprobeEngine();
     await this.persist();
     void this.drive();
     return this.status();
@@ -321,6 +336,7 @@ export class ReaderSession {
     this.tokens = [];
     this.chunks = [];
     this.tokenPos = 0;
+    this.activeEngine = null;
     await this.storage.remove(SESSION_KEY);
     this.emitState();
     if (id) this.emit({ type: "clear", sessionId: id });
@@ -353,6 +369,34 @@ export class ReaderSession {
   /** selectFamily for settings.engine, when one is stored. */
   private syncEngineFamily(): void {
     if (this.settings.engine) this.engine.selectFamily?.(this.settings.engine);
+  }
+
+  /**
+   * Re-evaluate the preferred engine family at each start/resume: a family
+   * that fell back (e.g. an offline local server at pick/restart time) must
+   * not stay sticky — engines with the probe seam (ensureFamily) re-scan and
+   * recover it; the rest re-pin via selectFamily as before. Either way,
+   * `activeEngine` records the family that will actually sound whenever it
+   * differs from the preference, so the UI can surface the fallback.
+   */
+  private async reprobeEngine(): Promise<void> {
+    const family = this.settings.engine;
+    if (!family) {
+      this.activeEngine = null; // engine-default preference — nothing to diverge from
+      return;
+    }
+    try {
+      if (this.engine.ensureFamily) await this.engine.ensureFamily(family);
+      else this.syncEngineFamily();
+    } catch {
+      /* re-probing is best-effort — keep routing as-is */
+    }
+    const hub = this.engine as { currentFamily?: string | null };
+    const actual =
+      typeof hub.currentFamily === "string" && hub.currentFamily.length > 0
+        ? hub.currentFamily
+        : this.engine.family;
+    this.activeEngine = actual === family ? null : actual;
   }
 
   /**
@@ -477,6 +521,7 @@ export class ReaderSession {
       this.tokens = [];
       this.chunks = [];
       this.tokenPos = 0;
+      this.activeEngine = null;
       await this.storage.remove(SESSION_KEY);
       this.emitState();
       if (id) this.emit({ type: "clear", sessionId: id });

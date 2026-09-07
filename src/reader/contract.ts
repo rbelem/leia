@@ -106,6 +106,14 @@ export interface TextEngine {
    * target family name; unknown families are a no-op. Absent = single-family.
    */
   selectFamily?(family: string): void;
+  /**
+   * Family switch with re-probe (session start/resume): make `family`
+   * current if reachable, re-scanning when the engine can (hubs re-register
+   * local servers that came online after boot). Resolves true when the
+   * family is current afterwards; false leaves routing untouched. Absent =
+   * not probeable — callers re-pin via selectFamily instead.
+   */
+  ensureFamily?(family: string): Promise<boolean>;
 }
 
 export function isEngineEventTerminal(ev: EngineEvent): boolean {

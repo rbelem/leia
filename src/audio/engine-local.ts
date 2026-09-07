@@ -279,13 +279,17 @@ function base64ToBytes(b64: string): Uint8Array {
  * stored custom profile and register a LocalEngine per ONLINE one. Offline
  * servers are simply not registered — the picker never sees an empty
  * family, and getVoices()'s 30 s TTL refresh self-heals when a server
- * appears. Lazy: never blocks web-speech. ponytail: a T14 refresh could
- * re-probe and register newly-online profiles without a hub restart.
+ * appears. Lazy: never blocks web-speech. Re-runnable (the hub's rescan
+ * hook calls this on ensureFamily): already-registered families keep their
+ * engine and the registration order never grows duplicates.
  */
 export async function registerLocalEngines(hub: EngineHub): Promise<void> {
   const profiles = [...BUILT_IN_PROFILES, ...(await readLocalProfiles())];
-  for (const profile of profiles) {
-    const { online, caps } = await probeProfile(profile);
-    if (online) hub.register(`local-${profile.id}`, new LocalEngine(profile, caps));
+  const probed = await Promise.all(
+    profiles.map(async (profile) => ({ profile, result: await probeProfile(profile) })),
+  );
+  for (const { profile, result } of probed) {
+    const family = `local-${profile.id}`;
+    if (result.online && !hub.has(family)) hub.register(family, new LocalEngine(profile, result.caps));
   }
 }

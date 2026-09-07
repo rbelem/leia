@@ -56,12 +56,18 @@ engine.register("kitten-local", new KittenEngine());
  */
 async function registerLocalEnginesFromSnapshot(hub: EngineHub): Promise<void> {
   const profiles = [...BUILT_IN_PROFILES, ...snapshotLocalProfiles()];
-  for (const profile of profiles) {
-    const { online, caps } = await probeProfile(profile);
-    if (online) hub.register(`local-${profile.id}`, new LocalEngine(profile, caps));
+  const probed = await Promise.all(
+    profiles.map(async (profile) => ({ profile, result: await probeProfile(profile) })),
+  );
+  for (const { profile, result } of probed) {
+    const family = `local-${profile.id}`;
+    // Re-scan safe (hub rescan hook): registered families keep their engine,
+    // the registration order never grows duplicates.
+    if (result.online && !hub.has(family)) hub.register(family, new LocalEngine(profile, result.caps));
   }
 }
 void registerLocalEnginesFromSnapshot(engine).catch(() => {}); // lazy boot probe (ADR-0006) — never blocks web-speech
+engine.setRescan(() => registerLocalEnginesFromSnapshot(engine)); // ensureFamily re-probe path
 
 /**
  * Apply the service worker's key snapshot from a forwarded leia:audio:*
@@ -114,6 +120,10 @@ function handleAudioMessage(msg: unknown): unknown {
       const m = msg as unknown as { family?: string };
       if (typeof m.family === "string") engine.select(m.family);
       return engine.capabilities as EngineCapabilities;
+    }
+    case "leia:audio:ensure-family": {
+      const m = msg as unknown as { family?: string };
+      return typeof m.family === "string" ? engine.ensureFamily(m.family) : Promise.resolve(false);
     }
     case "leia:audio:speak": {
       const m = msg as unknown as { speakId: number; text: string; voiceName: string | null; rate: number };

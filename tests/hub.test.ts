@@ -154,6 +154,62 @@ describe("EngineHub", () => {
     expect(hub.currentFamily).toBe("minimax");
   });
 
+  it("ensureFamily selects a registered family and reports success", async () => {
+    const ws = new StubEngine("web-speech", []);
+    const mx = new StubEngine("minimax", []);
+    const hub = new EngineHub();
+    hub.register("web-speech", ws, { default: true });
+    hub.register("minimax", mx);
+
+    await expect(hub.ensureFamily("minimax")).resolves.toBe(true);
+    expect(hub.currentFamily).toBe("minimax");
+    expect(hub.has("minimax")).toBe(true);
+  });
+
+  it("ensureFamily with an unknown family and no rescan is a false no-op", async () => {
+    const ws = new StubEngine("web-speech", []);
+    const hub = new EngineHub();
+    hub.register("web-speech", ws, { default: true });
+
+    await expect(hub.ensureFamily("local-kokoro")).resolves.toBe(false);
+    expect(hub.currentFamily).toBe("web-speech"); // routing untouched
+  });
+
+  it("ensureFamily re-scans and recovers a family that registered late (server back)", async () => {
+    const ws = new StubEngine("web-speech", []);
+    const kokoro = new StubEngine("local-kokoro", []);
+    const hub = new EngineHub();
+    hub.register("web-speech", ws, { default: true });
+    let scans = 0;
+    hub.setRescan(async () => {
+      scans += 1;
+      if (scans >= 2) hub.register("local-kokoro", kokoro); // server came up on the 2nd scan
+    });
+
+    await expect(hub.ensureFamily("local-kokoro")).resolves.toBe(false); // still down
+    expect(hub.currentFamily).toBe("web-speech");
+
+    await expect(hub.ensureFamily("local-kokoro")).resolves.toBe(true); // recovered
+    expect(hub.currentFamily).toBe("local-kokoro");
+    expect(scans).toBe(2);
+
+    // Registered families skip the re-scan entirely.
+    await expect(hub.ensureFamily("local-kokoro")).resolves.toBe(true);
+    expect(scans).toBe(2);
+  });
+
+  it("ensureFamily survives a throwing re-scan and leaves routing untouched", async () => {
+    const ws = new StubEngine("web-speech", []);
+    const hub = new EngineHub();
+    hub.register("web-speech", ws, { default: true });
+    hub.setRescan(async () => {
+      throw new Error("probe exploded");
+    });
+
+    await expect(hub.ensureFamily("local-kokoro")).resolves.toBe(false);
+    expect(hub.currentFamily).toBe("web-speech");
+  });
+
   it("select with an unknown family is a no-op", async () => {
     const ws = new StubEngine("web-speech", []);
     const hub = new EngineHub();

@@ -28,6 +28,8 @@ export class EngineHub implements TextEngine {
   private current: TextEngine | null = null;
   /** The engine a speak() call was routed to — cancel() must stop it even if the current family changed mid-speech. */
   private cancelTarget: TextEngine | null = null;
+  /** Late-registration hook (ADR-0006 local servers that come online after boot); see ensureFamily. */
+  private rescan: (() => Promise<void>) | null = null;
 
   register(family: string, engine: TextEngine, opts: { default?: boolean } = {}): void {
     this.engines.set(family, engine);
@@ -42,6 +44,41 @@ export class EngineHub implements TextEngine {
   select(family: string): void {
     const engine = this.engines.get(family);
     if (engine) this.current = engine;
+  }
+
+  /** True when the family is registered (re-scan guards use it to stay idempotent). */
+  has(family: string): boolean {
+    return this.engines.has(family);
+  }
+
+  /** Install the re-scan ensureFamily() runs for unregistered families. */
+  setRescan(rescan: () => Promise<void>): void {
+    this.rescan = rescan;
+  }
+
+  /**
+   * Family switch with re-probe (session start/resume): a registered family
+   * is selected outright; an unknown one triggers the re-scan once — a local
+   * server that came online after boot registers itself and takes over.
+   * False = still unavailable; routing stays as-is. Never rejects.
+   */
+  async ensureFamily(family: string): Promise<boolean> {
+    if (this.engines.has(family)) {
+      this.select(family);
+      return true;
+    }
+    if (this.rescan) {
+      try {
+        await this.rescan();
+      } catch {
+        return false; // a failed re-scan must never break the session
+      }
+      if (this.engines.has(family)) {
+        this.select(family);
+        return true;
+      }
+    }
+    return false;
   }
 
   get currentFamily(): string | null {

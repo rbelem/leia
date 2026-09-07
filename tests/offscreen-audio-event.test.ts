@@ -118,6 +118,33 @@ describe("offscreen audio event wire shape", () => {
     // stream after the first event instead.
     expect((sent.at(-1) as { event: { type: string } }).event.type).toBe("end");
   });
+
+  it("ensure-family answers reachability: registered family true, offline re-scan false", async () => {
+    // Kokoro is up at boot (registers local-kokoro); every other probe fails.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.startsWith("http://127.0.0.1:8880/leia/v1/health")) return jsonResponse({ ok: true });
+        if (u.startsWith("http://127.0.0.1:8880/leia/v1/capabilities")) {
+          return jsonResponse({ wordTiming: false, voices: [{ id: "k", lang: "en", name: "Kokoro" }] });
+        }
+        throw new Error("offline");
+      }),
+    );
+    await loadOffscreen();
+    // The reply-listener wrapper delivers asynchronously via sendResponse.
+    const ensureReply = (msg: Record<string, unknown>): Promise<unknown> =>
+      new Promise((resolve) => {
+        state.listeners[0](msg, {}, (r?: unknown) => resolve(r));
+      });
+
+    await expect(ensureReply({ type: "leia:audio:ensure-family", family: "local-kokoro" })).resolves.toBe(true);
+    // Unregistered family: the re-scan runs (piper still down) → false.
+    await expect(ensureReply({ type: "leia:audio:ensure-family", family: "local-piper" })).resolves.toBe(false);
+    // Malformed family: false, no throw.
+    await expect(ensureReply({ type: "leia:audio:ensure-family" })).resolves.toBe(false);
+  });
 });
 
 // --- leia:audio:clock (Chrome live-proven dead clock) -------------------------

@@ -186,10 +186,13 @@ function render(): void {
   els.back.disabled = !canSeekBack(view);
   els.fwd.disabled = !canSeekForward(view);
   els.speed.value = String(view.settings.rate);
+  // activeEngine: the family actually sounding when the preferred one fell
+  // back (sticky-fallback fix) — surface it where the reader is being used.
+  const famSuffix = view.activeEngine ? ` · ${view.activeEngine}` : "";
   const base =
     view.state === "stopped"
       ? "select text, or play the whole page"
-      : `${view.state} · sentence ${Math.min(view.tokenPos + 1, view.tokenCount)}/${view.tokenCount}`;
+      : `${view.state} · sentence ${Math.min(view.tokenPos + 1, view.tokenCount)}/${view.tokenCount}${famSuffix}`;
   // Surface engine failures exactly where the reader is being used (T17);
   // temporary-friendly: visible even when the popup is closed. Title mirrors
   // the text so the ellipsized overflow stays readable on hover.

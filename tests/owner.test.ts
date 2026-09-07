@@ -208,6 +208,28 @@ describe("ProxyEngine (Chrome offscreen proxy)", () => {
     await tick();
   });
 
+  it("currentFamily mirrors the last pinned family; ensureFamily forwards and reports reachability", async () => {
+    const engine = owner.chromeAudioEngine();
+    expect(engine.currentFamily).toBe("web-speech"); // default before any pin
+
+    engine.selectFamily("minimax");
+    expect(engine.currentFamily).toBe("minimax");
+
+    // ensureFamily forwards to the offscreen and maps the reply: the hub
+    // answers true once its re-scan recovered/selected the family.
+    state.reply = (msg) => (msg.type === "leia:audio:ensure-family" ? true : {});
+    await expect(engine.ensureFamily("local-kokoro")).resolves.toBe(true);
+    expect(state.sent.at(-1)).toMatchObject({ type: "leia:audio:ensure-family", family: "local-kokoro" });
+    expect(engine.currentFamily).toBe("local-kokoro");
+
+    // false (still offline) and transport failures read as unreachable.
+    state.reply = (msg) => (msg.type === "leia:audio:ensure-family" ? false : {});
+    await expect(engine.ensureFamily("local-kokoro")).resolves.toBe(false);
+    state.reply = () => new Error("receiving end does not exist");
+    await expect(engine.ensureFamily("local-kokoro")).resolves.toBe(false);
+    expect(engine.currentFamily).toBe("local-kokoro"); // selection tracking unaffected
+  });
+
   it("families() caches the offscreen reply across reads; failures resolve to []", async () => {
     const engine = owner.chromeAudioEngine();
     state.reply = (msg) => (msg.type === "leia:audio:families" ? [{ family: "web-speech", capabilities: { wordTiming: false, streaming: false, costClass: "free", privacyClass: "local" } }] : {});
