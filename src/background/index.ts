@@ -271,7 +271,14 @@ async function handleReaderSession(msg: RouterMessage): Promise<RouterReply | un
       if (prior) {
         const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
         const priorUrl = prior.url ?? (typeof tab?.url === "string" ? tab.url : undefined);
-        if (priorUrl) await resume.save(priorUrl, prior);
+        if (priorUrl) {
+          // T16 bookmark semantics: Pause and automatic stops (the page
+          // navigated away mid-read) keep the per-URL position. An explicit
+          // Stop ends the read AND forgets it — the next Play on this page
+          // starts from the top.
+          if ((msg as { forget?: boolean }).forget) await resume.clear(priorUrl);
+          else await resume.save(priorUrl, prior);
+        }
       }
       return { ok: true, replyType: msg.type, data: status };
     } catch (err) {

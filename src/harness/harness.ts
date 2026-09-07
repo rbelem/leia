@@ -95,7 +95,8 @@ function commandToMessage(name: string, args: Record<string, unknown>): unknown 
     case "resume":
       return { type: "leia:reader:resume" };
     case "stop":
-      return { type: "leia:reader:stop" };
+      // Explicit user stop: forget the page's saved position too.
+      return { type: "leia:reader:stop", forget: true };
     case "seek":
       return { type: "leia:reader:seek", token: args.token };
     case "prefs":

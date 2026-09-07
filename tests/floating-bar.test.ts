@@ -453,7 +453,7 @@ describe("secondary transport", () => {
     speed.dispatchEvent(new Event("change"));
     await settle();
 
-    expect(h.sent).toContainEqual({ type: "leia:reader:stop" });
+    expect(h.sent).toContainEqual({ type: "leia:reader:stop", forget: true });
     expect(h.sent).toContainEqual({ type: "leia:reader:seek", token: 0 });
     expect(h.sent).toContainEqual({ type: "leia:reader:seek", token: 2 });
     expect(h.sent).toContainEqual({ type: "leia:reader:prefs", rate: 1.5 });

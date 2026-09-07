@@ -434,7 +434,7 @@ if (document.getElementById("voice")) {
   });
 
   stopBtn.addEventListener("click", async () => {
-    applyReplyStatus((await send({ type: "leia:reader:stop" })) as RouterReply | undefined);
+    applyReplyStatus((await send({ type: "leia:reader:stop", forget: true })) as RouterReply | undefined);
   });
 
   backBtn.addEventListener("click", async () => {

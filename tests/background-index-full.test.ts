@@ -711,6 +711,22 @@ describe("reader session lifecycle (start / seek / pause / resume / restore / st
     ).toMatchObject({ url: URL_U1 });
   });
 
+  it("an explicit stop (forget) clears the page's resume record", async () => {
+    state.activeTabs = [{ id: 1, url: URL_U1 }];
+    state.script = (speakId) => (speakId <= 1 ? [startEvent(speakId), endEvent(speakId)] : [startEvent(speakId)]);
+    state.hang = true;
+    await dispatch({ type: "leia:reader:start", tokens: TOKENS_A });
+    await dispatch({ type: "leia:reader:pause" }); // pause parks the position
+    expect(
+      replyData<{ url: string } | null>(await dispatch({ type: "leia:reader:resume-info", url: URL_U1 })),
+    ).toMatchObject({ url: URL_U1 });
+    const stop = await dispatch({ type: "leia:reader:stop", forget: true });
+    expect(replyData(stop)).toMatchObject({ state: "stopped" });
+    expect(replyData(await dispatch({ type: "leia:reader:resume-info", url: URL_U1 }))).toBeNull();
+    // The next Play on this page therefore captures and starts at the top:
+    // handleReaderStart finds no saved record to restore from.
+  });
+
   it("emits word and timeline highlights only for word-timing engines", async () => {
     state.wordTiming = true;
     state.script = (speakId) => [

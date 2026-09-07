@@ -411,7 +411,9 @@ function mount(): void {
 
   els.stop.addEventListener("click", () => {
     if (!sessionIsMine()) return; // never stop another tab's session from here
-    void browser.runtime.sendMessage({ type: "leia:reader:stop" });
+    // Explicit stop: end the read and forget its position (next Play
+    // starts from the top). Automatic stops (scope-stale) keep the bookmark.
+    void browser.runtime.sendMessage({ type: "leia:reader:stop", forget: true });
   });
 
   els.back.addEventListener("click", () => {

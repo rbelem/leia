@@ -401,7 +401,7 @@ describe("transport buttons", () => {
     await loadPopup();
     q<HTMLButtonElement>("pp-stop").click();
     await settle();
-    expect(h.sent).toContainEqual({ type: "leia:reader:stop" });
+    expect(h.sent).toContainEqual({ type: "leia:reader:stop", forget: true });
     expect(q("status").textContent).toBe("paused · sentence 2/3");
     expect(q<HTMLButtonElement>("pp-play").querySelector("span.play-label")?.textContent).toBe("Play");
   });
