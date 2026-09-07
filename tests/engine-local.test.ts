@@ -396,6 +396,123 @@ describe("LocalEngine", () => {
     expect(calls).toHaveLength(4);
     expect(calls[2].url.endsWith("/leia/v1/health")).toBe(true);
   });
+
+  it("prefetch caches audio; speak consumes it (one synthesize for the pair); cancel clears", async () => {
+    const { fetchImpl, calls, synthBodies } = makeLocalFetch({
+      health: HEALTH_OK,
+      caps: () => jsonResponse(CAPS_OK),
+      synth: () => SYNC_OK(WORDS),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(makeProfile(8920, "kokoro"), CAPS_OK, { fetchImpl, audioHost: host });
+
+    await engine.prefetch("Hello world.", { voiceName: "v1", rate: 1 });
+    expect(synthBodies).toEqual([{ text: "Hello world.", voice: "v1", rate: 1, format: "wav" }]);
+    expect(calls.filter((c) => c.url.endsWith("/synthesize"))).toHaveLength(1);
+
+    const events = collect(engine.speak("Hello world.", 1, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0); // cached probe → cache hit → play
+    expect(calls.filter((c) => c.url.endsWith("/synthesize"))).toHaveLength(1); // served from cache — no second fetch
+    expect(host.played).toEqual([{ bytes: new Uint8Array([82, 73, 70, 70]), mime: "audio/wav" }]);
+    await vi.advanceTimersByTimeAsync(500); // cached envelope carried words → word events still fire
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 1 },
+      { type: "word", speakId: 1, begin: 0, end: 5 },
+      { type: "word", speakId: 1, begin: 6, end: 12 },
+      { type: "end", speakId: 1 },
+    ]);
+
+    engine.cancel(); // discards the cache
+    const events2 = collect(engine.speak("Hello world.", 2, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.filter((c) => c.url.endsWith("/synthesize"))).toHaveLength(2); // re-synthesized after cancel
+    host.playbacks[1].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events2;
+  });
+
+  it("cancel mid-prefetch invalidates: the late response is never stored nor played", async () => {
+    const held = deferred<Response>();
+    const { fetchImpl, calls } = makeLocalFetch({
+      health: HEALTH_OK,
+      caps: () => jsonResponse(CAPS_OK),
+      synth: () => held.promise,
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(makeProfile(8921, "kokoro"), CAPS_OK, { fetchImpl, audioHost: host });
+
+    const pending = engine.prefetch("Hello world.", { voiceName: "v1", rate: 1 });
+    engine.cancel(); // pause/seek while the prefetch is in flight
+    held.resolve(SYNC_OK(WORDS));
+    await pending;
+
+    // The epoch bump dropped the entry: the matching speak re-synthesizes
+    // instead of playing the stale prefetch bytes.
+    const events = collect(engine.speak("Hello world.", 1, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.filter((c) => c.url.endsWith("/synthesize"))).toHaveLength(2);
+    expect(host.played).toEqual([{ bytes: new Uint8Array([82, 73, 70, 70]), mime: "audio/wav" }]);
+    await vi.advanceTimersByTimeAsync(500); // second word at (457 − 0)ms
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 1 },
+      { type: "word", speakId: 1, begin: 0, end: 5 },
+      { type: "word", speakId: 1, begin: 6, end: 12 },
+      { type: "end", speakId: 1 },
+    ]);
+  });
+
+  it("prefetch network failure is swallowed — probe cache unpoisoned; speak still works", async () => {
+    let synthCalls = 0;
+    const { fetchImpl } = makeLocalFetch({
+      health: HEALTH_OK,
+      caps: () => jsonResponse(CAPS_OK),
+      synth: () => {
+        synthCalls += 1;
+        if (synthCalls === 1) throw new Error("connection refused"); // prefetch attempt only
+        return SYNC_OK(WORDS);
+      },
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(makeProfile(8922, "kokoro"), CAPS_OK, { fetchImpl, audioHost: host });
+
+    await expect(engine.prefetch("Boom.", { voiceName: "v1", rate: 1 })).resolves.toBeUndefined();
+    // markProfileOffline stays on the speak path — the probe cache is clean.
+    await expect(engine.getVoices()).resolves.toHaveLength(2);
+
+    const events = collect(engine.speak("Boom.", 1, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.played).toEqual([{ bytes: new Uint8Array([82, 73, 70, 70]), mime: "audio/wav" }]);
+    await vi.advanceTimersByTimeAsync(500); // second word at (457 − 0)ms
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 1 },
+      { type: "word", speakId: 1, begin: 0, end: 5 },
+      { type: "word", speakId: 1, begin: 6, end: 12 },
+      { type: "end", speakId: 1 },
+    ]);
+  });
+
+  it("prefetch on a non-OK synthesize stores nothing; the matching speak synthesizes on demand", async () => {
+    const { fetchImpl, calls } = makeLocalFetch({
+      health: HEALTH_OK,
+      caps: () => jsonResponse(CAPS_OK),
+      synth: () => jsonResponse({ error: "voice not found" }, 404),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(makeProfile(8923, "kokoro"), CAPS_OK, { fetchImpl, audioHost: host });
+
+    await engine.prefetch("Hi.", { voiceName: "v1", rate: 1 }); // !ok → nothing cached
+    const events = collect(engine.speak("Hi.", 1, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([{ type: "error", speakId: 1, message: '404 {"error":"voice not found"}' }]);
+    expect(host.played).toHaveLength(0);
+    expect(calls.filter((c) => c.url.endsWith("/synthesize"))).toHaveLength(2); // prefetch attempt + speak on demand
+  });
 });
 describe("LocalEngine — openai dialect", () => {
   beforeEach(() => {

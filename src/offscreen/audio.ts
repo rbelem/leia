@@ -133,6 +133,13 @@ function handleAudioMessage(msg: unknown): unknown {
     case "leia:audio:cancel":
       engine.cancel();
       return { ok: true };
+    case "leia:audio:prefetch": {
+      // Pipelining (ADR-0003): fire-and-forget synthesize-ahead on the hub;
+      // hub.prefetch no-ops for engines without prefetch and swallows errors.
+      const m = msg as unknown as { text: string; voiceName: string | null; rate: number };
+      void engine.prefetch(m.text, { voiceName: m.voiceName, rate: m.rate });
+      return { ok: true };
+    }
     // Synchronous read on purpose: the reply-listener helper triages sync, so
     // the content pages' 250ms clock poll always gets an immediate reply.
     // SINGLE RESPONDER: this doc answers with the march's envelope shape and

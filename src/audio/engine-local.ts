@@ -10,6 +10,16 @@
  * getVoices() return [] so the voice-driven picker drops the family
  * (ADR-0006). speak() gates on the TTL-cached probe and marks the profile
  * offline immediately when the server dies mid-session.
+ *
+ * Implements prefetch() (pipelining, ADR-0003 — ElevenLabs pattern): a
+ * single-entry cache of decoded audio bytes — the latest prefetch wins —
+ * that a later speak() with identical text+options consumes instead of
+ * re-synthesizing; a mismatching speak() or cancel() discards it. Local
+ * synthesis is the slow path (CPU ONNX), so pipelining hides the
+ * between-chunks gap. Only the leia synthesize dialect prefetches; the
+ * OpenAI dialect has a different endpoint/body and never populates the
+ * cache. prefetch never probes, never touches the active speak, and never
+ * marks the profile offline.
  */
 import { EventStream } from "../reader/event-stream";
 import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceInfo } from "../reader/contract";
@@ -50,6 +60,11 @@ export class LocalEngine implements TextEngine {
   private readonly audioHost: AudioHost;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
   private wordTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Decoded audio for chunk pipelining (ADR-0003): one entry, latest
+   * prefetch wins; cancel() discards it. The key pins text+voice+rate so a
+   * mismatching speak() can never serve stale audio. */
+  private cache: { cacheKey: string; bytes: Uint8Array; words?: LocalVoiceWord[] } | null = null;
+  private cacheEpoch = 0;
 
   constructor(profile: LocalProfile, caps: LocalCapabilities, opts: LocalEngineOptions = {}) {
     this.profile = profile;
@@ -85,6 +100,33 @@ export class LocalEngine implements TextEngine {
     return stream;
   }
 
+  /**
+   * Synthesize ahead for a FUTURE speak() with identical text+options
+   * (pipelining, ADR-0003). Best-effort: a failed request stores nothing
+   * and the later speak() synthesizes on demand.
+   */
+  async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    if (this.profile.kind === "openai") return;
+    const epoch = this.cacheEpoch;
+    try {
+      const resp = await this.fetchImpl(`${this.profile.baseUrl}/leia/v1/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice: this.voiceId(options), rate: clampRate(options.rate), format: "wav" }),
+      });
+      if (!resp.ok) return;
+      const envelope = (await resp.json()) as SynthesizeEnvelope;
+      const b64 = envelope.audio_b64;
+      if (typeof b64 !== "string" || b64.length === 0) return;
+      const bytes = base64ToBytes(b64);
+      if (this.cacheEpoch === epoch) {
+        this.cache = { cacheKey: this.cacheKey(text, options), bytes, words: envelope.words };
+      }
+    } catch {
+      // best-effort — a later speak() fetches on demand
+    }
+  }
+
   cancel(): void {
     const active = this.active;
     this.active = null;
@@ -93,6 +135,8 @@ export class LocalEngine implements TextEngine {
       active.playback?.stop();
     }
     this.clearWordTimers();
+    this.cacheEpoch += 1; // discard in-flight prefetch results too
+    this.cache = null;
   }
 
   // --- internals ---
@@ -118,7 +162,7 @@ export class LocalEngine implements TextEngine {
       return;
     }
 
-    const voice = options.voiceName ?? this.caps.voices[0]?.id ?? "default";
+    const voice = this.voiceId(options);
     if (this.profile.kind === "openai") {
       // OpenAI-compatible TTS: POST /v1/audio/speech → raw audio bytes
       // (mp3 by default — vLLM-Omni, LocalAI and Kokoro-FastAPI all encode
@@ -158,6 +202,12 @@ export class LocalEngine implements TextEngine {
       if (!this.isCurrent(speakId)) return;
       const mime = resp.headers?.get?.("content-type")?.split(";")[0] || "audio/mpeg";
       await this.deliver(bytes, mime, speakId, stream);
+      return;
+    }
+
+    const cached = this.cachedFor(text, options);
+    if (cached) {
+      await this.deliver(cached.bytes, "audio/wav", speakId, stream, cached.words);
       return;
     }
 
@@ -250,6 +300,28 @@ export class LocalEngine implements TextEngine {
         }, delay),
       );
     }
+  }
+
+  private voiceId(options: SpeakOptions): string {
+    return options.voiceName ?? this.caps.voices[0]?.id ?? "default";
+  }
+
+  private cacheKey(text: string, options: SpeakOptions): string {
+    return `${text}|${this.voiceId(options)}|${clampRate(options.rate)}`;
+  }
+
+  /**
+   * Serve the pipelining cache when text+options match (ElevenLabs pattern).
+   * A mismatching speak() discards the entry (ADR-0003 — latest prefetch
+   * wins; nothing stale survives to a later speak). A matching speak()
+   * keeps it: the next prefetch overwrites it and cancel() clears it.
+   */
+  private cachedFor(text: string, options: SpeakOptions): { bytes: Uint8Array; words?: LocalVoiceWord[] } | null {
+    const entry = this.cache;
+    if (!entry) return null;
+    const match = entry.cacheKey === this.cacheKey(text, options);
+    if (!match) this.cache = null;
+    return match ? { bytes: entry.bytes, words: entry.words } : null;
   }
 
   private clearWordTimers(): void {

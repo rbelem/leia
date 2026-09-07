@@ -233,6 +233,25 @@ export class ProxyEngine implements TextEngine {
     return stream;
   }
 
+  /**
+   * Fire-and-forget pipelining (ADR-0003): tell the offscreen hub to
+   * synthesize ahead for the next chunk. Failures are swallowed — the later
+   * speak() synthesizes on demand.
+   */
+  async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    try {
+      await ensureOffscreen();
+      await browser.runtime.sendMessage({
+        type: "leia:audio:prefetch",
+        text,
+        voiceName: options.voiceName,
+        rate: options.rate,
+      });
+    } catch {
+      // best-effort — a later speak() fetches on demand
+    }
+  }
+
   cancel(): void {
     const current = this.current;
     this.current = null;

@@ -304,6 +304,16 @@ describe("ProxyEngine (Chrome offscreen proxy)", () => {
     expect(await events).toEqual([{ type: "cancelled", speakId: 3 }]);
     expect(state.sent.filter((m) => m.type === "leia:audio:cancel")).toHaveLength(2);
   });
+
+  it("prefetch forwards fire-and-forget to the offscreen; failures are swallowed", async () => {
+    const engine = owner.chromeAudioEngine();
+    await engine.prefetch("hello", { voiceName: "V", rate: 1.5 });
+    expect(state.sent).toEqual([{ type: "leia:audio:prefetch", text: "hello", voiceName: "V", rate: 1.5 }]);
+
+    // A failing round trip must not reject — pipelining is best-effort.
+    state.reply = () => new Error("receiving end does not exist");
+    await expect(engine.prefetch("x", { voiceName: null, rate: 1 })).resolves.toBeUndefined();
+  });
 });
 
 describe("resolveAudioEngine (Firefox hub)", () => {

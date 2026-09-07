@@ -272,3 +272,52 @@ describe("offscreen leia:audio:clock", () => {
     }); // idle again
   });
 });
+
+// --- leia:audio:prefetch (pipelining, ADR-0003) -------------------------------
+// The SW's ProxyEngine forwards prefetch as a fire-and-forget message; the
+// offscreen case must hand it to the engine hub (which no-ops for engines
+// without prefetch). Observed through the hub's engine fetching: selecting
+// elevenlabs and arming its key, a prefetch message must synthesize ahead —
+// without playing audio or streaming events back.
+
+describe("offscreen leia:audio:prefetch", () => {
+  beforeEach(() => {
+    vi.stubGlobal("speechSynthesis", synth);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string): Promise<Response> => {
+        if (String(url).includes("/v1/text-to-speech")) {
+          return jsonResponse({ audio_base64: btoa("ID3") });
+        }
+        throw new Error(`unexpected fetch: ${url}`); // local-profile probes → offline → skipped
+      }),
+    );
+    vi.stubGlobal("Audio", FakeAudio);
+    (URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => "blob:test-url");
+    (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    (URL as unknown as Record<string, unknown>).createObjectURL = undefined;
+    (URL as unknown as Record<string, unknown>).revokeObjectURL = undefined;
+    lastAudio = null;
+  });
+
+  it("forwards to the engine hub — elevenlabs synthesizes ahead without speaking", async () => {
+    await loadOffscreen();
+
+    // Select elevenlabs AND arm its provider key in one audio message.
+    state.listeners[0](
+      { type: "leia:audio:family", family: "elevenlabs", keys: { "leia:settings:elevenlabsKey": "k" } },
+      {},
+    );
+    state.listeners[0]({ type: "leia:audio:prefetch", text: "Hello.", voiceName: null, rate: 1 }, {});
+
+    await until(() =>
+      vi.mocked(fetch).mock.calls.some((c) => String(c[0]).includes("/with-timestamps")),
+    ); // the hub's engine synthesized ahead
+    expect(lastAudio).toBeNull(); // prefetch never plays
+    expect(state.sent).toEqual([]); // …and streams nothing back
+  });
+});
