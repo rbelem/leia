@@ -219,6 +219,62 @@ describe("mount / unmount", () => {
   });
 });
 
+describe("foreign sessions are scoped to their own page", () => {
+  const FOREIGN = "https://elsewhere.example/article";
+
+  it("renders idle while another page's session plays: Play label, no foreign counter", async () => {
+    h.storage[CONTROLS_IN_PAGE_KEY] = true;
+    h.handlers["leia:reader:status"] = () =>
+      makeStatus({ state: "playing", tokenPos: 3, tokenCount: 9, url: FOREIGN });
+    await loadBar();
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Play");
+    expect(q<HTMLButtonElement>("leia-cmd-stop").disabled).toBe(true);
+    expect(q<HTMLButtonElement>("leia-cmd-back").disabled).toBe(true);
+    expect(q<HTMLButtonElement>("leia-cmd-fwd").disabled).toBe(true);
+    expect(q("leia-bar-status").textContent).toBe("select text, or play the whole page");
+  });
+
+  it("play on a foreign session starts THIS page (takeover), never pauses the other tab", async () => {
+    h.storage[CONTROLS_IN_PAGE_KEY] = true;
+    h.handlers["leia:reader:status"] = () =>
+      makeStatus({ state: "playing", tokenPos: 3, tokenCount: 9, url: FOREIGN });
+    h.capture = { tokens: [{ text: "hi" }], ranges: [] };
+    await loadBar();
+    play().click();
+    await settle();
+    const types = h.sent.map((m) => m.type);
+    expect(types).not.toContain("leia:reader:pause");
+    expect(types).toContain("leia:reader:start");
+  });
+
+  it("a same-page session keeps the classic pause and stop semantics", async () => {
+    h.storage[CONTROLS_IN_PAGE_KEY] = true;
+    h.handlers["leia:reader:status"] = () =>
+      makeStatus({ state: "playing", tokenPos: 3, tokenCount: 9, url: location.href });
+    await loadBar();
+    expect(play().querySelector("span.play-label")?.textContent).toBe("Pause");
+    play().click();
+    await settle();
+    expect(h.sent.map((m) => m.type)).toContain("leia:reader:pause");
+    q<HTMLButtonElement>("leia-cmd-stop").click();
+    await settle();
+    expect(h.sent.map((m) => m.type)).toContain("leia:reader:stop");
+  });
+
+  it("foreign state/error events paint neither the other article's counter nor its errors", async () => {
+    h.storage[CONTROLS_IN_PAGE_KEY] = true;
+    h.handlers["leia:reader:status"] = () => makeStatus({ state: "stopped", url: null });
+    await loadBar();
+    broadcast({
+      type: "leia:session:state",
+      status: makeStatus({ state: "playing", tokenPos: 5, tokenCount: 30, url: FOREIGN }),
+    });
+    expect(q("leia-bar-status").textContent).toBe("select text, or play the whole page");
+    broadcast({ type: "leia:session:error", sessionId: "s1", message: "boom" });
+    expect(q("leia-bar-status").textContent).toBe("select text, or play the whole page");
+  });
+});
+
 describe("play button", () => {
   it("start with no readable scope: no pending state, friendly status", async () => {
     await loadBar();

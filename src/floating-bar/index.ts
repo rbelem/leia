@@ -103,8 +103,30 @@ let status: SessionStatus = {
   tokenCount: 0,
   settings: { voiceName: null, rate: 1, engine: null },
 };
-/** Set when the underlying page mutated away from the bound scope; persists
- * until the next read click. */
+
+/**
+ * The reader session is global; this bar may only drive and display it
+ * when it was started for THIS page. Otherwise a foreign "playing" turns
+ * the Play button into a silent pause of another tab's read (reported as
+ * "not playing" on noticias.uol.com.br) and the status line shows the
+ * other article's sentence counter here. A foreign session renders idle,
+ * and Play starts reading here — the background parks the other page's
+ * position first (T17 takeover).
+ */
+function sessionIsMine(): boolean {
+  // No session at all, or an ownerless one (legacy/test paths): behave
+  // exactly as before.
+  if (!status.sessionId || !status.url) return true;
+  return stripHash(status.url) === stripHash(location.href);
+}
+
+function stripHash(url: string): string {
+  return url.replace(/#.*$/, "");
+}
+/** Persistent bar notice: scope stale, start/resume failure, engine error.
+ * A direct status-span write would be wiped by the next session broadcast's
+ * render() before anyone can read it — this channel survives renders and is
+ * cleared by the next read click. */
 let staleNotice: string | null = null;
 /** Play-button pending state: set on start/resume, cleared when audio
  * actually begins (first highlight), on error/stop/reply-failure, or by the
@@ -140,6 +162,9 @@ function handleScopeStale(): void {
 
 function render(): void {
   if (!els) return;
+  const view: SessionStatus = sessionIsMine()
+    ? status
+    : { ...status, state: "stopped", tokenPos: 0, tokenCount: 0, lastError: null };
   if (loading) {
     els.play.disabled = true;
     els.play.classList.add("loading");
@@ -154,24 +179,24 @@ function render(): void {
     els.play.disabled = false;
     els.play.classList.remove("loading");
     els.play.removeAttribute("aria-busy");
-    setPlayState(els.play, status.state);
-    els.play.setAttribute("aria-label", playLabel(status.state));
+    setPlayState(els.play, view.state);
+    els.play.setAttribute("aria-label", playLabel(view.state));
   }
-  els.stop.disabled = status.state === "stopped";
-  els.back.disabled = !canSeekBack(status);
-  els.fwd.disabled = !canSeekForward(status);
-  els.speed.value = String(status.settings.rate);
+  els.stop.disabled = view.state === "stopped";
+  els.back.disabled = !canSeekBack(view);
+  els.fwd.disabled = !canSeekForward(view);
+  els.speed.value = String(view.settings.rate);
   const base =
-    status.state === "stopped"
+    view.state === "stopped"
       ? "select text, or play the whole page"
-      : `${status.state} · sentence ${Math.min(status.tokenPos + 1, status.tokenCount)}/${status.tokenCount}`;
+      : `${view.state} · sentence ${Math.min(view.tokenPos + 1, view.tokenCount)}/${view.tokenCount}`;
   // Surface engine failures exactly where the reader is being used (T17);
   // temporary-friendly: visible even when the popup is closed. Title mirrors
   // the text so the ellipsized overflow stays readable on hover.
   els.status.textContent =
     staleNotice ??
-    (status.lastError
-      ? `${base} — engine: ${status.lastError.slice(0, 90)}`
+    (view.lastError
+      ? `${base} — engine: ${view.lastError.slice(0, 90)}`
       : loading
         ? `${loading}…`
         : base);
@@ -319,7 +344,10 @@ function startReading(): void {
   const scope = captureScope(window);
   if (!scope) {
     clearLoading();
-    if (els) els.status.textContent = "no readable article — select text";
+    // Persistent channel: a direct textContent write would be wiped by the
+    // next session broadcast's render() before anyone can read it.
+    staleNotice = "no readable article — select text";
+    render();
     return;
   }
   void browser.runtime
@@ -331,13 +359,15 @@ function startReading(): void {
         highlighter.bind(data.sessionId, scope, data.locale ?? null);
       } else if (r && shouldClearLoading({ type: "reply", ok: r.ok })) {
         clearLoading();
-        if (els) els.status.textContent = `failed: ${String(r.error ?? "?").slice(0, 80)}`;
+        staleNotice = `failed: ${String(r.error ?? "?").slice(0, 80)}`;
+        render();
       }
       // ok reply: stay pending — the first leia:highlight:set clears it.
     })
     .catch(() => {
       clearLoading();
-      if (els) els.status.textContent = "start failed";
+      staleNotice = "start failed";
+      render();
     });
 }
 
@@ -346,7 +376,10 @@ function mount(): void {
   els = buildBar();
 
   els.play.addEventListener("click", () => {
-    const action = playAction(status.state);
+    // A foreign session (another tab) must never be driven from here:
+    // "play" on this page means start reading THIS page — the background
+    // parks the other page's position before taking over (T17).
+    const action = sessionIsMine() ? playAction(status.state) : "start";
     const kind = loadingKindForAction(action);
     if (kind) beginLoading(kind);
     switch (action) {
@@ -360,10 +393,15 @@ function mount(): void {
             const reply = r as RouterReply | undefined;
             if (reply && shouldClearLoading({ type: "reply", ok: reply.ok })) {
               clearLoading();
-              if (els) els.status.textContent = `failed: ${String(reply.error ?? "?").slice(0, 80)}`;
+              staleNotice = `failed: ${String(reply.error ?? "?").slice(0, 80)}`;
+              render();
             }
           })
-          .catch(() => clearLoading());
+          .catch(() => {
+            clearLoading();
+            staleNotice = "resume failed";
+            render();
+          });
         break;
       case "pause":
         void browser.runtime.sendMessage({ type: "leia:reader:pause" });
@@ -372,16 +410,19 @@ function mount(): void {
   });
 
   els.stop.addEventListener("click", () => {
+    if (!sessionIsMine()) return; // never stop another tab's session from here
     void browser.runtime.sendMessage({ type: "leia:reader:stop" });
   });
 
   els.back.addEventListener("click", () => {
+    if (!sessionIsMine()) return;
     if (canSeekBack(status)) {
       void browser.runtime.sendMessage({ type: "leia:reader:seek", token: prevToken(status.tokenPos) });
     }
   });
 
   els.fwd.addEventListener("click", () => {
+    if (!sessionIsMine()) return;
     if (canSeekForward(status)) {
       void browser.runtime.sendMessage({ type: "leia:reader:seek", token: nextToken(status.tokenPos, status.tokenCount) });
     }
@@ -457,6 +498,7 @@ function handleBarSessionState(msg: RouterMessage): undefined {
 // usually closed exactly when these fire.
 function handleBarSessionError(msg: RouterMessage): undefined {
   if (loading && shouldClearLoading({ type: "error" })) clearLoading();
+  if (!sessionIsMine()) return undefined; // another page's engine failure
   staleNotice = `engine: ${(msg as unknown as { message: string }).message}`;
   render();
   return undefined;
