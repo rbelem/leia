@@ -598,6 +598,75 @@ describe("ReaderSession (fake engine)", () => {
     expect(engine.selectFamilyCalls()).toEqual([]);
   });
 
+  it("a phantom engine:undefined key does not suppress the voice→family pin", async () => {
+    const { engine, storage, emit } = makeSession();
+    engine.voices = [{ name: "af_heart", lang: "en-US", localService: true, family: "local-kokoro" }];
+    const s = await ReaderSession.load(engine, storage, emit);
+
+    // Mirrors the harness payload built as `{engine: args.engine}` — the key
+    // is present with an undefined value, which must count as absent.
+    await s.setPrefs({ voiceName: "af_heart", engine: undefined });
+    expect(engine.selectFamilyCalls()).toEqual(["local-kokoro"]);
+    expect(s.status().settings.engine).toBe("local-kokoro");
+    const prefs = storage.read(PREFS_KEY) as { engine: string | null };
+    expect(prefs.engine).toBe("local-kokoro");
+  });
+
+  it("voiceName null (back to default voice) clears a previously pinned engine", async () => {
+    const { engine, storage, emit } = makeSession();
+    engine.voices = [{ name: "kitten-local", lang: "en-US", localService: true, family: "kitten-local" }];
+    const s = await ReaderSession.load(engine, storage, emit);
+    await s.setPrefs({ voiceName: "kitten-local" });
+    expect(s.status().settings.engine).toBe("kitten-local");
+
+    engine.clearFamilyCalls();
+    // The popup's "(default voice)" entry sends {voiceName: null}.
+    await s.setPrefs({ voiceName: null });
+    expect(s.status().settings.engine).toBeNull();
+    const prefs = storage.read(PREFS_KEY) as { engine: string | null };
+    expect(prefs.engine).toBeNull(); // the stale pin is gone from the record
+
+    // Next start uses the engine default — the stale family is not re-pinned.
+    await s.start(TOKENS);
+    await tick();
+    expect(engine.selectFamilyCalls()).toEqual([]);
+    engine.finishCurrent(); // drain the drive loop
+    await tick();
+  });
+
+  it("an explicit engine value wins over the voice (no pin-by-voice)", async () => {
+    const { engine, emit } = makeSession();
+    engine.voices = [{ name: "af_heart", lang: "en-US", localService: true, family: "local-kokoro" }];
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.setPrefs({ voiceName: "af_heart", engine: "minimax" });
+    expect(engine.selectFamilyCalls()).toEqual(["minimax"]);
+    expect(s.status().settings.engine).toBe("minimax");
+  });
+
+  it("an explicit engine:null keeps T14 semantics (voice re-derives the family)", async () => {
+    const { engine, emit } = makeSession();
+    engine.voices = [{ name: "af_heart", lang: "en-US", localService: true, family: "local-kokoro" }];
+    const s = await ReaderSession.load(engine, new MemoryStorage(), emit);
+
+    await s.setPrefs({ voiceName: "af_heart", engine: null });
+    expect(engine.selectFamilyCalls()).toEqual(["local-kokoro"]);
+    expect(s.status().settings.engine).toBe("local-kokoro");
+  });
+
+  it("a rate-only prefs message touches neither voice nor engine", async () => {
+    const { engine, storage, emit } = makeSession();
+    engine.voices = [{ name: "af_heart", lang: "en-US", localService: true, family: "local-kokoro" }];
+    await storage.set({ [PREFS_KEY]: { voiceName: "af_heart", rate: 1, engine: "local-kokoro" } });
+    const s = await ReaderSession.load(engine, storage, emit);
+    engine.clearFamilyCalls(); // ignore load-time pinning
+
+    await s.setPrefs({ rate: 1.5 });
+    expect(engine.selectFamilyCalls()).toEqual([]);
+    const prefs = storage.read(PREFS_KEY) as { voiceName: string | null; rate: number; engine: string | null };
+    expect(prefs).toEqual({ voiceName: "af_heart", rate: 1.5, engine: "local-kokoro" });
+  });
+
   it("start() re-pins the stored engine family after a background restart", async () => {
     const { engine, storage, emit } = makeSession();
     await storage.set({ [PREFS_KEY]: { voiceName: "male-qn-qingse", rate: 1, engine: "minimax" } });

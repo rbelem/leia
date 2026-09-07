@@ -345,18 +345,33 @@ export class ReaderSession {
 
   /** Persist user preferences (voice, speed, engine) across sessions; live for the next chunk. */
   async setPrefs(prefs: Partial<SessionSettings>): Promise<SessionStatus> {
-    this.prefs = { ...this.prefs, ...prefs };
+    // A key present with an `undefined` value is a phantom from senders that
+    // build the payload unconditionally (`{engine: args.engine}`) — not a
+    // choice. Treat undefined as "key absent" so it can neither overwrite a
+    // stored value nor suppress the voice→family pin below.
+    const given = { ...prefs };
+    for (const key of ["voiceName", "rate", "engine"] as const) {
+      if (given[key] === undefined) delete given[key];
+    }
+    this.prefs = { ...this.prefs, ...given };
     this.settings = { ...this.settings, ...this.prefs };
     await this.prefsStorage.set({ [PREFS_KEY]: this.prefs });
-    if ("engine" in prefs && prefs.engine) {
+    if (given.engine) {
       // Family switch takes effect from the next chunk (current playback
       // keeps its engine). null = engine default — leave the current one.
-      this.engine.selectFamily?.(prefs.engine);
-    } else if ("voiceName" in prefs && prefs.voiceName) {
+      this.engine.selectFamily?.(given.engine);
+    } else if (given.voiceName) {
       // Voice-only change (popup omits `engine` when it believes the family
       // is already current — stale after any background restart). Re-derive
       // the family from where that voice actually lives.
-      await this.syncVoiceFamily(prefs.voiceName);
+      await this.syncVoiceFamily(given.voiceName);
+    } else if (given.voiceName === null) {
+      // Back to "(default voice)" with no engine value in the message: drop a
+      // previously voice-pinned family so the next start uses the engine
+      // default (an explicit engine:null already merged in above).
+      this.prefs.engine = null;
+      this.settings.engine = null;
+      await this.prefsStorage.set({ [PREFS_KEY]: this.prefs });
     }
     if (this.state === "playing" || this.state === "paused") {
       // Live-apply to the persisted session so a resumed session keeps them.
