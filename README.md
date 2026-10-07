@@ -35,6 +35,7 @@ docs/             permissions, engine contract, platform floor, spikes
 | `npm run typecheck` | `tsc --noEmit` (strict) |
 | `npm test` | vitest run (jsdom) |
 | `npm run build` | esbuild → `dist/chrome` + `dist/firefox` |
+| `npm run test:e2e` | native permission-grant e2e via cua-driver (needs chromium + cua-driver 0.33.x + at-spi2-core on a session bus; arm with `LEIA_E2E=1` — [docs/cua-e2e.md](docs/cua-e2e.md)) |
 
 ## Load in Chrome
 

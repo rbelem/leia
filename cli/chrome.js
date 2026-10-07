@@ -15,7 +15,7 @@
  * later `status` / `events` / `down` can re-attach to the still-running browser
  * (the harness reconnects to the bridge port every ~1s) or tear it down.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocket } from "ws";
@@ -27,6 +27,27 @@ const REPO = new URL("..", import.meta.url).pathname;
 // Chrome's CSP connect-src (src/manifest.json) is fixed to these loopback
 // origins; the harness must land on a port the CSP allows.
 const CSP_ALLOWED_PORTS = new Set([9333]);
+
+// a11y activation recipe — WHY this exists (rationale lives here; pointers:
+// docs/cua-e2e.md §"activation recipe", AGENTS.md "a11y recipe"):
+// cua-driver enumerates browsers over AT-SPI, and chromium is invisible to
+// AT-SPI unless BOTH (a) org.a11y.Status.ScreenReaderEnabled=true on the
+// session bus BEFORE the browser process starts, and (b)
+// --force-renderer-accessibility is on its command line (investigation
+// 2026-10-07, isolated experiments; without (b) the tree stays 2-element
+// shallow). LEIA_NO_FORCE_A11Y=1 opts out (perf/privacy kill switch).
+// Argument vectors for busctl (the binary name is passed by the spawnSync
+// call sites — keeping it out of these arrays avoids a doubled verb).
+const A11Y_FLAG_GET = ["--user", "get-property", "org.a11y.Bus",
+  "/org/a11y/bus", "org.a11y.Status", "ScreenReaderEnabled"];
+const A11Y_FLAG_SET = (v) => ["--user", "set-property", "org.a11y.Bus",
+  "/org/a11y/bus", "org.a11y.Status", "ScreenReaderEnabled", "b", v];
+// The cua daemon owns the flag while it runs: it sets ScreenReaderEnabled=true
+// at its own startup and re-asserts it, so restoring `false` under it would
+// break the NEXT launch's a11y visibility. Socket presence + a status answer
+// is the ownership test (docs/cua-e2e.md §restore).
+const CUA_DAEMON_SOCK = join(process.env.HOME ?? "", ".cache", "cua-driver", "cua-driver.sock");
+const FORCE_A11Y_ARG = "--force-renderer-accessibility";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -40,6 +61,12 @@ export class ChromeAdapter extends BrowserAdapter {
     this.extensionId = "";
     this._targetWs = null; // CDP socket to the harness page
     this._cdpSeq = 0;
+    // a11y recipe bookkeeping: the pre-spawn flag value leia flipped (§
+    // _ensureA11yRecipe); null when leia changed nothing. Restore happens in
+    // stop()'s finally — `down` needs no a11y teardown because the spawn arg
+    // dies with the browser process and the bus flag is session-scoped
+    // launcher state, not per-browser state.
+    this._a11yPrior = null;
   }
 
   async start() {
@@ -57,17 +84,20 @@ export class ChromeAdapter extends BrowserAdapter {
     }
 
     this.profileDir = mkdtempSync(join("/tmp/opencode", "leia-chrome-"));
+    const recipe = this._ensureA11yRecipe();
+    const args = [
+      `--user-data-dir=${this.profileDir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-gpu",
+      `--remote-debugging-port=${this.debugPort}`,
+      `--load-extension=${dist}`,
+      "about:blank",
+    ];
+    if (recipe.spawnArg) args.splice(args.indexOf("--disable-gpu") + 1, 0, recipe.spawnArg);
     this.child = spawn(
       this.chromeBin,
-      [
-        `--user-data-dir=${this.profileDir}`,
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-gpu",
-        `--remote-debugging-port=${this.debugPort}`,
-        `--load-extension=${dist}`,
-        "about:blank",
-      ],
+      args,
       // detached: the browser must outlive `up` — one-shot commands re-attach
       // to its CDP port via state.json (the firefox path survives through
       // geckodriver; chromium's wrapper chain dies with the parent otherwise).
@@ -235,6 +265,69 @@ export class ChromeAdapter extends BrowserAdapter {
     await this._openTarget(url);
   }
 
+  /**
+   * Pre-spawn a11y activation recipe (docs/cua-e2e.md). Best-effort — NEVER
+   * hard-fails `leia up` (a11y only matters to the cua e2e; leia must keep
+   * working on bus-less systems). The flag is read by chromium at browser
+   * process start, so this runs before spawn, never after.
+   *
+   * Restore semantics live in stop(): only a flag leia itself flipped
+   * (`set-by-leia`) is restored, and only when no cua daemon owns it.
+   */
+  _ensureA11yRecipe() {
+    if (process.env.LEIA_NO_FORCE_A11Y) {
+      console.warn("[chrome] a11y recipe disabled (LEIA_NO_FORCE_A11Y)");
+      return { flag: "skipped", spawnArg: null };
+    }
+    let value;
+    try {
+      const read = spawnSync("busctl", A11Y_FLAG_GET, { encoding: "utf8" });
+      if (read.status !== 0) throw new Error(read.stderr?.trim() || `exit ${read.status}`);
+      value = read.stdout.trim() === "b true";
+    } catch (err) {
+      console.warn(
+        `[chrome] a11y bus flag unreadable (${err.message}); the cua e2e cannot ` +
+          "see this browser — see docs/cua-e2e.md",
+      );
+      // Still add the spawn arg: alone it enables nothing, costs nothing, and
+      // self-heals if the bus flag gets set later.
+      return { flag: "unknown", spawnArg: FORCE_A11Y_ARG };
+    }
+    if (value) return { flag: "already", spawnArg: FORCE_A11Y_ARG };
+    try {
+      const set = spawnSync("busctl", A11Y_FLAG_SET("true"), { encoding: "utf8" });
+      if (set.status !== 0) throw new Error(set.stderr?.trim() || `exit ${set.status}`);
+    } catch (err) {
+      console.warn(
+        `[chrome] could not set the a11y bus flag (${err.message}); the cua e2e ` +
+          "cannot see this browser — see docs/cua-e2e.md",
+      );
+      return { flag: "unknown", spawnArg: FORCE_A11Y_ARG };
+    }
+    this._a11yPrior = false;
+    return { flag: "set-by-leia", prior: false, spawnArg: FORCE_A11Y_ARG };
+  }
+
+  /**
+   * Restore ScreenReaderEnabled only when leia flipped it (`_a11yPrior ===
+   * false`); a flag that was already true needs no restore (we changed
+   * nothing). While a cua daemon answers, leave it true — the daemon set the
+   * flag first and re-asserts it at startup; restoring `false` under it would
+   * break the next launch's a11y visibility. Best-effort, ignores errors.
+   */
+  _restoreA11yFlag() {
+    if (this._a11yPrior !== false) return;
+    this._a11yPrior = null;
+    const daemonActive = existsSync(CUA_DAEMON_SOCK) && spawnSync("cua-driver", ["status"]).status === 0;
+    if (daemonActive) {
+      console.warn("[chrome] cua daemon active — leaving ScreenReaderEnabled=true (daemon-owned)");
+      return;
+    }
+    try {
+      spawnSync("busctl", A11Y_FLAG_SET("false"));
+    } catch {}
+  }
+
   async _killChild() {
     try {
       this.child?.kill("SIGTERM");
@@ -243,13 +336,17 @@ export class ChromeAdapter extends BrowserAdapter {
   }
 
   async stop() {
-    this._closeTargetSocket();
-    const st = loadState();
-    const spawnedPid = this.child?.pid;
-    await this._killChildIfNeeded(st);
-    await sleep(400);
-    this._removeProfile(st);
-    if (spawnedPid || st?.browser === "chrome") clearState();
+    try {
+      this._closeTargetSocket();
+      const st = loadState();
+      const spawnedPid = this.child?.pid;
+      await this._killChildIfNeeded(st);
+      await sleep(400);
+      this._removeProfile(st);
+      if (spawnedPid || st?.browser === "chrome") clearState();
+    } finally {
+      this._restoreA11yFlag();
+    }
   }
 
   _closeTargetSocket() {

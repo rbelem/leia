@@ -19,3 +19,15 @@ nohup flatpak run org.mozilla.firefox --marionette --remote-debugging-port=9222 
 
 - `npm run build` → `dist/chrome`, `dist/firefox`
 - `npm test`, `npm run typecheck`
+- `LEIA_E2E=1 npm run test:e2e` — native permission-grant e2e via cua-driver (see docs/cua-e2e.md)
+
+## a11y recipe (chromium + AT-SPI)
+
+- cli/chrome.js forces the a11y activation recipe by default (session-bus
+  ScreenReaderEnabled pre-spawn + `--force-renderer-accessibility`) so
+  cua-driver e2e can see the browser; `LEIA_NO_FORCE_A11Y=1` opts out.
+  Rationale: docs/cua-e2e.md §"activation recipe".
+- Agent shells scrub DBUS_SESSION_BUS_ADDRESS/XDG_RUNTIME_DIR/WAYLAND_DISPLAY
+  from directly-spawned GUI binaries; if you launch chromium from an agent
+  shell, wrap it in a script that re-exports them (node child_process spawns
+  are unaffected).
