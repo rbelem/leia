@@ -16,8 +16,9 @@
  * (the harness reconnects to the bridge port every ~1s) or tear it down.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { BrowserAdapter } from "./adapter.js";
 import { loadState, saveState, clearState } from "./state.js";
@@ -51,6 +52,56 @@ const FORCE_A11Y_ARG = "--force-renderer-accessibility";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Flatpak wrapper detection (issue #21): a `--chrome-bin` whose content execs
+ * `flatpak run <app-id>` launches the browser inside a flatpak sandbox that
+ * OUTLIVES the wrapper pid and keeps a private /tmp. Returns the app-id
+ * ("org.chromium.Chromium") or null for plain binaries. Pure — exported for
+ * unit tests.
+ */
+export function parseFlatpakWrapper(source) {
+  const m = /flatpak\s+run\b/.exec(source ?? "");
+  if (!m) return null;
+  // The app-id is the first dotted token after `run` — skips intervening
+  // flags (`--user`, `--branch=stable`, …). Flatpak ids are dotted
+  // (reverse-DNS), so a dot is the discriminator against further flags.
+  for (const tok of source.slice(m.index + m[0].length).split(/\s+/)) {
+    if (/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)+$/.test(tok)) return tok;
+  }
+  return null;
+}
+
+function detectFlatpakWrapper(binPath) {
+  try {
+    if (!existsSync(binPath)) return null;
+    return parseFlatpakWrapper(readFileSync(binPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Durable profile root for flatpak sessions (host-visible in the sandbox via the home grant). */
+export function flatpakProfileRoot() {
+  return join(process.env.HOME ?? tmpdir(), ".local", "share", "leia", "profiles");
+}
+
+/**
+ * Profile dir for a new session. Flatpak mode: under ~/.local/share/leia
+ * (issue #21 gap 2 — the sandbox has no /tmp grant, so a /tmp profile dies
+ * with the sandbox tmpfs and wipes storage.local under a still-running
+ * browser; the home grant makes this root host-visible inside the sandbox).
+ * Plain mode: /tmp/opencode exactly as before. mkdtemp keeps concurrent
+ * sessions (lanes, parallel e2e) collision-free.
+ */
+export function makeProfileDir(flatpakAppId) {
+  if (flatpakAppId) {
+    const root = flatpakProfileRoot();
+    mkdirSync(root, { recursive: true });
+    return mkdtempSync(join(root, "leia-chrome-"));
+  }
+  return mkdtempSync(join("/tmp/opencode", "leia-chrome-"));
+}
+
 export class ChromeAdapter extends BrowserAdapter {
   constructor(opts = {}) {
     super(opts);
@@ -67,6 +118,11 @@ export class ChromeAdapter extends BrowserAdapter {
     // dies with the browser process and the bus flag is session-scoped
     // launcher state, not per-browser state.
     this._a11yPrior = null;
+    // Flatpak session bookkeeping (issue #21): app-id from the wrapper
+    // content, and the sandbox instance id resolved after spawn for surgical
+    // teardown. Null/null = plain binary, byte-for-byte today's behavior.
+    this.flatpakAppId = null;
+    this.flatpakInstanceId = null;
   }
 
   async start() {
@@ -83,7 +139,9 @@ export class ChromeAdapter extends BrowserAdapter {
       throw new Error(`dist/chrome missing — run \`npm run build -- --dev\` first`);
     }
 
-    this.profileDir = mkdtempSync(join("/tmp/opencode", "leia-chrome-"));
+    this.flatpakAppId = detectFlatpakWrapper(this.chromeBin);
+    await this._prepareFlatpakSession();
+    this.profileDir = makeProfileDir(this.flatpakAppId);
     const recipe = this._ensureA11yRecipe();
     const args = [
       `--user-data-dir=${this.profileDir}`,
@@ -106,14 +164,16 @@ export class ChromeAdapter extends BrowserAdapter {
     this.child.unref();
 
     const extId = await this._discoverExtensionId();
-    if (!extId) {
-      await this._killChild();
-      throw new Error("could not discover the extension id from the background service worker");
-    }
+    if (!extId) await this._failMissingExtension();
     this.extensionId = extId;
+    // The wrapper execs `flatpak run`, so child.pid IS the flatpak-run pid.
+    // Resolve OUR sandbox instance now (browser is up, so the instance is
+    // listed) — `down` needs it to kill the sandbox, not just the wrapper
+    // (issue #21 gap 1).
+    this.flatpakInstanceId = this.flatpakAppId ? this._resolveFlatpakInstance() : null;
 
     await this._openHarnessAndConnect();
-    saveState({ browser: "chrome", debugPort: this.debugPort, profileDir: this.profileDir, extensionId: extId, pid: this.child.pid });
+    this._persistState(extId);
     // Let the CLI process exit after `up` like the firefox path: unref the
     // bridge listener and the CDP socket so neither holds the event loop
     // open. One-shot commands re-bind the bridge; the harness wake
@@ -341,6 +401,12 @@ export class ChromeAdapter extends BrowserAdapter {
       const st = loadState();
       const spawnedPid = this.child?.pid;
       await this._killChildIfNeeded(st);
+      // Flatpak sandboxes outlive their wrapper pid (issue #21 gap 1): after
+      // the pid kill, surgically kill OUR instance and verify the debug port
+      // is actually free. On failure this throws BEFORE the profile/state
+      // cleanup — state.json stays for a retry, and the durable profile of a
+      // possibly-still-alive browser is not deleted underneath it.
+      await this._teardownFlatpak(st);
       await sleep(400);
       this._removeProfile(st);
       if (spawnedPid || st?.browser === "chrome") clearState();
@@ -364,6 +430,182 @@ export class ChromeAdapter extends BrowserAdapter {
         process.kill(st.pid, "SIGTERM");
       } catch {}
     }
+  }
+
+  // ----- flatpak lifecycle (issue #21) ------------------------------------
+
+  /** No-op for plain binaries; warns + reconciles stale state for flatpak. */
+  async _prepareFlatpakSession() {
+    if (!this.flatpakAppId) return;
+    console.warn(
+      `[chrome] flatpak mode: ${this.flatpakAppId} — durable profile under ` +
+        `${flatpakProfileRoot()}, teardown kills the sandbox instance (issue #21)`,
+    );
+    await this._reconcileStaleState();
+  }
+
+  /** Extension discovery failed: tear down what we spawned, then throw. */
+  async _failMissingExtension() {
+    // Resolve the instance while this.child is still known (pid matching).
+    if (this.flatpakAppId) this.flatpakInstanceId ??= this._resolveFlatpakInstance();
+    await this._killChild();
+    if (this.flatpakAppId) {
+      // The sandbox outlives the wrapper — kill it before bailing.
+      try {
+        await this._teardownFlatpak(null);
+      } catch {}
+    }
+    throw new Error("could not discover the extension id from the background service worker");
+  }
+
+  /** Persist the cross-invocation record. Optional flatpak fields stay absent for plain binaries. */
+  _persistState(extId) {
+    saveState({
+      browser: "chrome",
+      debugPort: this.debugPort,
+      profileDir: this.profileDir,
+      extensionId: extId,
+      pid: this.child.pid,
+      // state.json written by older versions (or for plain binaries) lacks
+      // the flatpak fields — every reader treats them as nullable.
+      ...(this.flatpakAppId
+        ? { flatpakAppId: this.flatpakAppId, instanceId: this.flatpakInstanceId }
+        : {}),
+    });
+  }
+
+  /**
+   * `flatpak ps -j` rows. Empty on any failure — teardown then degrades to
+   * the port-polling ladder instead of trusting a half-read inventory.
+   */
+  _flatpakRows() {
+    try {
+      const r = spawnSync("flatpak", ["ps", "-j"], { encoding: "utf8" });
+      if (r.status !== 0 || !r.stdout?.trim()) return [];
+      const rows = JSON.parse(r.stdout);
+      return Array.isArray(rows) ? rows : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Match our spawned child to its flatpak sandbox instance. The wrapper
+   * script `exec`s `flatpak run`, so child.pid is the flatpak-run pid —
+   * matched against the `pid` (wrapper) or `child-pid` (sandbox process)
+   * column, whichever this flatpak version populates. Falls back to the only
+   * listed instance of the app when the pid columns disagree with reality;
+   * never guesses among several (a wrong guess would kill someone else's
+   * browser).
+   */
+  _resolveFlatpakInstance() {
+    const rows = this._flatpakRows().filter((row) => row.application === this.flatpakAppId);
+    const mine = rows.find(
+      (row) => Number(row.pid) === this.child?.pid || Number(row["child-pid"]) === this.child?.pid,
+    );
+    if (mine) return String(mine.instance);
+    if (rows.length === 1) {
+      console.warn(
+        `[chrome] flatpak ps pid mismatch (child ${this.child?.pid} not listed) — ` +
+          `assuming the only ${this.flatpakAppId} instance ${rows[0].instance}`,
+      );
+      return String(rows[0].instance);
+    }
+    console.warn(
+      `[chrome] could not match pid ${this.child?.pid} to a ${this.flatpakAppId} instance ` +
+        `(${rows.length} listed) — teardown will poll the port and last-resort only if still bound`,
+    );
+    return null;
+  }
+
+  /** True while something answers CDP on the debug port. */
+  async _portAlive(port, timeoutMs = 800) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Poll until the port stops answering CDP (or the budget runs out). */
+  async _waitPortFree(port, budgetMs = 5000) {
+    const deadline = Date.now() + budgetMs;
+    while (Date.now() < deadline) {
+      if (!(await this._portAlive(port))) return true;
+      await sleep(250);
+    }
+    return !(await this._portAlive(port));
+  }
+
+  /**
+   * Surgical sandbox teardown (issue #21 gap 1). `flatpak kill <instance>`
+   * only ever targets OUR instance — never the app-id wholesale, because the
+   * user may have their own windows of the same app running. Ladder:
+   * instance kill → poll port → (still bound) loud last-resort app-id kill →
+   * poll → (still bound) throw, naming what to clean up by hand. A no-op for
+   * plain binaries (no flatpakAppId anywhere) — exactly today's behavior.
+   */
+  async _teardownFlatpak(st) {
+    const appId = this.flatpakAppId ?? (st?.browser === "chrome" ? st?.flatpakAppId : null);
+    if (!appId) return;
+    const instanceId = this.flatpakInstanceId ?? st?.instanceId ?? null;
+    const port = st?.debugPort ?? this.debugPort;
+    if (instanceId) {
+      const r = spawnSync("flatpak", ["kill", String(instanceId)], { encoding: "utf8" });
+      if (r.status !== 0) {
+        console.warn(
+          `[chrome] flatpak kill ${instanceId} failed (${r.stderr?.trim() || `exit ${r.status}`})`,
+        );
+      }
+    }
+    if (await this._waitPortFree(port)) return;
+    // Last resort: the instance kill did not free the port. Killing by
+    // app-id takes down EVERY instance of the app — including the user's own
+    // windows — so enumerate them loudly BEFORE pulling the trigger.
+    const victims = this._flatpakRows().filter((row) => row.application === appId);
+    console.warn(
+      `[chrome] debug port ${port} still bound after killing instance ${instanceId ?? "(unknown)"}` +
+        ` — LAST RESORT: killing ALL instances of ${appId}: ` +
+        (victims.map((v) => `${v.instance} (pid ${v.pid})`).join(", ") || "(none currently listed)"),
+    );
+    spawnSync("flatpak", ["kill", appId]);
+    if (await this._waitPortFree(port)) return;
+    throw new Error(
+      `flatpak teardown failed: debug port ${port} is still bound ` +
+        `(instance ${instanceId ?? "unknown"}, pid ${this.child?.pid ?? st?.pid ?? "?"}) — ` +
+        "inspect `flatpak ps` and free it manually; leia state kept for a retry",
+    );
+  }
+
+  /**
+   * Pre-spawn guard for flatpak `up` (issue #21 gap 1's double-bind): a live
+   * session on the recorded port would leave `up` probing SOMEONE ELSE'S CDP
+   * server (possibly an orphan), so refuse; a dead one gets its profile
+   * swept (crash left it — clean `down` removes it) and its state cleared.
+   * Plain binaries keep today's behavior.
+   */
+  async _reconcileStaleState() {
+    const st = loadState();
+    if (st?.browser !== "chrome") return;
+    const port = st.debugPort ?? this.debugPort;
+    if (await this._portAlive(port)) {
+      throw new Error(
+        `a leia chrome session is already running (pid ${st.pid ?? "?"}, port ${port}) — run \`leia down\` first`,
+      );
+    }
+    console.warn(
+      `[chrome] stale state from a dead session (pid ${st.pid ?? "?"}, port ${port}) — ` +
+        "sweeping its profile before a fresh spawn",
+    );
+    if (st.profileDir) {
+      try {
+        rmSync(st.profileDir, { recursive: true, force: true });
+      } catch {}
+    }
+    clearState();
   }
 
   _removeProfile(st) {

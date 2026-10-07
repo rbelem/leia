@@ -20,6 +20,10 @@ nohup flatpak run org.mozilla.firefox --marionette --remote-debugging-port=9222 
 - `npm run build` → `dist/chrome`, `dist/firefox`
 - `npm test`, `npm run typecheck`
 - `LEIA_E2E=1 npm run test:e2e` — native permission-grant e2e via cua-driver (see docs/cua-e2e.md)
+- leia-ctl flatpak chromium (`--chrome-bin <flatpak-run wrapper>`): durable
+  profile under `~/.local/share/leia/profiles`, `down` does surgical
+  `flatpak kill <instanceId>` + port verification. Set `LEIA_STATE_DIR` when
+  running parallel leia sessions (the state file is otherwise global).
 
 ## a11y recipe (chromium + AT-SPI)
 

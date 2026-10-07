@@ -238,6 +238,14 @@ async function optionsSetKey(ctx, { rest }) {
   await ensureConnected(ctx.adapter);
   const [provider, key] = rest;
   if (!provider || !key) return { ok: false, error: "options:set-key requires <provider> <key>" };
+  // This path writes storage.local without the options page's gesture-bound
+  // permissions.request (c22f7b2) — optional HOST permissions are not granted
+  // here (issue #21 note 3). See docs/permissions.md for the options-page and
+  // developerPrivate grant flows.
+  console.warn(
+    `[options] note: '${provider}' key saved without the options-page gesture flow — ` +
+      "host-permission grants still need the options page (docs/permissions.md)",
+  );
   return ctx.adapter.sendCommand("options:set-key", { provider, key });
 }
 

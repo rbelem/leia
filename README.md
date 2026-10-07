@@ -37,6 +37,19 @@ docs/             permissions, engine contract, platform floor, spikes
 | `npm run build` | esbuild → `dist/chrome` + `dist/firefox` |
 | `npm run test:e2e` | native permission-grant e2e via cua-driver (needs chromium + cua-driver 0.33.x + at-spi2-core on a session bus; arm with `LEIA_E2E=1` — [docs/cua-e2e.md](docs/cua-e2e.md)) |
 
+### leia-ctl on flatpak chromium
+
+`node cli/index.js up --chrome-bin <wrapper>` detects a `flatpak run <app-id>`
+wrapper and adapts: the profile lives under `~/.local/share/leia/profiles/`
+(the sandbox has no `/tmp` grant; the home grant makes this host-visible), and
+`down` kills the sandbox **instance** (`flatpak kill <instanceId>` — never the
+app-id, your own windows of the same app are safe), then verifies the debug
+port is actually free and fails loudly if not. Clean `down` still removes the
+profile; a crash leaves it, and the next flatpak `up` sweeps stale state with
+a warning. `LEIA_STATE_DIR` isolates the state file for parallel sessions.
+Harness-driven `options:set-key` does not grant optional host permissions —
+see [docs/permissions.md](docs/permissions.md).
+
 ## Load in Chrome
 
 ```sh
