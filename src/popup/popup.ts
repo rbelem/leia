@@ -53,6 +53,7 @@ const FAMILY_LABELS: Record<string, string> = {
   xai: "xAI",
   mistral: "Mistral",
   gemini: "Gemini",
+  qwencloud: "QwenCloud",
   azure: "Azure",
   "kitten-local": "Kitten (local)",
 };

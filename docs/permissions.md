@@ -11,11 +11,16 @@ Decisions locked in T1 (council amendments). Source of truth:
 | `storage` | required | install | `chrome.storage.local` for API keys (T2). No warning |
 | `host_permissions` | `http://127.0.0.1/*`, `http://localhost/*`, `http://[::1]/*` | install (mandatory) | the options page probes local voice servers directly (ADR-0006) — loopback-only, keyless, so no prompt gate would make sense; listed alongside `<all_urls>` in the install warning |
 | content-script `matches` | `<all_urls>` | install | content script + floating bar must be present on every page. Drives the install-time warning |
-| `optional_host_permissions` | `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://generativelanguage.googleapis.com/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003). **No remote host is asked for at install** |
+| `optional_host_permissions` | `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://generativelanguage.googleapis.com/*`, `https://maas.qwencloudapi.com/*`, `https://*.aliyuncs.com/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003). **No remote host is asked for at install**. `*.aliyuncs.com` covers QwenCloud's OSS audio-result hosts |
 
 Rationale: reading the page is the product, so `<all_urls>` is unavoidable at
 install; every *remote* network destination the extension will ever touch is
-optional and requested on first use. The loopback hosts are the exception,
+optional and requested on first use (the options-page save button calls
+`permissions.request` with the provider's `originPatterns`). The request is
+not cosmetic: some Chromium builds (flatpak chromium 154 observed) CORS-wall
+extension-page fetches to ungranted origins even when the origin is listed in
+`optional_host_permissions` — the engine fetch then fails with "Failed to
+fetch" despite a saved key. The loopback hosts are the exception,
 deliberately mandatory: the options page health-probes local servers itself
 (ADR-0006), and a first-use permission prompt for the user's own machine
 would be noise. They widen the install-time warning's host list but grant no
@@ -41,7 +46,7 @@ access beyond this machine.
     kitten-local asset origins (`https://raw.githubusercontent.com`,
     `https://huggingface.co`), **and every provider API origin** from
     `optional_host_permissions` (minimax, elevenlabs, openai, xai, mistral,
-    gemini, azure/speech.microsoft, aliyuncs). These MUST be listed:
+    gemini, qwencloudapi, azure/speech.microsoft, aliyuncs). These MUST be listed:
     `connect-src` governs the runtime `fetch()` both the kitten worker (model
     download) and the provider TTS engines (audio synthesis) use. A
     loopback-only `connect-src` makes every engine fail at runtime with

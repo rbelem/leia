@@ -139,6 +139,7 @@ toward a provider.
 | `xai` | xAI Grok TTS (#01, `src/audio/engine-xai.ts`) | false | false | paid | provider | current |
 | `mistral` | Mistral Voxtral TTS (#02, `src/audio/engine-mistral.ts`) | false | false | paid | provider | current |
 | `gemini` | Google Gemini TTS (#03, `src/audio/engine-gemini.ts`) | false | false | paid | provider | current |
+| `qwencloud` | QwenCloud Qwen3-TTS (`src/audio/engine-qwencloud.ts`) — POST synth → WAV URL download | false | false | paid | provider | current |
 | `kitten-local` | KittenTTS on-device (ticket 06, `src/audio/kitten/engine-kitten.ts`) | false | false | free | local | current |
 | `local-kokoro` | Kokoro-FastAPI (T11, #12, ADR-0004/0006, `src/audio/engine-local.ts`) | true | false | free | local | current |
 | `local-piper` | sherpa-onnx / Piper shim (T11, #12, `shims/`) | false | false | free | local | current |

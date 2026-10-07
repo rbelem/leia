@@ -119,6 +119,13 @@ if (document.getElementById("providers")) {
         const items: Record<string, unknown> = { [def.keyStorage]: key };
         if (def.regionStorage && regionInput) items[def.regionStorage] = regionInput.value.trim();
         await browser.storage.local.set(items);
+        // Origin grant rides the save gesture (docs/permissions.md "first use,
+        // prompted"): without it some builds CORS-wall the engine fetch even
+        // with the key saved. Denied grant still saves the key — several
+        // engines' APIs are CORS-permissive, and the row shows key state.
+        if (key && def.originPatterns) {
+          await browser.permissions.request({ origins: [...def.originPatterns] }).catch(() => undefined);
+        }
         state.textContent = key ? `saved ${maskKey(key)}` : "no key";
         state.classList.toggle("ok", key.length > 0);
       };

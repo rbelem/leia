@@ -17,6 +17,7 @@ import { OpenAIEngine } from "../audio/engine-openai";
 import { XaiEngine } from "../audio/engine-xai";
 import { MistralEngine } from "../audio/engine-mistral";
 import { GeminiEngine } from "../audio/engine-gemini";
+import { QwenCloudEngine } from "../audio/engine-qwencloud";
 import { KittenEngine } from "../audio/kitten/engine-kitten";
 import { LocalEngine } from "../audio/engine-local";
 import { BUILT_IN_PROFILES, probeProfile } from "../audio/local-profiles";
@@ -44,6 +45,7 @@ engine.register("openai", new OpenAIEngine({ getKey: readProviderKey("leia:setti
 engine.register("xai", new XaiEngine({ getKey: readProviderKey("leia:settings:xaiKey") }));
 engine.register("mistral", new MistralEngine({ getKey: readProviderKey("leia:settings:mistralKey") }));
 engine.register("gemini", new GeminiEngine({ getKey: readProviderKey("leia:settings:geminiKey") }));
+engine.register("qwencloud", new QwenCloudEngine({ getKey: readProviderKey("leia:settings:qwencloudKey") }));
 // kitten-local (ticket 06): lazy — the model worker spawns on first speak.
 engine.register("kitten-local", new KittenEngine());
 

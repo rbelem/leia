@@ -13,6 +13,7 @@ import { AZURE_DEFAULT_REGION, AZURE_REGIONS } from "../src/audio/engine-azure";
 const h = vi.hoisted(() => ({
   storage: {} as Record<string, unknown>,
   reloadCalls: 0,
+  permissionRequests: [] as Array<{ origins?: string[] }>,
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -20,6 +21,12 @@ vi.mock("webextension-polyfill", () => ({
     runtime: {
       reload: () => {
         h.reloadCalls += 1;
+      },
+    },
+    permissions: {
+      request: async (perms: { origins?: string[] }) => {
+        h.permissionRequests.push(perms);
+        return true;
       },
     },
     storage: {
@@ -74,6 +81,7 @@ const providerRow = (id: string): HTMLElement =>
 beforeEach(() => {
   for (const k of Object.keys(h.storage)) delete h.storage[k];
   h.reloadCalls = 0;
+  h.permissionRequests.length = 0;
   buildOptionsDom();
   vi.stubGlobal(
     "fetch",
@@ -106,7 +114,7 @@ describe("initial render", () => {
     expect([...preset.options].map((o) => o.value)).toEqual(BUILT_IN_PROFILES.map((p) => p.id));
 
     const rows = [...q("providers").querySelectorAll<HTMLElement>(".provider")];
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(8);
     expect(providerRow("minimax").querySelector(".provider-state")!.textContent).toBe("no key");
     // Azure renders its region as a dropdown with the default preselected.
     const azure = providerRow("azure").querySelector<HTMLSelectElement>("select.region")!;
@@ -125,6 +133,34 @@ describe("initial render", () => {
     expect(minimax.querySelector(".provider-state")!.classList.contains("ok")).toBe(true);
     expect(minimax.querySelector<HTMLInputElement>(".key-input")!.value).toBe("sk-abcd1234");
     expect(providerRow("azure").querySelector<HTMLSelectElement>("select.region")!.value).toBe("japaneast");
+  });
+
+  it("saving a key requests the provider's optional host permissions (docs/permissions.md)", async () => {
+    await loadOptions();
+
+    const qwen = providerRow("qwencloud");
+    const input = qwen.querySelector<HTMLInputElement>(".key-input")!;
+    input.value = "sk-test-9999";
+    qwen.querySelector<HTMLButtonElement>(".save")!.click();
+    await settle();
+
+    expect(h.storage["leia:settings:qwencloudKey"]).toBe("sk-test-9999");
+    expect(h.permissionRequests).toEqual([
+      { origins: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*"] },
+    ]);
+  });
+
+  it("clearing a key saves the empty value without requesting permissions", async () => {
+    h.storage["leia:settings:minimaxKey"] = "sk-abcd1234";
+    await loadOptions();
+
+    const minimax = providerRow("minimax");
+    minimax.querySelector<HTMLInputElement>(".key-input")!.value = "";
+    minimax.querySelector<HTMLButtonElement>(".save")!.click();
+    await settle();
+
+    expect(h.storage["leia:settings:minimaxKey"]).toBe("");
+    expect(h.permissionRequests).toEqual([]);
   });
 });
 

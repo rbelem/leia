@@ -16,25 +16,30 @@ export interface ProviderDef {
   hint?: string;
   /** When set, the region renders as a dropdown (default preselected) instead of free text. */
   regionOptions?: { list: readonly string[]; default: string };
+  /** Origins requested as optional host permissions when a key is saved (docs/permissions.md). */
+  originPatterns?: readonly string[];
 }
 
 /** BYO-key provider catalog — storage keys per docs/ADR-0003 settings shape. */
 export const PROVIDERS: ProviderDef[] = [
-  { id: "minimax", label: "MiniMax", keyStorage: "leia:settings:minimaxKey" },
-  { id: "elevenlabs", label: "ElevenLabs", keyStorage: "leia:settings:elevenlabsKey" },
-  { id: "openai", label: "OpenAI", keyStorage: "leia:settings:openaiKey" },
-  { id: "xai", label: "xAI", keyStorage: "leia:settings:xaiKey" },
+  { id: "minimax", label: "MiniMax", keyStorage: "leia:settings:minimaxKey", originPatterns: ["https://api.minimax.io/*"] },
+  { id: "elevenlabs", label: "ElevenLabs", keyStorage: "leia:settings:elevenlabsKey", originPatterns: ["https://api.elevenlabs.io/*"] },
+  { id: "openai", label: "OpenAI", keyStorage: "leia:settings:openaiKey", originPatterns: ["https://api.openai.com/*"] },
+  { id: "xai", label: "xAI", keyStorage: "leia:settings:xaiKey", originPatterns: ["https://api.x.ai/*"] },
   {
     id: "mistral",
     label: "Mistral",
     keyStorage: "leia:settings:mistralKey",
+    originPatterns: ["https://api.mistral.ai/*"],
     hint: "Mistral voices are the saved voices on your account (create in the Mistral console / Le Chat voice library) — they load automatically in the picker.",
   },
-  { id: "gemini", label: "Gemini", keyStorage: "leia:settings:geminiKey" },
+  { id: "gemini", label: "Gemini", keyStorage: "leia:settings:geminiKey", originPatterns: ["https://generativelanguage.googleapis.com/*"] },
+  { id: "qwencloud", label: "QwenCloud", keyStorage: "leia:settings:qwencloudKey", originPatterns: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*"] },
   {
     id: "azure",
     label: "Azure",
     keyStorage: "leia:settings:azureKey",
+    originPatterns: ["https://*.speech.microsoft.com/*"],
     regionStorage: "leia:settings:azureRegion",
     regionOptions: { list: AZURE_REGIONS, default: AZURE_DEFAULT_REGION },
   },
