@@ -34,7 +34,7 @@ export const PROVIDERS: ProviderDef[] = [
     hint: "Mistral voices are the saved voices on your account (create in the Mistral console / Le Chat voice library) — they load automatically in the picker.",
   },
   { id: "gemini", label: "Gemini", keyStorage: "leia:settings:geminiKey", originPatterns: ["https://generativelanguage.googleapis.com/*"] },
-  { id: "qwencloud", label: "QwenCloud", keyStorage: "leia:settings:qwencloudKey", originPatterns: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*"] },
+  { id: "qwencloud", label: "QwenCloud", keyStorage: "leia:settings:qwencloudKey", originPatterns: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*", "wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*"] },
   {
     id: "azure",
     label: "Azure",

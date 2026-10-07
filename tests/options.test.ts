@@ -146,7 +146,7 @@ describe("initial render", () => {
 
     expect(h.storage["leia:settings:qwencloudKey"]).toBe("sk-test-9999");
     expect(h.permissionRequests).toEqual([
-      { origins: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*"] },
+      { origins: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*", "wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*"] },
     ]);
   });
 

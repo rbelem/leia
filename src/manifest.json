@@ -28,7 +28,7 @@
     "open_in_tab": true
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; default-src 'self'; connect-src 'self' ws://127.0.0.1:9333 ws://localhost:9333 http://127.0.0.1:* http://localhost:* http://[::1]:* https://raw.githubusercontent.com https://huggingface.co https://api.minimax.io https://api.elevenlabs.io https://api.openai.com https://api.x.ai https://api.mistral.ai https://generativelanguage.googleapis.com https://maas.qwencloudapi.com https://*.speech.microsoft.com https://*.aliyuncs.com; media-src 'self' blob:"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; default-src 'self'; connect-src 'self' ws://127.0.0.1:9333 ws://localhost:9333 http://127.0.0.1:* http://localhost:* http://[::1]:* https://raw.githubusercontent.com https://huggingface.co https://api.minimax.io https://api.elevenlabs.io https://api.openai.com https://api.x.ai https://api.mistral.ai https://generativelanguage.googleapis.com https://maas.qwencloudapi.com https://*.speech.microsoft.com https://*.aliyuncs.com wss://token-plan.ap-southeast-1.maas.aliyuncs.com; media-src 'self' blob:"
   },
   "offscreen": {
     "scripts": ["offscreen/audio.js"],
@@ -39,7 +39,7 @@
     { "matches": ["<all_urls>"], "js": ["content/index.js"], "run_at": "document_idle" },
     { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
   ],
-  "permissions": ["activeTab", "storage", "offscreen", "alarms", "scripting"],
+  "permissions": ["activeTab", "storage", "offscreen", "alarms", "scripting", "declarativeNetRequest"],
   "commands": {
     "toggle-read": {
       "suggested_key": { "default": "Alt+Shift+L" },
@@ -56,6 +56,7 @@
     "https://api.mistral.ai/*",
     "https://generativelanguage.googleapis.com/*",
     "https://maas.qwencloudapi.com/*",
-    "https://*.aliyuncs.com/*"
+    "https://*.aliyuncs.com/*",
+    "wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*"
   ]
 }

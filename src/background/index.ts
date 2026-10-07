@@ -13,6 +13,7 @@ import { chromeAudioEngine, audioClockMs, isChrome, resolveAudioEngine } from ".
 import { LOCAL_PROFILES_STORAGE_KEY } from "../audio/local-profiles";
 import type { KeystoreSnapshot } from "../audio/keystore";
 import { PROVIDERS } from "../settings/providers";
+import { installWsAuthRule, removeWsAuthRule, type DnrApi } from "../audio/engine-qwencloud";
 import { ReaderSession, type SessionEvent, type TokenText } from "../reader/session";
 import type { EngineEvent, TextEngine } from "../reader/contract";
 import { ResumeStore } from "./resume";
@@ -324,6 +325,19 @@ async function handlePreview(msg: RouterMessage): Promise<RouterReply> {
   const { voiceName, family } = msg as { voiceName?: string | null; family?: string };
   try {
     if (family) engine.selectFamily?.(family);
+    else {
+      // The offscreen doc a previous interaction warmed may be gone (Chrome
+      // recycles idle offscreen docs; the SW idles too), and a fresh doc
+      // boots on the registration-order default family. The read path
+      // re-pins on start/resume; previews must too, or they land on
+      // web-speech no matter the pinned provider. ensureFamily awaits the
+      // offscreen ACK, so the speak forward below cannot outrun the switch.
+      const s = await getSession();
+      const pinned = s.status().settings.engine ?? null;
+      if (pinned) {
+        await (engine as TextEngine & { ensureFamily?: (f: string) => Promise<boolean> }).ensureFamily?.(pinned);
+      }
+    }
     for await (const ev of engine.speak(PREVIEW_SAMPLE, PREVIEW_SPEAK_ID, {
       voiceName: voiceName ?? null,
       rate: 1,
@@ -526,11 +540,49 @@ async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | un
   return undefined;
 }
 
-async function handleBackgroundMessage(msg: RouterMessage): Promise<RouterReply | undefined> {
+/** Content-script senders always carry a `sender.tab`; extension pages don't. */
+function fromExtensionPage(sender: unknown): boolean {
+  return !(typeof sender === "object" && sender !== null && "tab" in sender && (sender as { tab: unknown }).tab != null);
+}
+
+/**
+ * QwenCloud plan-key WS auth (token-plan gateway). The offscreen document
+ * hosts the audio engines but Chrome does not expose declarativeNetRequest
+ * there, so the engine delegates the session-rule install/remove to the SW.
+ * The key rides one same-extension runtime message and lands only in the
+ * session rule (cleared on remove / browser restart). Extension-internal
+ * pages only — content-script senders are rejected.
+ */
+async function handleWsAuth(msg: RouterMessage, sender: unknown): Promise<RouterReply | undefined> {
+  if (msg.type !== "leia:ws-auth") return undefined;
+  if (!fromExtensionPage(sender)) {
+    return { ok: false, replyType: "leia:ws-auth", error: "content scripts may not touch the WS auth rule" };
+  }
+  const dnr = (browser as unknown as { declarativeNetRequest?: DnrApi }).declarativeNetRequest;
+  if (!dnr) return { ok: false, replyType: "leia:ws-auth", error: "declarativeNetRequest unavailable" };
+  const op = msg.op;
+  try {
+    if (op === "install" && typeof msg.key === "string" && msg.key.length > 0) {
+      await installWsAuthRule(dnr, msg.key);
+    } else if (op === "remove") {
+      await removeWsAuthRule(dnr);
+    } else {
+      return { ok: false, replyType: "leia:ws-auth", error: "bad leia:ws-auth message" };
+    }
+  } catch (err) {
+    return { ok: false, replyType: "leia:ws-auth", error: String(err) };
+  }
+  return { ok: true, replyType: "leia:ws-auth" };
+}
+
+async function handleBackgroundMessage(msg: RouterMessage, sender: unknown): Promise<RouterReply | undefined> {
   if (msg.type === "leia:page-info") return handlePageInfo();
 
   const readerReply = (await handleReaderSession(msg)) ?? (await handleReaderPrefs(msg));
   if (readerReply !== undefined) return readerReply;
+
+  const wsAuthReply = await handleWsAuth(msg, sender);
+  if (wsAuthReply !== undefined) return wsAuthReply;
 
   const audioReply = await handleAudioDispatch(msg);
   if (audioReply !== undefined) return audioReply;
@@ -547,7 +599,7 @@ async function handleBackgroundMessage(msg: RouterMessage): Promise<RouterReply 
 // never claims reply channels it doesn't answer. The relays move here from
 // the dispatchers because their senders (offscreen events, probe streams)
 // expect the port to close immediately, not hang open on a promised reply.
-addReplyListener((msg: unknown) => {
+addReplyListener((msg: unknown, sender: unknown) => {
   if (!isRouterMessage(msg)) return undefined;
   // Audio events from the Chrome offscreen document (ADR-0002). The engine
   // event rides the `event` field: the wire `type` is the routing key, the
@@ -567,7 +619,7 @@ addReplyListener((msg: unknown) => {
   // whichever arrives first. Firefox has no offscreen doc, so the async
   // body below answers via audioClockMs().
   if (msg.type === "leia:audio:clock" && isChrome()) return undefined;
-  return handleBackgroundMessage(msg);
+  return handleBackgroundMessage(msg, sender);
 });
 
 // --- Keyboard shortcut (T18): toggle reading. Configurable in

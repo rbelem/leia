@@ -11,7 +11,7 @@ Decisions locked in T1 (council amendments). Source of truth:
 | `storage` | required | install | `chrome.storage.local` for API keys (T2). No warning |
 | `host_permissions` | `http://127.0.0.1/*`, `http://localhost/*`, `http://[::1]/*` | install (mandatory) | the options page probes local voice servers directly (ADR-0006) — loopback-only, keyless, so no prompt gate would make sense; listed alongside `<all_urls>` in the install warning |
 | content-script `matches` | `<all_urls>` | install | content script + floating bar must be present on every page. Drives the install-time warning |
-| `optional_host_permissions` | `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://generativelanguage.googleapis.com/*`, `https://maas.qwencloudapi.com/*`, `https://*.aliyuncs.com/*`, `https://*.speech.microsoft.com/*` | first use, prompted | provider APIs (ADR-0003). **No remote host is asked for at install**. `*.aliyuncs.com` covers QwenCloud's OSS audio-result hosts |
+| `optional_host_permissions` | `https://api.openai.com/*`, `https://api.elevenlabs.io/*`, `https://api.x.ai/*`, `https://api.mistral.ai/*`, `https://generativelanguage.googleapis.com/*`, `https://maas.qwencloudapi.com/*`, `https://*.aliyuncs.com/*`, `https://*.speech.microsoft.com/*`, `wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*` | first use, prompted | provider APIs (ADR-0003). **No remote host is asked for at install**. `*.aliyuncs.com` covers QwenCloud's OSS audio-result hosts; the `wss://` token-plan pattern grants the QwenCloud plan-key WebSocket (DNR header injection needs host permission) |
 
 Rationale: reading the page is the product, so `<all_urls>` is unavoidable at
 install; every *remote* network destination the extension will ever touch is
@@ -46,7 +46,9 @@ access beyond this machine.
     kitten-local asset origins (`https://raw.githubusercontent.com`,
     `https://huggingface.co`), **and every provider API origin** from
     `optional_host_permissions` (minimax, elevenlabs, openai, xai, mistral,
-    gemini, qwencloudapi, azure/speech.microsoft, aliyuncs). These MUST be listed:
+    gemini, qwencloudapi, azure/speech.microsoft, aliyuncs,
+    `wss://token-plan.ap-southeast-1.maas.aliyuncs.com` for the QwenCloud
+    plan-key WebSocket). These MUST be listed:
     `connect-src` governs the runtime `fetch()` both the kitten worker (model
     download) and the provider TTS engines (audio synthesis) use. A
     loopback-only `connect-src` makes every engine fail at runtime with

@@ -23,10 +23,10 @@
  */
 import browser from "webextension-polyfill";
 
-export function addReplyListener(handler: (msg: unknown) => unknown): void {
+export function addReplyListener(handler: (msg: unknown, sender: unknown) => unknown): void {
   browser.runtime.onMessage.addListener(
-    (msg: unknown, _sender: unknown, sendResponse?: (response?: unknown) => void): boolean => {
-      const reply = handler(msg);
+    (msg: unknown, sender: unknown, sendResponse?: (response?: unknown) => void): boolean => {
+      const reply = handler(msg, sender);
       if (reply === undefined) return false; // unhandled: no reply — don't race the context that owns it
       Promise.resolve(reply).then((value) => {
         if (value !== undefined) sendResponse?.(value);

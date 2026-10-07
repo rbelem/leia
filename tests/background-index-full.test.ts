@@ -40,6 +40,8 @@ const state = vi.hoisted(() => ({
   speakErrorMessage: "",
   familiesResult: [{ family: "web-speech" }] as unknown,
   selectFamilyCalls: [] as string[],
+  ensureFamilyCalls: [] as string[],
+  ensureFamilyResult: undefined as boolean | undefined,
   speakCalls: [] as Array<{ text: string; speakId: number; options: SpeakOptions }>,
   clockValue: 777 as number | null,
   /** Set by resolveAudioEngine at import; the tests mutate it. */
@@ -192,6 +194,10 @@ vi.mock("../src/audio/owner", async () => {
           if (c) c.stream.closeCancelled({ type: "cancelled", speakId: c.speakId });
         },
         selectFamily: (family: string) => void state.selectFamilyCalls.push(family),
+        ensureFamily: async (family: string) => {
+          state.ensureFamilyCalls.push(family);
+          return state.ensureFamilyResult ?? true;
+        },
         families: () => state.familiesResult,
       };
       state.engine = engine;
@@ -572,6 +578,15 @@ describe("preview, prefs, status, and voices", () => {
     state.script = (speakId) => [startEvent(speakId), endEvent(speakId)];
     await dispatch({ type: "leia:reader:preview", family: "minimax" });
     expect(state.selectFamilyCalls).toContain("minimax");
+  });
+
+  it("re-pins the session's family when the preview carries none (recycled offscreen doc)", async () => {
+    state.script = (speakId) => [startEvent(speakId), endEvent(speakId)];
+    await dispatch({ type: "leia:reader:prefs", engine: "qwencloud" });
+    state.ensureFamilyCalls.length = 0;
+    const r = await dispatch({ type: "leia:reader:preview", voiceName: "longanlingxin" });
+    expect(r.reply).toEqual({ ok: true, replyType: "leia:reader:preview" });
+    expect(state.ensureFamilyCalls).toContain("qwencloud");
   });
 
   it("fails the preview when the engine reports an error event instead of throwing", async () => {

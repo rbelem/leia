@@ -72,7 +72,7 @@ permission when you save the key):
 | xAI (Grok) | raw MP3, 28 voices, `eve` default |
 | Mistral (Voxtral) | voices are your account's saved voices, fetched live |
 | Gemini | PCM → WAV, 30 voices, `Kore` default |
-| QwenCloud (Qwen3-TTS) | DashScope API — JSON envelope → OSS WAV download, 10 voices, `Cherry` default |
+| QwenCloud (Qwen3-TTS) | DashScope API — JSON envelope → OSS WAV download, 10 voices, `Cherry` default. Plan keys (`sk-sp-…`) instead use the token-plan WebSocket task protocol (`qwen-audio-3.0-tts-plus`, voices `longanlingxin`/`longanlufeng`), authenticated via a DNR session rule that sets the WS handshake `Authorization` header |
 
 **On-device** — Kitten (nano) runs entirely in the browser via ONNX Runtime
 Web, free and offline-capable. First use downloads ~25 MB of model files —
