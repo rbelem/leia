@@ -235,6 +235,20 @@ export class ProxyEngine implements TextEngine {
     return this.fams ?? [];
   }
 
+  /**
+   * Offscreen hub per-family traffic (harness audio:stats dev read). Firefox
+   * answers from its own hub via the background router; Chrome forwards.
+   */
+  async stats(): Promise<Record<string, Record<string, unknown>> | null> {
+    try {
+      await ensureOffscreen();
+      const reply = await browser.runtime.sendMessage({ type: "leia:audio:stats" });
+      return (reply ?? null) as Record<string, Record<string, unknown>> | null;
+    } catch {
+      return null;
+    }
+  }
+
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
     const current = this.current;
     const stream = new EventStream<EngineEvent>();

@@ -91,6 +91,7 @@ export class FishAudioEngine implements TextEngine {
    * key that synthesized it so a key change can't serve stale audio. */
   private cache: { apiKey: string; cacheKey: string; bytes: Uint8Array } | null = null;
   private cacheEpoch = 0;
+  private statsAcc = { speak: 0, prefetch: 0, cacheHits: 0 };
 
   constructor(opts: FishAudioEngineOptions) {
     this.getKey = opts.getKey;
@@ -131,6 +132,7 @@ export class FishAudioEngine implements TextEngine {
   }
 
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
+    this.statsAcc.speak += 1;
     const stream = new EventStream<EngineEvent>();
     const wasActive = this.active;
     this.active = { speakId, stream, playback: null };
@@ -162,6 +164,7 @@ export class FishAudioEngine implements TextEngine {
    * measured) as an audible pause between sentences.
    */
   async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    this.statsAcc.prefetch += 1;
     const key = await this.getKey();
     if (!key) return;
     const epoch = this.cacheEpoch;
@@ -284,8 +287,17 @@ export class FishAudioEngine implements TextEngine {
     const entry = this.cache;
     if (!entry) return null;
     const match = entry.apiKey === apiKey && entry.cacheKey === this.cacheKey(text, options);
-    if (!match) this.cache = null;
-    return match ? entry.bytes : null;
+    if (!match) {
+      this.cache = null;
+      return null;
+    }
+    this.statsAcc.cacheHits += 1;
+    return entry.bytes;
+  }
+
+  /** Dev diagnostics (harness audio:stats): pipelining hit-rate at a glance. */
+  stats(): Record<string, number> {
+    return { ...this.statsAcc };
   }
 }
 

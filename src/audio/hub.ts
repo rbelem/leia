@@ -30,6 +30,9 @@ export class EngineHub implements TextEngine {
   private cancelTarget: TextEngine | null = null;
   /** Late-registration hook (ADR-0006 local servers that come online after boot); see ensureFamily. */
   private rescan: (() => Promise<void>) | null = null;
+  /** Per-family traffic for the harness audio:stats dev read. */
+  private speakCounts: Record<string, number> = {};
+  private prefetchCounts: Record<string, number> = {};
 
   register(family: string, engine: TextEngine, opts: { default?: boolean } = {}): void {
     this.engines.set(family, engine);
@@ -114,6 +117,7 @@ export class EngineHub implements TextEngine {
 
   speak(text: string, speakId: number, options: SpeakOptions): AsyncIterable<EngineEvent> {
     if (!this.current) throw new Error("no engine registered");
+    this.speakCounts[this.current.family] = (this.speakCounts[this.current.family] ?? 0) + 1;
     this.cancelTarget = this.current;
     return this.current.speak(text, speakId, options);
   }
@@ -142,9 +146,32 @@ export class EngineHub implements TextEngine {
   /** Forward pipelining to the current engine (ADR-0003); a plain engine — or no engine — is a no-op. Never throws. */
   async prefetch(text: string, options: SpeakOptions): Promise<void> {
     try {
+      if (this.current) {
+        this.prefetchCounts[this.current.family] = (this.prefetchCounts[this.current.family] ?? 0) + 1;
+      }
       await this.current?.prefetch?.(text, options);
     } catch {
       // Pipelining is best-effort; a failing prefetch surfaces on speak().
     }
+  }
+
+  /**
+   * Per-family traffic for the harness audio:stats dev read — speak/prefetch
+   * counted here, engine-specific counters (pipelining cache hits) merged in
+   * when an engine reports them.
+   */
+  stats(): Record<string, Record<string, unknown>> {
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const family of this.order) {
+      const engine = this.engines.get(family) as
+        | (TextEngine & { stats?: () => Record<string, unknown> })
+        | undefined;
+      out[family] = {
+        speak: this.speakCounts[family] ?? 0,
+        prefetch: this.prefetchCounts[family] ?? 0,
+        ...(engine?.stats?.() ?? {}),
+      };
+    }
+    return out;
   }
 }

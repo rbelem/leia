@@ -280,6 +280,10 @@ async function audioFamilies(ctx) {
   await ensureConnected(ctx.adapter);
   return ctx.adapter.sendCommand("audio:families");
 }
+async function audioStats(ctx) {
+  await ensureConnected(ctx.adapter);
+  return ctx.adapter.sendCommand("audio:stats");
+}
 async function audioClock(ctx) {
   await ensureConnected(ctx.adapter);
   return ctx.adapter.sendCommand("audio:clock");
@@ -352,6 +356,7 @@ const commands = {
   "probe:tts": probeTts,
   "probe:ff": probeFf,
   "audio:families": audioFamilies,
+  "audio:stats": audioStats,
   "audio:clock": audioClock,
   ping,
   events,

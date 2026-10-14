@@ -510,6 +510,11 @@ browser.runtime.sendMessage = (async (msg: unknown, ...rest: unknown[]) => {
 
 /** Settings/family disclosure + audio-owner plumbing (ADR-0002, T14). */
 async function handleAudioDispatch(msg: RouterMessage): Promise<RouterReply | undefined> {
+  if (msg.type === "leia:audio:stats") {
+    const withStats = engine as TextEngine & { stats?: () => Promise<Record<string, Record<string, unknown>>> | Record<string, Record<string, unknown>> };
+    const data = typeof withStats.stats === "function" ? await withStats.stats() : null;
+    return { ok: true, replyType: "leia:audio:stats", data };
+  }
   if (msg.type === "leia:audio:families") {
     // ponytail: engines without families() answer as the single default
     // family; EngineHub.families() and the Chrome proxy both implement it.

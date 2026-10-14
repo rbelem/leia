@@ -347,6 +347,14 @@ describe("ProxyEngine (Chrome offscreen proxy)", () => {
     }
   });
 
+  it("stats forwards to the offscreen hub and survives its absence", async () => {
+    const engine = owner.chromeAudioEngine();
+    state.reply = (msg) => (msg.type === "leia:audio:stats" ? undefined : { ok: true });
+    const probe = await engine.stats();
+    expect(probe).toEqual(null); // undefined reply (dead doc) coalesces to null
+    expect(state.sent.some((m) => m.type === "leia:audio:stats")).toBe(true);
+  });
+
   it("a newer speak preempts the older stream and sends the offscreen a cancel", async () => {
     const engine = owner.chromeAudioEngine();
     const first = collect(engine.speak("one", 1, { voiceName: null, rate: 1 }));

@@ -429,6 +429,23 @@ describe("FishAudioEngine", () => {
     ]);
   });
 
+  it("stats(): speak, prefetch and cache hits at a glance", async () => {
+    const { fetchImpl } = makeFetch([() => mp3Response(MP3_BYTES)]);
+    const host = makeHost();
+    const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: host });
+    const options = { voiceName: "v1", rate: 1 };
+
+    expect(engine.stats()).toEqual({ speak: 0, prefetch: 0, cacheHits: 0 });
+    await engine.prefetch("Hello world.", options);
+    const events = collect(engine.speak("Hello world.", 11, options));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events;
+
+    expect(engine.stats()).toEqual({ speak: 1, prefetch: 1, cacheHits: 1 });
+  });
+
   it("text over 2000 chars → error before the request; exactly 2000 is allowed", async () => {
     const { fetchImpl, calls } = makeFetch([() => mp3Response(MP3_BYTES)]);
     const host = makeHost();

@@ -189,6 +189,24 @@ function runCommand(id: number, name: string, args: Record<string, unknown>): vo
 }
 
 /**
+ * Debug-only redaction: the SW enriches audio forwards with real provider
+ * keys (the offscreen keystore needs them verbatim on storage-less Chrome
+ * builds), and this observer hears the same messages. The bridge is a
+ * loopback dev surface — mask key values before they leave the extension.
+ */
+function redactForDebug(msg: unknown): unknown {
+  if (typeof msg !== "object" || msg === null) return msg;
+  const m = msg as Record<string, unknown>;
+  if (typeof m.keys !== "object" || m.keys === null) return msg;
+  const keys = m.keys as Record<string, unknown>;
+  const masked: Record<string, unknown> = {};
+  for (const [slot, value] of Object.entries(keys)) {
+    masked[slot] = typeof value === "string" && value.length > 0 ? `••••${value.slice(-4)}` : value;
+  }
+  return { ...m, keys: masked };
+}
+
+/**
  * Observe background broadcasts to extension pages (session state, audio
  * event, highlight, theme). Return `undefined` so we never claim a reply
  * channel that belongs to the owner (repo rule, echoed in messaging.ts).
@@ -198,7 +216,7 @@ function observeRuntime(): void {
     if (!msg || (msg as { type?: unknown }).type === "ping") return undefined;
     const m = msg as { type?: unknown };
     log("evt", `[event] ${String(m.type)}`);
-    send({ type: "event", name: m.type, data: msg });
+    send({ type: "event", name: m.type, data: redactForDebug(msg) });
     return undefined;
   });
 }
