@@ -5,10 +5,10 @@
  * model rides a `model` request HEADER (not a body field); the free
  * s2.1-pro-free tier is the wallet-safe default.
  *
- * Voices are Fish marketplace model ids: VoiceInfo.name carries the model's
- * `_id` (titles are not unique on the marketplace — ElevenLabs made the same
- * id-as-name call) and flows into the request's `reference_id`. No voice
- * (null) = Fish's own default voice.
+ * Voices are Fish marketplace model ids: `VoiceInfo.name` carries the model's
+ * `_id` (unique — it flows into `reference_id` and survives duplicate titles)
+ * and `VoiceInfo.title` carries the marketplace display name for the picker.
+ * No voice (null) = Fish's own default voice.
  *
  * No timestamps in the response — sentence-granularity marching highlight
  * only (ADR-0003), so `wordTiming: false` and NO word events ever.
@@ -54,6 +54,7 @@ const LANGUAGE_TAGS: Record<string, string> = {
 
 interface FishModelDef {
   _id?: unknown;
+  title?: unknown;
   state?: unknown;
   languages?: unknown;
   dmca_taken_down?: unknown;
@@ -93,6 +94,7 @@ export class FishAudioEngine implements TextEngine {
         .filter((m) => m.state === "trained" && m.dmca_taken_down !== true)
         .map((m) => ({
           name: m._id,
+          title: typeof m.title === "string" && m.title.length > 0 ? m.title : undefined,
           lang: langTag(Array.isArray(m.languages) ? m.languages[0] : undefined),
           localService: false,
           family: "fishaudio",

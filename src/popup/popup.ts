@@ -270,7 +270,7 @@ if (document.getElementById("voice")) {
         const opt = document.createElement("option");
         opt.value = v.name;
         opt.dataset.family = family;
-        opt.textContent = `${v.name} (${v.lang})`;
+        opt.textContent = `${v.title ?? v.name} (${v.lang})`;
         group.appendChild(opt);
       }
       voiceSelect.appendChild(group);
