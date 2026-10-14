@@ -8,6 +8,9 @@
 
 export interface VoiceInfo {
   name: string;
+  /** Display label for pickers when `name` is an opaque id (marketplace model
+   * ids); identity still rides `name` so selection round-trips exactly. */
+  title?: string;
   lang: string;
   localService: boolean;
   /** Engine family the voice belongs to (popup groups by it; engines route by it). */

@@ -203,7 +203,12 @@ describe("refresh: voice picker assembly", () => {
   it("builds groups, keyless affordances, offline servers, caps, summary and resume hint", async () => {
     h.handlers["leia:reader:status"] = () =>
       okReply(makeStatus({ settings: { voiceName: "Mini Voice", rate: 1.5, engine: "minimax" } }));
-    h.handlers["leia:reader:voices"] = () => okReply([voice("Mini Voice", "minimax"), voice("System", "web-speech")]);
+    h.handlers["leia:reader:voices"] = () =>
+      okReply([
+        voice("Mini Voice", "minimax"),
+        { ...voice("90e65eaa", "fishaudio"), title: "Orion" },
+        voice("System", "web-speech"),
+      ]);
     h.handlers["leia:audio:families"] = () => okReply([{ family: "minimax", capabilities: PAID_CAPS }]);
     h.handlers["leia:reader:resume-info"] = () =>
       okReply({ url: "https://page.test/article", tokenPos: 2, tokenCount: 9 });
@@ -223,6 +228,10 @@ describe("refresh: voice picker assembly", () => {
     expect(labels).toContain("Local servers — 9 offline");
     const mini = select.querySelector<HTMLOptionElement>('option[value="Mini Voice"]')!;
     expect(mini.textContent).toBe("Mini Voice (en-US)");
+    expect(mini.dataset.family).toBe("minimax");
+    // Titled voices render the title; the option value stays the identity id.
+    const orion = select.querySelector<HTMLOptionElement>('option[value="90e65eaa"]')!;
+    expect(orion.textContent).toBe("Orion (en-US)");
     expect(mini.dataset.family).toBe("minimax");
     // Keyless groups are visibly disabled, not hidden.
     const eleven = [...select.querySelectorAll("optgroup")].find((g) => g.label!.startsWith("ElevenLabs"))!;

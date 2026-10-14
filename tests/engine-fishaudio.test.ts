@@ -111,8 +111,10 @@ describe("FishAudioEngine", () => {
             { _id: 42, title: "Bad id", state: "trained", languages: ["ko"], dmca_taken_down: false },
             { _id: "jkl000", title: "Kansai", state: "trained", languages: ["ja-JP"], dmca_taken_down: false },
             { _id: "mno111", title: "Mystery", state: "trained", languages: [], dmca_taken_down: null },
+            { _id: "pqr222", title: "", state: "trained", languages: ["en"], dmca_taken_down: false },
+            { _id: "stu333", state: "trained", languages: ["en"], dmca_taken_down: false },
           ],
-          total: 6,
+          total: 8,
           has_more: false,
         });
       },
@@ -120,9 +122,11 @@ describe("FishAudioEngine", () => {
     const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: makeHost() });
 
     expect(await engine.getVoices()).toEqual([
-      { name: "abc123", lang: "en-US", localService: false, family: "fishaudio" },
-      { name: "jkl000", lang: "ja-JP", localService: false, family: "fishaudio" },
-      { name: "mno111", lang: "und", localService: false, family: "fishaudio" },
+      { name: "abc123", title: "Alto", lang: "en-US", localService: false, family: "fishaudio" },
+      { name: "jkl000", title: "Kansai", lang: "ja-JP", localService: false, family: "fishaudio" },
+      { name: "mno111", title: "Mystery", lang: "und", localService: false, family: "fishaudio" },
+      { name: "pqr222", title: undefined, lang: "en-US", localService: false, family: "fishaudio" },
+      { name: "stu333", title: undefined, lang: "en-US", localService: false, family: "fishaudio" },
     ]);
     expect(calls).toHaveLength(1);
   });
