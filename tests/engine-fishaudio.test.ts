@@ -129,6 +129,42 @@ describe("FishAudioEngine", () => {
       { name: "stu333", title: undefined, lang: "en-US", localService: false, family: "fishaudio" },
     ]);
     expect(calls).toHaveLength(1);
+    expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("getVoices caches per key within the TTL — the second open fetches nothing", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      () => jsonResponse({ items: [{ _id: "abc123", title: "Alto", state: "trained", languages: ["en"] }] }),
+    ]);
+    const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: makeHost() });
+
+    const first = await engine.getVoices();
+    const second = await engine.getVoices();
+
+    expect(second).toBe(first);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("getVoices refetches after a failure and for a different key", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      () => new Response("nope", { status: 500 }),
+      () => jsonResponse({ items: [{ _id: "abc123", title: "Alto", state: "trained", languages: ["en"] }] }),
+      () => jsonResponse({ items: [{ _id: "def456", title: "Other", state: "trained", languages: ["en"] }] }),
+    ]);
+    let key = "fk1";
+    const engine = new FishAudioEngine({ getKey: async () => key, fetchImpl, audioHost: makeHost() });
+
+    // 500 is not cached — the next open refetches and succeeds.
+    expect(await engine.getVoices()).toEqual([]);
+    expect(await engine.getVoices()).toEqual([
+      { name: "abc123", title: "Alto", lang: "en-US", localService: false, family: "fishaudio" },
+    ]);
+    // A different key must not be served the previous key's cached list.
+    key = "fk2";
+    expect(await engine.getVoices()).toEqual([
+      { name: "def456", title: "Other", lang: "en-US", localService: false, family: "fishaudio" },
+    ]);
+    expect(calls).toHaveLength(3);
   });
 
   it("getVoices: no key → [] with no fetch", async () => {

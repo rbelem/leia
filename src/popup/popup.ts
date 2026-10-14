@@ -234,31 +234,23 @@ if (document.getElementById("voice")) {
     playbackControls.hidden = inPage;
   }
 
-  async function refresh(): Promise<void> {
-    const [statusReply, voicesReply, familiesReply, storedKeys, customProfiles] = await Promise.all([
-      send({ type: "leia:reader:status" }),
-      send({ type: "leia:reader:voices" }),
-      send({ type: "leia:audio:families" }),
-      browser.storage.local.get(PROVIDERS.map((p) => p.keyStorage)) as Promise<Record<string, unknown>>,
-      readLocalProfiles(),
-    ]);
-    const status = (statusReply as RouterReply | undefined)?.data as SessionStatus | undefined;
-    currentStatus = status ?? null;
-    renderReader();
-
-    const voices = ((voicesReply as RouterReply | undefined)?.data as VoiceInfo[] | undefined) ?? [];
+  /**
+   * One picker render: real voice groups when `voices` has them, keyless /
+   * offline affordances otherwise. Runs twice per refresh — static groups
+   * immediately, real voices when the (potentially slow) voices reply lands —
+   * so a slow provider API never blanks the whole popup.
+   */
+  function renderVoicePicker(
+    voices: VoiceInfo[],
+    storedKeys: Record<string, unknown>,
+    customProfiles: Awaited<ReturnType<typeof readLocalProfiles>>,
+  ): void {
     voicesByFamily = new Map<string, VoiceInfo[]>();
     for (const v of voices) {
       const list = voicesByFamily.get(v.family) ?? [];
       list.push(v);
       voicesByFamily.set(v.family, list);
     }
-
-    familyCaps = new Map(
-      (((familiesReply as RouterReply | undefined)?.data as FamilyInfo[] | undefined) ?? []).map(
-        (f) => [f.family, f.capabilities],
-      ),
-    );
 
     const customNames = new Map(customProfiles.map((p) => [p.id, p.name]));
 
@@ -318,7 +310,7 @@ if (document.getElementById("voice")) {
       group.appendChild(opt);
       voiceSelect.appendChild(group);
     }
-    voiceSelect.value = status?.settings.voiceName ?? "";
+    voiceSelect.value = currentStatus?.settings.voiceName ?? "";
     previewBtn.disabled = !voiceSelect.value;
     updateCapabilities();
 
@@ -329,6 +321,39 @@ if (document.getElementById("voice")) {
       .filter((f) => f.startsWith("local-"))
       .map((f) => localProfileName(f.slice("local-".length), customNames));
     sourcesSummaryEl.textContent = summarizeVoiceSources(savedKeys, onlineLocal);
+  }
+
+  async function refresh(): Promise<void> {
+    const [statusReply, familiesReply, storedKeys, customProfiles] = await Promise.all([
+      send({ type: "leia:reader:status" }),
+      send({ type: "leia:audio:families" }),
+      browser.storage.local.get(PROVIDERS.map((p) => p.keyStorage)) as Promise<Record<string, unknown>>,
+      readLocalProfiles(),
+    ]);
+    // Voices is the slow call (a provider API fetch per keyed engine). It
+    // rides outside the gate: the picker paints its static groups now and
+    // re-renders when the voices reply lands.
+    const voicesPromise = send({ type: "leia:reader:voices" });
+
+    const status = (statusReply as RouterReply | undefined)?.data as SessionStatus | undefined;
+    currentStatus = status ?? null;
+    renderReader();
+
+    familyCaps = new Map(
+      (((familiesReply as RouterReply | undefined)?.data as FamilyInfo[] | undefined) ?? []).map(
+        (f) => [f.family, f.capabilities],
+      ),
+    );
+
+    renderVoicePicker([], storedKeys, customProfiles);
+
+    try {
+      const voicesReply = (await voicesPromise) as RouterReply | undefined;
+      const voices = (voicesReply?.data as VoiceInfo[] | undefined) ?? [];
+      renderVoicePicker(voices, storedKeys, customProfiles);
+    } catch {
+      // voices stay unloaded; the keyless affordances from the first pass stand
+    }
     void refreshResume();
   }
 
