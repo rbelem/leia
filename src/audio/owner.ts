@@ -59,23 +59,51 @@ function chromeOffscreenApi(): ChromeOffscreen | undefined {
 
 let ensuredOffscreen: Promise<void> | null = null;
 
-async function ensureOffscreen(): Promise<void> {
-  ensuredOffscreen ??= (async () => {
-    const offscreen = chromeOffscreenApi();
-    if (!offscreen) throw new Error("offscreen API unavailable — Chrome 109+ only");
+/**
+ * Chrome reaped the offscreen document mid-playback at least once in the
+ * wild (reader left in silent "playing" forever), so a cached create-promise
+ * alone lies after that. Every ensure re-checks liveness when the Chrome API
+ * can answer; null = API unavailable, trust the cache.
+ */
+async function offscreenDocumentAlive(): Promise<boolean | null> {
+  try {
+    const runtime = (browser as unknown as { runtime: { getContexts?: (filter: unknown) => Promise<unknown[]> } })
+      .runtime;
+    if (typeof runtime.getContexts !== "function") return null;
+    const contexts = await runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
+    return contexts.length > 0;
+  } catch {
+    return null;
+  }
+}
+
+async function createOffscreenDocument(): Promise<void> {
+  const offscreen = chromeOffscreenApi();
+  if (!offscreen) throw new Error("offscreen API unavailable — Chrome 109+ only");
+  try {
     await offscreen.createDocument({
       url: OFFSCREEN_URL,
       reasons: ["AUDIO_PLAYBACK"],
       justification: "Leia reads selections aloud via Web Speech (ADR-0002)",
     });
-  })().catch((err: unknown) => {
+  } catch (err: unknown) {
     // Only one offscreen document per extension. Reuse it if it is ours;
     // if a spike probe document holds the slot, the audio messages below
     // will fail cleanly with "receiving end does not exist".
     if (String(err).includes("Only a single offscreen document may be created")) return;
-    ensuredOffscreen = null;
+    ensuredOffscreen = null; // so the next call retries a fresh create
     throw err;
-  });
+  }
+}
+
+async function ensureOffscreen(force = false): Promise<void> {
+  if (force) ensuredOffscreen = null;
+  if (ensuredOffscreen) {
+    const alive = await offscreenDocumentAlive();
+    if (alive === true) return ensuredOffscreen;
+    if (alive === false) ensuredOffscreen = null; // Chrome reaped it — recreate below
+  }
+  ensuredOffscreen ??= createOffscreenDocument();
   return ensuredOffscreen;
 }
 
@@ -216,23 +244,45 @@ export class ProxyEngine implements TextEngine {
       void browser.runtime.sendMessage({ type: "leia:audio:cancel" }).catch(() => {});
     }
 
-    void ensureOffscreen()
-      .then(() =>
-        browser.runtime.sendMessage({
-          type: "leia:audio:speak",
-          speakId,
-          text,
-          voiceName: options.voiceName,
-          rate: options.rate,
-        }),
-      )
-      .catch((err: unknown) => {
-        if (this.current?.speakId === speakId) {
-          stream.push({ type: "error", speakId, message: String(err) });
-          stream.close();
-        }
-      });
+    void this.sendSpeak(speakId, text, options, stream);
     return stream;
+  }
+
+  /**
+   * Forward one chunk to the offscreen document. A resolved-but-undefined
+   * reply means nobody answered: the document died (Chrome reaps it) and the
+   * speak would hang forever — recreate it once and retry; a second miss
+   * fails the stream so the session parks visibly instead of hanging.
+   */
+  private async sendSpeak(
+    speakId: number,
+    text: string,
+    options: SpeakOptions,
+    stream: EventStream<EngineEvent>,
+    retried = false,
+  ): Promise<void> {
+    try {
+      await ensureOffscreen();
+      const ack = await browser.runtime.sendMessage({
+        type: "leia:audio:speak",
+        speakId,
+        text,
+        voiceName: options.voiceName,
+        rate: options.rate,
+      });
+      if (ack === undefined) throw new Error("offscreen audio did not acknowledge (document gone)");
+      this.armWatchdog(speakId);
+    } catch (err: unknown) {
+      if (!retried) {
+        await ensureOffscreen(true).catch(() => {});
+        return this.sendSpeak(speakId, text, options, stream, true);
+      }
+      if (this.current?.speakId === speakId) {
+        this.clearWatchdog();
+        stream.push({ type: "error", speakId, message: String(err) });
+        stream.close();
+      }
+    }
   }
 
   /**
@@ -257,6 +307,7 @@ export class ProxyEngine implements TextEngine {
   cancel(): void {
     const current = this.current;
     this.current = null;
+    this.clearWatchdog();
     if (current) current.stream.closeCancelled({ type: "cancelled", speakId: current.speakId });
     void browser.runtime.sendMessage({ type: "leia:audio:cancel" }).catch(() => {});
   }
@@ -267,11 +318,59 @@ export class ProxyEngine implements TextEngine {
     const stream = this.current.stream;
     stream.push(ev);
     if (isEngineEventTerminal(ev)) {
+      this.clearWatchdog();
       this.current = null;
       stream.close();
     }
   }
+
+  // --- offscreen liveness watchdog -----------------------------------------
+  // Chrome can reap the offscreen document mid-chunk; the stream then never
+  // delivers another event and the reader hangs in silent "playing". While a
+  // chunk is out, a quiet-period watchdog pings the document: answered → the
+  // chunk is just long (long playback, slow synthesis), re-arm; unanswered →
+  // fail the stream so the session parks with a visible, retryable error.
+
+  private watchdog: ReturnType<typeof setTimeout> | null = null;
+
+  private armWatchdog(speakId: number): void {
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => void this.checkOffscreenAlive(speakId), OFFSCREEN_WATCHDOG_MS);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdog) clearTimeout(this.watchdog);
+    this.watchdog = null;
+  }
+
+  private async checkOffscreenAlive(speakId: number): Promise<void> {
+    if (!this.current || this.current.speakId !== speakId) return;
+    let ack: unknown;
+    try {
+      ack = await browser.runtime.sendMessage({ type: "leia:audio:ping" });
+    } catch {
+      ack = undefined;
+    }
+    if (!this.current || this.current.speakId !== speakId) return; // ended while pinging
+    if (ack) {
+      this.armWatchdog(speakId);
+      return;
+    }
+    const current = this.current;
+    this.current = null;
+    this.clearWatchdog();
+    current.stream.push({
+      type: "error",
+      speakId,
+      message: "offscreen audio went away — paused; resume to retry",
+    });
+    current.stream.close();
+  }
 }
+
+/** Quiet period after which the proxy pings the offscreen document while a
+ * chunk is out; unanswered means Chrome reaped it and the reader must park. */
+const OFFSCREEN_WATCHDOG_MS = 30_000;
 
 const proxy = new ProxyEngine();
 
