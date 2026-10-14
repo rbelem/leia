@@ -120,6 +120,8 @@ function handleAudioMessage(msg: unknown): unknown {
       return engine.capabilities as EngineCapabilities;
     case "leia:audio:families":
       return engine.families() as EngineFamilyInfo[];
+    case "leia:audio:stats":
+      return engine.stats();
     case "leia:audio:family": {
       const m = msg as unknown as { family?: string };
       if (typeof m.family === "string") engine.select(m.family);

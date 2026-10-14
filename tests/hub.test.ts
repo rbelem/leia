@@ -308,4 +308,23 @@ describe("EngineHub", () => {
     hub.register("azure", new StubEngine("azure", [], AZURE_CAPABILITIES));
     expect(hub.families().map((f) => f.family)).toEqual(["openai", "web-speech", "azure"]);
   });
+
+  it("stats() counts speak/prefetch per family and merges engine-reported counters", () => {
+    const hub = new EngineHub();
+    const fishy = new PrefetchStubEngine("fishaudio", []);
+    (fishy as unknown as { stats: () => Record<string, number> }).stats = () => ({ cacheHits: 2 });
+    hub.register("web-speech", new StubEngine("web-speech", []), { default: true });
+    hub.register("fishaudio", fishy);
+
+    // default family (web-speech) speaks; the session then pins fishaudio,
+    // whose prefetch counts against the family actually routed to.
+    const iterable = hub.speak("hi", 1, { voiceName: null, rate: 1 });
+    void iterable;
+    hub.selectFamily("fishaudio");
+    void hub.prefetch("next", { voiceName: null, rate: 1 });
+
+    const stats = hub.stats();
+    expect(stats["web-speech"]).toEqual({ speak: 1, prefetch: 0 });
+    expect(stats["fishaudio"]).toEqual({ speak: 0, prefetch: 1, cacheHits: 2 });
+  });
 });

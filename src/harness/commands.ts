@@ -51,6 +51,8 @@ export function commandToMessage(name: string, args: Record<string, unknown>): u
       return { type: "leia:selection:capture" };
     case "audio:families":
       return { type: "leia:audio:families" };
+    case "audio:stats":
+      return { type: "leia:audio:stats" };
     case "audio:clock":
       return { type: "leia:audio:clock" };
     default:
