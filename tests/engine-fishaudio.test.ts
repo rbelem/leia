@@ -354,6 +354,81 @@ describe("FishAudioEngine", () => {
     expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("pipelining: prefetch then identical speak serves cached bytes with no second fetch", async () => {
+    const { fetchImpl, calls } = makeFetch([() => mp3Response(MP3_BYTES)]);
+    const host = makeHost();
+    const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: host });
+    const options = { voiceName: "abc123", rate: 1 };
+
+    await engine.prefetch("Hello world.", options);
+    expect(calls).toHaveLength(1);
+
+    const events = collect(engine.speak("Hello world.", 7, options));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1); // cache hit — no second synthesis
+    expect(host.played).toEqual([{ bytes: MP3_BYTES, mime: "audio/mpeg" }]);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 7 },
+      { type: "end", speakId: 7 },
+    ]);
+  });
+
+  it("pipelining: a mismatching speak discards the entry and synthesizes on demand", async () => {
+    const { fetchImpl, calls } = makeFetch([() => mp3Response(MP3_BYTES), () => mp3Response(new Uint8Array([1, 2]))]);
+    const host = makeHost();
+    const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: host });
+
+    await engine.prefetch("First.", { voiceName: "v1", rate: 1 });
+    const events = collect(engine.speak("Second.", 8, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2);
+    expect(host.played).toEqual([{ bytes: new Uint8Array([1, 2]), mime: "audio/mpeg" }]);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 8 },
+      { type: "end", speakId: 8 },
+    ]);
+  });
+
+  it("pipelining: cancel discards a pending prefetch", async () => {
+    const { fetchImpl, calls } = makeFetch([() => mp3Response(MP3_BYTES), () => mp3Response(new Uint8Array([9]))]);
+    const host = makeHost();
+    const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: host });
+
+    await engine.prefetch("Hello world.", { voiceName: "v1", rate: 1 });
+    engine.cancel();
+    const events = collect(engine.speak("Hello world.", 9, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2); // discarded by cancel → on-demand synthesis
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 9 },
+      { type: "end", speakId: 9 },
+    ]);
+  });
+
+  it("pipelining: a failed prefetch stores nothing — the speak synthesizes itself", async () => {
+    const { fetchImpl, calls } = makeFetch([() => jsonResponse({ message: "nope" }, 500), () => mp3Response(MP3_BYTES)]);
+    const host = makeHost();
+    const engine = new FishAudioEngine({ getKey: async () => "fk1", fetchImpl, audioHost: host });
+
+    await engine.prefetch("Hello world.", { voiceName: "v1", rate: 1 }); // 500 → nothing stored
+    const events = collect(engine.speak("Hello world.", 10, { voiceName: "v1", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2);
+    expect(host.played).toEqual([{ bytes: MP3_BYTES, mime: "audio/mpeg" }]);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await events).toEqual([
+      { type: "start", speakId: 10 },
+      { type: "end", speakId: 10 },
+    ]);
+  });
+
   it("text over 2000 chars → error before the request; exactly 2000 is allowed", async () => {
     const { fetchImpl, calls } = makeFetch([() => mp3Response(MP3_BYTES)]);
     const host = makeHost();
