@@ -173,6 +173,7 @@ describe("pure helpers (bootstrap-gated module)", () => {
     expect(familyLabel("web-speech")).toBe("Web Speech");
     expect(familyLabel("minimax")).toBe("MiniMax");
     expect(familyLabel("qwencloud")).toBe("QwenCloud");
+    expect(familyLabel("fishaudio")).toBe("Fish Audio");
     expect(familyLabel("local-kokoro")).toBe("Kokoro (local)");
     expect(familyLabel("local-custom-x", new Map([["custom-x", "My Box"]]))).toBe("My Box (local)");
     expect(familyLabel("mystery")).toBe("mystery");
@@ -325,6 +326,7 @@ describe("refresh: voice picker assembly", () => {
       "Mistral — no key",
       "Gemini — no key",
       "QwenCloud — no key",
+      "Fish Audio — no key",
       "Azure — no key",
       "Local servers — 9 offline",
     ]);
