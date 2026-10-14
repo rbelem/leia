@@ -1,0 +1,17 @@
+{
+  "lockfile_version": "1",
+  "packages": {
+    "firefox": {
+      "resolved": "github:NixOS/nixpkgs/e2ccecbf30866802b1db536246e0939eccbd7bfb?narHash=sha256-bIhK7AMT7yU8Hkjzaag0MDpqbqiMTvN6UJ0U6Zs63OI%3D#firefox",
+      "source": "nixpkg"
+    },
+    "geckodriver": {
+      "resolved": "github:NixOS/nixpkgs/e2ccecbf30866802b1db536246e0939eccbd7bfb?narHash=sha256-bIhK7AMT7yU8Hkjzaag0MDpqbqiMTvN6UJ0U6Zs63OI%3D#geckodriver",
+      "source": "nixpkg"
+    },
+    "github:NixOS/nixpkgs/nixpkgs-unstable": {
+      "last_modified": "2026-10-06T17:11:02Z",
+      "resolved": "github:NixOS/nixpkgs/e2ccecbf30866802b1db536246e0939eccbd7bfb?lastModified=1791306662&narHash=sha256-bIhK7AMT7yU8Hkjzaag0MDpqbqiMTvN6UJ0U6Zs63OI%3D"
+    }
+  }
+}

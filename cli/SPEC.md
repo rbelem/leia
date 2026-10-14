@@ -36,9 +36,12 @@ voice servers + provider keys), and the probe surface.
   adapter drives a **geckodriver** process that launches/holds Firefox and exposes
   the WebDriver-classic HTTP API (the same mechanism the firefox-devtools-MCP uses
   under the hood).
-- **geckodriver is required** (on PATH or via `GECKODRIVER`/`--geckodriver-path`). A
-  known-good binary lives at `/tmp/geckodriver` (0.37.1) in this dev env; the
-  firefox-devtools-MCP also bundles one.
+- **geckodriver is required** (on PATH or via `GECKODRIVER`/`--geckodriver-path`).
+  `devbox.json` at the repo root provides geckodriver 0.37.x and a Firefox build —
+  run the CLI inside `devbox shell` / `devbox run` and both resolve from PATH with
+  no env overrides (verified live: vanilla nixpkgs Firefox 157 + geckodriver 0.37.1
+  drives the full fish.audio flow). The firefox-devtools-MCP also bundles a
+  geckodriver, and `GECKODRIVER`/`FIREFOX_BIN` still override the devbox binaries.
 - The Firefox binary is supplied via `moz:firefoxOptions.binary` — this env uses the
   Nix `playwright-firefox` build:
   `/nix/store/nvqkhvdw9xqk948rq5rx8nwb5rwmkzry-playwright-firefox/firefox/firefox`.
