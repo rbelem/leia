@@ -1,0 +1,179 @@
+name: Release
+
+# A tag push is a release. Gates run first; then one reproducible pair of
+# zips is built, a GitHub release carries them, and each configured store is
+# published to autonomously. Stores without configured secrets run their
+# publish script in --dry-run so the mechanism itself is exercised on every
+# release and the workflow stays green before credentials exist.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install pinned dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Stamp release version from tag
+        run: node scripts/stamp-version.mjs
+
+      - name: Build both dists
+        run: npm run build
+
+      - name: Store-kit gate (text limits, manifest agreement, asset dimensions)
+        run: node scripts/store-check.mjs
+
+      - name: Package reproducible zips
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          EPOCH="$(git log -1 --format=%ct)"
+          mkdir -p store/pkg
+          python3 scripts/reprozip.py --root dist/chrome  --out "store/pkg/leia-chrome-${VERSION}.zip"  --epoch "$EPOCH"
+          python3 scripts/reprozip.py --root dist/firefox --out "store/pkg/leia-firefox-${VERSION}.zip" --epoch "$EPOCH"
+          git archive --format=zip -o "store/pkg/leia-${VERSION}-sources.zip" HEAD
+
+      - name: Prove double-build byte equality
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          EPOCH="$(git log -1 --format=%ct)"
+          A1="$(sha256sum "store/pkg/leia-chrome-${VERSION}.zip" | cut -d' ' -f1)"
+          B1="$(sha256sum "store/pkg/leia-firefox-${VERSION}.zip" | cut -d' ' -f1)"
+          npm run build
+          python3 scripts/reprozip.py --root dist/chrome  --out /tmp/chrome-2.zip  --epoch "$EPOCH"
+          python3 scripts/reprozip.py --root dist/firefox --out /tmp/firefox-2.zip --epoch "$EPOCH"
+          A2="$(sha256sum /tmp/chrome-2.zip | cut -d' ' -f1)"
+          B2="$(sha256sum /tmp/firefox-2.zip | cut -d' ' -f1)"
+          echo "build 1: $A1 $B1"
+          echo "build 2: $A2 $B2"
+          test "$A1" = "$A2"
+          test "$B1" = "$B2"
+
+      - name: Print package hashes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sha256sum store/pkg/leia-*.zip | tee "store/pkg/leia-${VERSION}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: |
+            store/pkg/leia-chrome-*.zip
+            store/pkg/leia-firefox-*.zip
+            store/pkg/leia-*-sources.zip
+            store/pkg/leia-*.sha256
+          if-no-files-found: error
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            store/pkg/leia-chrome-*.zip \
+            store/pkg/leia-firefox-*.zip \
+            store/pkg/leia-*-sources.zip \
+            store/pkg/leia-*.sha256 \
+            --verify-tag --generate-notes --title "Leia ${GITHUB_REF_NAME}"
+
+  publish-chrome:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: store/pkg
+      - name: Publish (or dry-run without secrets)
+        env:
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="store/pkg/leia-chrome-${VERSION}.zip"
+          if [ -z "$CWS_REFRESH_TOKEN" ]; then
+            echo "CWS secrets not configured — dry-run"
+            node scripts/publish-chrome.mjs --zip "$ZIP" --dry-run
+          else
+            node scripts/publish-chrome.mjs --zip "$ZIP"
+          fi
+
+  publish-firefox:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: store/pkg
+      - name: Publish (or dry-run without secrets)
+        env:
+          AMO_ADDON_ID: ${{ vars.AMO_ADDON_ID }}
+          AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+          AMO_CHANNEL: ${{ vars.AMO_CHANNEL }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="store/pkg/leia-firefox-${VERSION}.zip"
+          SRC="store/pkg/leia-${VERSION}-sources.zip"
+          CHANNEL_ARGS=""
+          if [ -n "$AMO_CHANNEL" ]; then
+            CHANNEL_ARGS="--channel $AMO_CHANNEL"
+          fi
+          if [ -z "$AMO_API_SECRET" ]; then
+            echo "AMO secrets not configured — dry-run"
+            node scripts/publish-firefox.mjs --zip "$ZIP" --src-zip "$SRC" $CHANNEL_ARGS --dry-run
+          else
+            node scripts/publish-firefox.mjs --zip "$ZIP" --src-zip "$SRC" $CHANNEL_ARGS
+          fi
+
+  publish-edge:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: store/pkg
+      - name: Publish (or dry-run without secrets)
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_CLIENT_SECRET: ${{ secrets.EDGE_CLIENT_SECRET }}
+          EDGE_TENANT_ID: ${{ secrets.EDGE_TENANT_ID }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="store/pkg/leia-chrome-${VERSION}.zip"
+          if [ -z "$EDGE_API_KEY" ] && [ -z "$EDGE_CLIENT_SECRET" ]; then
+            echo "Edge secrets not configured — dry-run"
+            node scripts/publish-edge.mjs --zip "$ZIP" --dry-run
+          else
+            node scripts/publish-edge.mjs --zip "$ZIP"
+          fi
