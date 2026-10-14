@@ -452,6 +452,13 @@ export class ReaderSession {
           voiceName: this.settings.voiceName,
           rate: this.settings.rate,
         });
+        // Pipelining (ADR-0003): chunk N+1's synthesis races chunk N's
+        // synthesis AND playback, so fire it at speak time — waiting for the
+        // start event gives it only the playback window, which a slow
+        // provider API loses (measured 6.9s gaps vs 0.01s when it wins).
+        // Fire-and-forget: a prefetch failure must never break the session;
+        // speak() remains the fallback.
+        this.prefetchNext(chunk);
         let outcome: "end" | "cancelled" | "error" = "end";
         const wordTiming = this.engine.capabilities.wordTiming;
         for await (const ev of iterable) {
@@ -461,11 +468,6 @@ export class ReaderSession {
             // speaking. A voiceless engine failing loudly never fakes a
             // started read (word/timeline events follow, never precede, it).
             this.emit({ type: "highlight", sessionId: this.sessionId as string, from: chunk.from, to: chunk.to });
-            // Pipelining (ADR-0003): chunk N's audio actually began — have
-            // the engine synthesize N+1 now so its latency hides behind
-            // playback. Fire-and-forget: a prefetch failure must never
-            // break the session; speak() remains the fallback.
-            this.prefetchNext(chunk);
             continue;
           }
           if (ev.type === "word") {
