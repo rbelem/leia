@@ -132,8 +132,10 @@ function handleAudioMessage(msg: unknown): unknown {
     case "leia:audio:speak": {
       const m = msg as unknown as { speakId: number; text: string; voiceName: string | null; rate: number };
       void speakAndStream(m);
-      return undefined; // streaming; reply arrives as leia:audio:event messages
+      return { ok: true }; // ACK registers liveness: undefined on the proxy side means the document is gone
     }
+    case "leia:audio:ping":
+      return { ok: true };
     case "leia:audio:cancel":
       engine.cancel();
       return { ok: true };

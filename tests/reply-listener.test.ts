@@ -183,12 +183,12 @@ describe("reply-critical sites respond only for their own messages", () => {
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });
 
-  it("offscreen audio: streaming arm (speak) claims no channel — sync `false`, no reply", async () => {
+  it("offscreen audio: streaming arm (speak) acks asynchronously — the proxy reads the ACK as liveness", async () => {
     const listener = await loadListener("../src/offscreen/audio");
     const { sendResponse, keepOpen } = deliver(listener, { type: "leia:audio:speak", speakId: 1, text: "hi", voiceName: null, rate: 1 });
-    expect(keepOpen).toBe(false);
+    expect(keepOpen).toBe(true);
     await flush();
-    expect(sendResponse).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });
 
   it("offscreen audio: families arm still delivers its payload via sendResponse", async () => {

@@ -24,6 +24,8 @@ const state = vi.hoisted(() => ({
   storageThrows: false,
   createDocumentError: null as Error | null,
   createDocumentCalls: 0,
+  /** getContexts result; null = API absent (trust the cached document). */
+  contexts: null as null | unknown[],
   listeners: [] as ReplyListener[],
 }));
 
@@ -39,6 +41,10 @@ vi.mock("webextension-polyfill", () => ({
         });
         return Promise.resolve({});
       },
+      getContexts: async () => {
+        if (state.contexts === null) throw new Error("getContexts unavailable");
+        return state.contexts;
+      },
       onMessage: { addListener: (fn: ReplyListener) => state.listeners.push(fn) },
     },
     storage: {
@@ -53,6 +59,8 @@ vi.mock("webextension-polyfill", () => ({
       createDocument: async () => {
         state.createDocumentCalls += 1;
         if (state.createDocumentError) throw state.createDocumentError;
+        // A created document is alive — mirror reality for the liveness check.
+        if (Array.isArray(state.contexts)) state.contexts = [{ contextType: "OFFSCREEN_DOCUMENT" }];
       },
     },
   },
@@ -279,11 +287,72 @@ describe("ProxyEngine (Chrome offscreen proxy)", () => {
     expect(events).toEqual([{ type: "error", speakId: 1, message: expect.stringContaining("receiving end") }]);
   });
 
+  it("a dead offscreen document is recreated once and the speak retried", async () => {
+    // First speak message: nobody answers (document gone). After the forced
+    // recreate, the retried speak acks and events flow.
+    let speakCalls = 0;
+    state.contexts = [];
+    state.reply = (msg) => {
+      if (msg.type === "leia:audio:speak") {
+        speakCalls += 1;
+        return speakCalls === 1 ? undefined : { ok: true };
+      }
+      return { ok: true };
+    };
+    const engine = owner.chromeAudioEngine();
+    const done = collect(engine.speak("hello", 9, { voiceName: null, rate: 1 }));
+    await tick();
+    await tick();
+
+    expect(state.createDocumentCalls).toBe(2); // original + forced recreate
+    expect(state.sent.filter((m) => m.type === "leia:audio:speak")).toHaveLength(2);
+
+    engine.pushEvent({ type: "start", speakId: 9 });
+    engine.pushEvent({ type: "end", speakId: 9 });
+    expect(await done).toEqual([
+      { type: "start", speakId: 9 },
+      { type: "end", speakId: 9 },
+    ]);
+  });
+
+  it("watchdog: an unanswered offscreen during playback parks the chunk with an error", async () => {
+    vi.useFakeTimers();
+    try {
+      state.reply = (msg) => (msg.type === "leia:audio:ping" ? undefined : { ok: true });
+      const engine = owner.chromeAudioEngine();
+      const done = collect(engine.speak("long chunk", 3, { voiceName: null, rate: 1 }));
+      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await done).toEqual([
+        { type: "error", speakId: 3, message: "offscreen audio went away — paused; resume to retry" },
+      ]);
+      expect(state.sent.filter((m) => m.type === "leia:audio:ping")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("watchdog: an answered ping re-arms instead of parking a long chunk", async () => {
+    vi.useFakeTimers();
+    try {
+      state.reply = (msg) => (msg.type === "leia:audio:ping" ? { ok: true } : { ok: true });
+      const engine = owner.chromeAudioEngine();
+      const done = collect(engine.speak("long chunk", 4, { voiceName: null, rate: 1 }));
+      await vi.advanceTimersByTimeAsync(60_000); // two quiet periods — both answered
+      engine.pushEvent({ type: "end", speakId: 4 });
+      expect(await done).toEqual([{ type: "end", speakId: 4 }]);
+      expect(state.sent.filter((m) => m.type === "leia:audio:ping").length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a newer speak preempts the older stream and sends the offscreen a cancel", async () => {
     const engine = owner.chromeAudioEngine();
     const first = collect(engine.speak("one", 1, { voiceName: null, rate: 1 }));
     await tick();
     const second = collect(engine.speak("two", 2, { voiceName: null, rate: 1 }));
+    await tick();
     expect(await first).toEqual([{ type: "cancelled", speakId: 1 }]);
     // The cancel message rides along with the second speak message.
     expect(state.sent.map((m) => m.type)).toEqual(["leia:audio:speak", "leia:audio:cancel", "leia:audio:speak"]);
