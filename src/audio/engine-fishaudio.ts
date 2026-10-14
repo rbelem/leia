@@ -24,6 +24,12 @@ export const FISH_TTS_URL = "https://api.fish.audio/v1/tts";
 export const FISH_MODELS_URL = "https://api.fish.audio/model";
 export const FISH_TTS_MODEL = "s2.1-pro-free";
 export const FISH_MAX_CHARS = 2000;
+/** Marketplace list drifts slowly; refetching it on every popup open cost
+ * ~3 s per open (measured TTFB), so voices are cached per key for 5 min. */
+export const FISH_VOICES_TTL_MS = 5 * 60_000;
+/** A hung marketplace request must fail the list (uncached, retried next
+ * open) instead of blanking the popup picker indefinitely. */
+const FISH_VOICES_TIMEOUT_MS = 5_000;
 
 export const FISH_CAPABILITIES: EngineCapabilities = {
   wordTiming: false,
@@ -73,6 +79,7 @@ export class FishAudioEngine implements TextEngine {
   private readonly fetchImpl: typeof fetch;
   private readonly audioHost: AudioHost;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
+  private voicesCache: { key: string; at: number; voices: VoiceInfo[] } | null = null;
 
   constructor(opts: FishAudioEngineOptions) {
     this.getKey = opts.getKey;
@@ -83,13 +90,18 @@ export class FishAudioEngine implements TextEngine {
   async getVoices(): Promise<VoiceInfo[]> {
     const key = await this.getKey();
     if (!key) return [];
+    const cached = this.voicesCache;
+    if (cached && cached.key === key && Date.now() - cached.at < FISH_VOICES_TTL_MS) return cached.voices;
     try {
       const url = `${FISH_MODELS_URL}?page_size=100&sort_by=task_count&page_number=1`;
-      const resp = await this.fetchImpl(url, { headers: { Authorization: `Bearer ${key}` } });
+      const resp = await this.fetchImpl(url, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(FISH_VOICES_TIMEOUT_MS),
+      });
       if (!resp.ok) return [];
       const data = (await resp.json()) as { items?: FishModelDef[] };
       if (!Array.isArray(data.items)) return [];
-      return data.items
+      const voices = data.items
         .filter((m): m is FishModelDef & { _id: string } => typeof m?._id === "string" && m._id.length > 0)
         .filter((m) => m.state === "trained" && m.dmca_taken_down !== true)
         .map((m) => ({
@@ -99,8 +111,10 @@ export class FishAudioEngine implements TextEngine {
           localService: false,
           family: "fishaudio",
         }));
+      this.voicesCache = { key, at: Date.now(), voices };
+      return voices;
     } catch {
-      return [];
+      return []; // failures are not cached — the next open retries
     }
   }
 
