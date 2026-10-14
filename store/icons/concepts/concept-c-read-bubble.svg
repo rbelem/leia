@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Concept C: the read bubble. Text becomes speech, one line highlighted. -->
+  <path d="M 148 392 L 148 452 L 224 392 Z" fill="#221733"/>
+  <rect x="64" y="92" width="384" height="300" rx="84" fill="#221733"/>
+  <rect x="124" y="156" width="264" height="36" rx="18" fill="#FFF3DC"/>
+  <rect x="124" y="222" width="204" height="44" rx="22" fill="#FFB63D"/>
+  <rect x="124" y="296" width="148" height="36" rx="18" fill="#FFF3DC"/>
+</svg>

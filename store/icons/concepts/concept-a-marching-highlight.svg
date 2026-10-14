@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Concept A: the marching highlight. A paragraph where one line is
+       attended by sound. The product story in one glyph. -->
+  <rect x="56" y="56" width="400" height="400" rx="92" fill="#221733"/>
+  <rect x="120" y="148" width="208" height="36" rx="18" fill="#FFF3DC"/>
+  <rect x="104" y="226" width="304" height="84" rx="42" fill="#FFB63D"/>
+  <g fill="#221733">
+    <rect x="188" y="255" width="16" height="26" rx="8"/>
+    <rect x="218" y="246" width="16" height="44" rx="8"/>
+    <rect x="248" y="239" width="16" height="58" rx="8"/>
+    <rect x="278" y="246" width="16" height="44" rx="8"/>
+    <rect x="308" y="255" width="16" height="26" rx="8"/>
+  </g>
+  <rect x="120" y="336" width="136" height="36" rx="18" fill="#FFF3DC"/>
+  <circle cx="288" cy="354" r="18" fill="#FFF3DC"/>
+</svg>

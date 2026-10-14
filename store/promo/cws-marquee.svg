@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 560">
+  <!-- CWS marquee / Edge large promo tile (1400x560). Brand-forward, no
+       text: a page of text lines, one line carried by sound across the
+       whole width. Reads when scaled to half size. -->
+  <rect width="1400" height="560" fill="#2A1D42"/>
+  <circle cx="1300" cy="60" r="260" fill="#352552"/>
+  <circle cx="80" cy="520" r="220" fill="#352552"/>
+  <!-- quiet paragraph rows -->
+  <g fill="#FFF3DC">
+    <rect x="-60" y="52" width="430" height="34" rx="17" opacity="0.85"/>
+    <rect x="410" y="52" width="300" height="34" rx="17" opacity="0.4"/>
+    <rect x="750" y="52" width="500" height="34" rx="17" opacity="0.85"/>
+    <rect x="-40" y="140" width="340" height="34" rx="17" opacity="0.4"/>
+    <rect x="340" y="140" width="430" height="34" rx="17" opacity="0.85"/>
+    <rect x="810" y="140" width="360" height="34" rx="17" opacity="0.55"/>
+    <rect x="-60" y="386" width="390" height="34" rx="17" opacity="0.85"/>
+    <rect x="370" y="386" width="280" height="34" rx="17" opacity="0.4"/>
+    <rect x="690" y="386" width="520" height="34" rx="17" opacity="0.85"/>
+    <rect x="-30" y="474" width="450" height="34" rx="17" opacity="0.55"/>
+    <rect x="460" y="474" width="380" height="34" rx="17" opacity="0.85"/>
+    <rect x="880" y="474" width="420" height="34" rx="17" opacity="0.4"/>
+  </g>
+  <!-- the marching highlight, carried edge to edge -->
+  <rect x="-70" y="238" width="1540" height="84" rx="42" fill="#FFB63D"/>
+  <g fill="#2A1D42">
+    <rect x="470" y="264" width="26" height="32" rx="13"/>
+    <rect x="526" y="254" width="26" height="52" rx="13"/>
+    <rect x="582" y="244" width="26" height="72" rx="13"/>
+    <rect x="638" y="254" width="26" height="52" rx="13"/>
+    <rect x="694" y="264" width="26" height="32" rx="13"/>
+    <rect x="788" y="264" width="26" height="32" rx="13"/>
+    <rect x="844" y="254" width="26" height="52" rx="13"/>
+    <rect x="900" y="244" width="26" height="72" rx="13"/>
+  </g>
+</svg>

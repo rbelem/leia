@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 280">
+  <!-- CWS / Edge small promo tile (440x280). Brand-forward, no text:
+       the marching-highlight glyph enlarged, text rows cropping off-canvas
+       so the frame stays full edge to edge. -->
+  <rect width="440" height="280" fill="#2A1D42"/>
+  <circle cx="392" cy="36" r="150" fill="#352552"/>
+  <circle cx="24" cy="268" r="120" fill="#352552"/>
+  <!-- paragraph rhythm, cropped at both edges -->
+  <rect x="-36" y="34" width="204" height="30" rx="15" fill="#FFF3DC" opacity="0.92"/>
+  <rect x="196" y="34" width="140" height="30" rx="15" fill="#FFF3DC" opacity="0.55"/>
+  <rect x="-28" y="216" width="148" height="30" rx="15" fill="#FFF3DC" opacity="0.55"/>
+  <rect x="148" y="216" width="240" height="30" rx="15" fill="#FFF3DC" opacity="0.92"/>
+  <!-- the attended line -->
+  <rect x="-24" y="94" width="488" height="92" rx="46" fill="#FFB63D"/>
+  <g fill="#2A1D42">
+    <rect x="142" y="118" width="22" height="44" rx="11"/>
+    <rect x="186" y="104" width="22" height="72" rx="11"/>
+    <rect x="230" y="96" width="22" height="88" rx="11"/>
+    <rect x="274" y="104" width="22" height="72" rx="11"/>
+    <rect x="318" y="118" width="22" height="44" rx="11"/>
+  </g>
+</svg>

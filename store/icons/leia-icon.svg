@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Leia icon: the marching highlight. A paragraph where one line is
+       attended by sound. Shape count kept low and bars kept thick so the
+       glyph survives 16 px toolbar rendering. -->
+  <rect x="56" y="56" width="400" height="400" rx="96" fill="#221733"/>
+  <rect x="116" y="132" width="232" height="48" rx="24" fill="#FFF3DC"/>
+  <rect x="96" y="212" width="320" height="100" rx="50" fill="#FFB63D"/>
+  <g fill="#221733">
+    <rect x="196" y="232" width="24" height="60" rx="12"/>
+    <rect x="244" y="214" width="24" height="96" rx="12"/>
+    <rect x="292" y="232" width="24" height="60" rx="12"/>
+  </g>
+  <rect x="116" y="344" width="176" height="48" rx="24" fill="#FFF3DC"/>
+</svg>

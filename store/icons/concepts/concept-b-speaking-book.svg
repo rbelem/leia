@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Concept B: the speaking book. Pages open, voice rising from the spine. -->
+  <circle cx="256" cy="256" r="224" fill="#221733"/>
+  <path d="M 256 316 C 216 286 168 278 128 286 L 128 358 C 168 350 216 358 256 386 Z" fill="#FFF3DC"/>
+  <path d="M 256 316 C 296 286 344 278 384 286 L 384 358 C 344 350 296 358 256 386 Z" fill="#FFF3DC"/>
+  <g stroke="#FFB63D" stroke-width="26" stroke-linecap="round" fill="none">
+    <path d="M 222 234 A 48 48 0 0 1 290 234"/>
+    <path d="M 197 209 A 84 84 0 0 1 315 209"/>
+    <path d="M 171 183 A 120 120 0 0 1 341 183"/>
+  </g>
+</svg>
