@@ -86,6 +86,11 @@ export class FishAudioEngine implements TextEngine {
   private readonly ttsTimeoutMs: number;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
   private voicesCache: { key: string; at: number; voices: VoiceInfo[] } | null = null;
+  /** Decoded audio for chunk pipelining (ADR-0003): one entry, latest
+   * prefetch wins; cancel() discards it. `apiKey` pins the entry to the
+   * key that synthesized it so a key change can't serve stale audio. */
+  private cache: { apiKey: string; cacheKey: string; bytes: Uint8Array } | null = null;
+  private cacheEpoch = 0;
 
   constructor(opts: FishAudioEngineOptions) {
     this.getKey = opts.getKey;
@@ -145,6 +150,36 @@ export class FishAudioEngine implements TextEngine {
       active.stream.closeCancelled({ type: "cancelled", speakId: active.speakId });
       active.playback?.stop();
     }
+    this.cacheEpoch += 1; // discard in-flight prefetch results too
+    this.cache = null;
+  }
+
+  /**
+   * Synthesize ahead for a FUTURE speak() with identical text+options
+   * (pipelining, ADR-0003). Best-effort: a missing key or failed request
+   * stores nothing and the later speak() synthesizes on demand. Without
+   * this, every chunk boundary eats a full synthesis round trip (~3-8 s
+   * measured) as an audible pause between sentences.
+   */
+  async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    const key = await this.getKey();
+    if (!key) return;
+    const epoch = this.cacheEpoch;
+    try {
+      const resp = await this.fetchImpl(FISH_TTS_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: FISH_TTS_MODEL },
+        body: JSON.stringify(this.requestBody(text, options)),
+        signal: AbortSignal.timeout(this.ttsTimeoutMs),
+      });
+      if (!resp.ok) return;
+      const buf = await resp.arrayBuffer();
+      if (this.cacheEpoch === epoch) {
+        this.cache = { apiKey: key, cacheKey: this.cacheKey(text, options), bytes: new Uint8Array(buf) };
+      }
+    } catch {
+      // best-effort — a later speak() fetches on demand
+    }
   }
 
   // --- internals ---
@@ -172,44 +207,35 @@ export class FishAudioEngine implements TextEngine {
       return;
     }
 
-    const body: Record<string, unknown> = {
-      text,
-      format: "mp3",
-      mp3_bitrate: 128,
-      normalize: true,
-      latency: "balanced",
-      chunk_length: 300,
-    };
-    if (typeof options.voiceName === "string" && options.voiceName.length > 0) {
-      body.reference_id = options.voiceName; // omitted → Fish's default voice
-    }
-    if (options.rate !== 1) body.prosody = { speed: clampRate(options.rate) };
-
-    let resp: Response;
-    try {
-      resp = await this.fetchImpl(FISH_TTS_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: FISH_TTS_MODEL },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.ttsTimeoutMs),
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "TimeoutError") {
-        const secs = Math.max(1, Math.round(this.ttsTimeoutMs / 1000));
-        fail(`Fish Audio synthesis timed out after ${secs}s — resume to retry`);
+    let bytes = this.cachedFor(key, text, options);
+    if (!bytes) {
+      let resp: Response;
+      try {
+        resp = await this.fetchImpl(FISH_TTS_URL, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: FISH_TTS_MODEL },
+          body: JSON.stringify(this.requestBody(text, options)),
+          signal: AbortSignal.timeout(this.ttsTimeoutMs),
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name === "TimeoutError") {
+          const secs = Math.max(1, Math.round(this.ttsTimeoutMs / 1000));
+          fail(`Fish Audio synthesis timed out after ${secs}s — resume to retry`);
+          return;
+        }
+        fail(`Fish Audio request failed: ${String(err)}`);
         return;
       }
-      fail(`Fish Audio request failed: ${String(err)}`);
-      return;
+      if (!this.isCurrent(speakId)) return;
+      if (!resp.ok) {
+        fail(await errorDetail(resp));
+        return;
+      }
+      const buf = await resp.arrayBuffer();
+      if (!this.isCurrent(speakId)) return;
+      bytes = new Uint8Array(buf);
     }
-    if (!this.isCurrent(speakId)) return;
-    if (!resp.ok) {
-      fail(await errorDetail(resp));
-      return;
-    }
-    const buf = await resp.arrayBuffer();
-    if (!this.isCurrent(speakId)) return;
-    const playback = this.audioHost.play(new Uint8Array(buf), "audio/mpeg");
+    const playback = this.audioHost.play(bytes, "audio/mpeg");
     if (!this.isCurrent(speakId)) {
       playback.stop();
       return;
@@ -225,6 +251,41 @@ export class FishAudioEngine implements TextEngine {
 
   private isCurrent(speakId: number): boolean {
     return this.active?.speakId === speakId;
+  }
+
+  /** The exact body a speak would send — prefetch must match it byte for
+   * byte, or the cached audio would not be the audio speak asked for. */
+  private requestBody(text: string, options: SpeakOptions): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      text,
+      format: "mp3",
+      mp3_bitrate: 128,
+      normalize: true,
+      latency: "balanced",
+      chunk_length: 300,
+    };
+    if (typeof options.voiceName === "string" && options.voiceName.length > 0) {
+      body.reference_id = options.voiceName; // omitted → Fish's default voice
+    }
+    if (options.rate !== 1) body.prosody = { speed: clampRate(options.rate) };
+    return body;
+  }
+
+  private cacheKey(text: string, options: SpeakOptions): string {
+    return `${text}|${options.voiceName ?? ""}|${options.rate}`;
+  }
+
+  /**
+   * Serve the pipelining cache when text+options+key all match. A
+   * mismatching speak() discards the entry (ADR-0003 — latest prefetch
+   * wins; nothing stale survives to a later speak).
+   */
+  private cachedFor(apiKey: string, text: string, options: SpeakOptions): Uint8Array | null {
+    const entry = this.cache;
+    if (!entry) return null;
+    const match = entry.apiKey === apiKey && entry.cacheKey === this.cacheKey(text, options);
+    if (!match) this.cache = null;
+    return match ? entry.bytes : null;
   }
 }
 
