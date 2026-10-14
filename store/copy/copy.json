@@ -1,0 +1,37 @@
+{
+  "_readme": "Single source of truth for store listing text. scripts/store-check.mjs validates the lengths against the cited limits. Paste these values into each store dashboard (see chrome.md, firefox.md, edge.md for field mapping).",
+  "name": {
+    "value": "Leia: Read Aloud",
+    "max": 45,
+    "limit_source": "Chrome Web Store dashboard item-name field is capped at 45 characters; this value is 16 and is safe under every store's cap. The name lives in src/manifest.json 'name', which all three stores display as the listing name. Operator picked 'Leia Reads' on 2026-10-14, then reverted to 'Leia: Read Aloud' the same day after the first AMO submission (guid leia@rclb.dev preserved; only the listing name changed)."
+  },
+  "short_description": {
+    "value": "Read any webpage aloud with a voice you choose and a highlight that follows the words as they are spoken.",
+    "max": 132,
+    "limit_source": "Manifest description limit of 132 characters: https://developer.chrome.com/docs/webstore/preparing/ (quoted: 'A string of no more than 132 characters'). Displayed by CWS as the short description; AMO and Edge use it the same way from the manifest."
+  },
+  "amo_summary": {
+    "value": "Leia reads webpages aloud with a highlight that follows the words. Browser voices, a built-in offline model, local servers, or your own provider key. No account.",
+    "max": 250,
+    "limit_source": "AMO summary limit of 250 characters: https://extensionworkshop.com/documentation/develop/create-an-appealing-listing/ (quoted: 'The summary description for your add-on is limited to 250 characters')."
+  },
+  "long_description_file": "store/copy/long-description.md",
+  "long_description_soft_max": 16000,
+  "long_description_limit_note": "The CWS dashboard enforces a 16,000-character detailed-description cap; the current text is ~2k so the exact cap is not load-bearing. Not encoded as a hard gate.",
+  "keywords_tags": {
+    "value": ["read aloud", "text to speech", "tts", "accessibility", "dyslexia", "listening", "follow along"],
+    "usage": "AMO tags (Basic Information) and Edge search terms. CWS has no keyword field; keywords belong naturally in the description. 'screen reader' was deliberately excluded: Leia is follow-along TTS, not a screen reader, and stores police misleading metadata.",
+    "note": "Removed 'screen reader' after review; see .audit/store-assets.tsv."
+  },
+  "categories": {
+    "cws": "Accessibility",
+    "amo": ["Accessibility", "Other"],
+    "edge": "Accessibility",
+    "note": "AMO allows up to two categories (source: create-an-appealing-listing). Verify the exact category strings in each dashboard at submission time; these are the intended picks."
+  },
+  "language": "en-US",
+  "homepage_url": null,
+  "support_url": null,
+  "privacy_policy_url": null,
+  "_url_note": "No public homepage, support page, or hosted privacy policy exists yet (checked PRODUCT.md and the repo). Fill these before submission if you can; every store field that takes them is optional except where the README notes otherwise. store/privacy-policy.md is written to be hosted anywhere (GitHub Pages or the repo itself) and its URL pasted into the dashboards."
+}

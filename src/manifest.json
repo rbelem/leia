@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Leia",
-  "version": "0.1.1",
-  "description": "Reads webpages aloud with pluggable AI voices and a highlight that follows the speech (skeleton build).",
+  "name": "Leia: Read Aloud",
+  "version": "0.1.2",
+  "description": "Read any webpage aloud with a voice you choose and a highlight that follows the words as they are spoken.",
   "minimum_chrome_version": "109",
   "action": {
     "default_title": "Leia",
@@ -31,22 +31,53 @@
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; default-src 'self'; connect-src 'self' ws://127.0.0.1:9333 ws://localhost:9333 http://127.0.0.1:* http://localhost:* http://[::1]:* https://raw.githubusercontent.com https://huggingface.co https://api.minimax.io https://api.elevenlabs.io https://api.openai.com https://api.x.ai https://api.mistral.ai https://generativelanguage.googleapis.com https://maas.qwencloudapi.com https://api.fish.audio https://*.speech.microsoft.com https://*.aliyuncs.com wss://token-plan.ap-southeast-1.maas.aliyuncs.com; media-src 'self' blob:"
   },
   "offscreen": {
-    "scripts": ["offscreen/audio.js"],
+    "scripts": [
+      "offscreen/audio.js"
+    ],
     "reason": "AUDIO_PLAYBACK",
     "creation": "ALL"
   },
   "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["content/index.js"], "run_at": "document_idle" },
-    { "matches": ["<all_urls>"], "js": ["floating-bar/index.js"], "run_at": "document_idle" }
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/index.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "floating-bar/index.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
-  "permissions": ["activeTab", "storage", "offscreen", "alarms", "scripting", "declarativeNetRequest"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "offscreen",
+    "alarms",
+    "scripting",
+    "declarativeNetRequest"
+  ],
   "commands": {
     "toggle-read": {
-      "suggested_key": { "default": "Alt+Shift+L" },
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
       "description": "Toggle reading"
     }
   },
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://[::1]/*"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "http://[::1]/*"
+  ],
   "optional_host_permissions": [
     "https://api.openai.com/*",
     "https://api.elevenlabs.io/*",
