@@ -30,6 +30,9 @@ export const FISH_VOICES_TTL_MS = 5 * 60_000;
 /** A hung marketplace request must fail the list (uncached, retried next
  * open) instead of blanking the popup picker indefinitely. */
 const FISH_VOICES_TIMEOUT_MS = 5_000;
+/** Synthesis normally answers in 2–6 s; a stalled POST would otherwise hang
+ * the reader drive loop in silent "playing" forever (observed live). */
+export const FISH_TTS_TIMEOUT_MS = 20_000;
 
 export const FISH_CAPABILITIES: EngineCapabilities = {
   wordTiming: false,
@@ -70,6 +73,8 @@ export interface FishAudioEngineOptions {
   getKey: () => Promise<string | null>;
   fetchImpl?: typeof fetch;
   audioHost?: AudioHost;
+  /** Test hook: overrides FISH_TTS_TIMEOUT_MS. */
+  ttsTimeoutMs?: number;
 }
 
 export class FishAudioEngine implements TextEngine {
@@ -78,6 +83,7 @@ export class FishAudioEngine implements TextEngine {
   private readonly getKey: () => Promise<string | null>;
   private readonly fetchImpl: typeof fetch;
   private readonly audioHost: AudioHost;
+  private readonly ttsTimeoutMs: number;
   private active: { speakId: number; stream: EventStream<EngineEvent>; playback: Playback | null } | null = null;
   private voicesCache: { key: string; at: number; voices: VoiceInfo[] } | null = null;
 
@@ -85,6 +91,7 @@ export class FishAudioEngine implements TextEngine {
     this.getKey = opts.getKey;
     this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis); // Firefox: bare fetch loses its Window `this`
     this.audioHost = opts.audioHost ?? DOM_AUDIO_HOST;
+    this.ttsTimeoutMs = opts.ttsTimeoutMs ?? FISH_TTS_TIMEOUT_MS;
   }
 
   async getVoices(): Promise<VoiceInfo[]> {
@@ -184,8 +191,14 @@ export class FishAudioEngine implements TextEngine {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: FISH_TTS_MODEL },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.ttsTimeoutMs),
       });
     } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        const secs = Math.max(1, Math.round(this.ttsTimeoutMs / 1000));
+        fail(`Fish Audio synthesis timed out after ${secs}s — resume to retry`);
+        return;
+      }
       fail(`Fish Audio request failed: ${String(err)}`);
       return;
     }

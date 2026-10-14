@@ -336,6 +336,24 @@ describe("FishAudioEngine", () => {
     ]);
   });
 
+  it("stalled synthesis aborts at the timeout → error event invites resume", async () => {
+    // A fetch that never answers but honors the abort signal, like a hung TLS stream.
+    const { fetchImpl, calls } = makeFetch([
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    ]);
+    const engine = new FishAudioEngine({ getKey: async () => "k", fetchImpl, audioHost: makeHost(), ttsTimeoutMs: 50 });
+
+    const events = collect(engine.speak("Hi.", 7, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(await events).toEqual([
+      { type: "error", speakId: 7, message: "Fish Audio synthesis timed out after 1s — resume to retry" },
+    ]);
+    expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("text over 2000 chars → error before the request; exactly 2000 is allowed", async () => {
     const { fetchImpl, calls } = makeFetch([() => mp3Response(MP3_BYTES)]);
     const host = makeHost();
