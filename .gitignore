@@ -9,3 +9,8 @@ result
 # leia-ctl research/prototype scratch (superseded by cli/ + cli/SPEC.md)
 prototype/
 ff-research/
+
+# store packages are rebuilt per submission (see store/README.md)
+store/pkg/*.zip
+.audit/
+store/pkg/*.sha256
