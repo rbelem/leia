@@ -58,3 +58,22 @@ Every run uploads a fresh copy, so a failed version create leaves nothing behind
 - **200 MB cap.** It applies to the package and to the source archive (see the submission reference). The build is far below it today; check before adding assets.
 
 The default reviewer build environment is documented in the source submission reference. `store/pkg/README-amo-src.md` ships inside the source archive with our exact steps (Node 22, `npm ci`, `node scripts/build.mjs`), which keeps the reviewer's build reproducible.
+
+## Automating the dev hub (verified 2026-10-14)
+
+Two facts make the AMO dev hub scriptable, and both were learned the hard way:
+
+1. addons.mozilla.org runs in a Firefox privileged content process, so
+   marionette and WebDriver refuse content operations there ("browsing
+   contexts in privileged scope"). Launch the automation browser with
+   `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1` (flatpak: `flatpak run
+   --env=MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 ...`) and the refusal disappears.
+2. The image uploader ignores file selections set through WebDriver
+   (`input.files` assignment and send_keys both save nothing). Post the
+   media form directly from the page instead: read the CSRF token and
+   formset fields from the live form (`edit_media/edit`), build a FormData
+   with real `File` objects, and `fetch` it same-origin. Watch two traps:
+   the description/name/release-notes fields are editor pairs where the
+   submitted field is the `_0` mirror, and geckodriver execute scripts
+   with top-level `await` fail with a bare "javascript error" unless the
+   body is wrapped in a returned async IIFE.
