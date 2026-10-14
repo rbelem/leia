@@ -36,6 +36,7 @@ import { XaiEngine } from "./engine-xai";
 import { MistralEngine } from "./engine-mistral";
 import { GeminiEngine } from "./engine-gemini";
 import { QwenCloudEngine } from "./engine-qwencloud";
+import { FishAudioEngine } from "./engine-fishaudio";
 import { KittenEngine } from "./kitten/engine-kitten";
 import { registerLocalEngines } from "./engine-local";
 import { EngineHub, type EngineFamilyInfo } from "./hub";
@@ -323,6 +324,7 @@ export function resolveAudioEngine(): TextEngine {
   hub.register("mistral", new MistralEngine({ getKey: () => readProviderKey("leia:settings:mistralKey") }));
   hub.register("gemini", new GeminiEngine({ getKey: () => readProviderKey("leia:settings:geminiKey") }));
   hub.register("qwencloud", new QwenCloudEngine({ getKey: () => readProviderKey("leia:settings:qwencloudKey") }));
+  hub.register("fishaudio", new FishAudioEngine({ getKey: () => readProviderKey("leia:settings:fishaudioKey") }));
   // kitten-local (ticket 06): lazy — the model worker spawns on first speak.
   hub.register("kitten-local", new KittenEngine());
   // Re-scan hook (sticky-fallback fix): ensureFamily("local-…") re-runs the

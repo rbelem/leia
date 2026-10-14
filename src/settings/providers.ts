@@ -36,6 +36,13 @@ export const PROVIDERS: ProviderDef[] = [
   { id: "gemini", label: "Gemini", keyStorage: "leia:settings:geminiKey", originPatterns: ["https://generativelanguage.googleapis.com/*"] },
   { id: "qwencloud", label: "QwenCloud", keyStorage: "leia:settings:qwencloudKey", originPatterns: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*", "wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*"] },
   {
+    id: "fishaudio",
+    label: "Fish Audio",
+    keyStorage: "leia:settings:fishaudioKey",
+    originPatterns: ["https://api.fish.audio/*"],
+    hint: "Voices are marketplace voice ids from the Fish Audio library your account can reach; synthesis uses the free s2.1-pro-free model by default.",
+  },
+  {
     id: "azure",
     label: "Azure",
     keyStorage: "leia:settings:azureKey",

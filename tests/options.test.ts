@@ -114,7 +114,7 @@ describe("initial render", () => {
     expect([...preset.options].map((o) => o.value)).toEqual(BUILT_IN_PROFILES.map((p) => p.id));
 
     const rows = [...q("providers").querySelectorAll<HTMLElement>(".provider")];
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(9);
     expect(providerRow("minimax").querySelector(".provider-state")!.textContent).toBe("no key");
     // Azure renders its region as a dropdown with the default preselected.
     const azure = providerRow("azure").querySelector<HTMLSelectElement>("select.region")!;
@@ -148,6 +148,19 @@ describe("initial render", () => {
     expect(h.permissionRequests).toEqual([
       { origins: ["https://maas.qwencloudapi.com/*", "https://*.aliyuncs.com/*", "wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*"] },
     ]);
+  });
+
+  it("saving a fishaudio key requests its api.fish.audio origin", async () => {
+    await loadOptions();
+
+    const fish = providerRow("fishaudio");
+    const input = fish.querySelector<HTMLInputElement>(".key-input")!;
+    input.value = "fk-test-1234";
+    fish.querySelector<HTMLButtonElement>(".save")!.click();
+    await settle();
+
+    expect(h.storage["leia:settings:fishaudioKey"]).toBe("fk-test-1234");
+    expect(h.permissionRequests).toEqual([{ origins: ["https://api.fish.audio/*"] }]);
   });
 
   it("clearing a key saves the empty value without requesting permissions", async () => {

@@ -54,6 +54,7 @@ const FAMILY_LABELS: Record<string, string> = {
   mistral: "Mistral",
   gemini: "Gemini",
   qwencloud: "QwenCloud",
+  fishaudio: "Fish Audio",
   azure: "Azure",
   "kitten-local": "Kitten (local)",
 };
