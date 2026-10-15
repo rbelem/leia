@@ -11,23 +11,23 @@ Source for every requirement below (fetched 2026-10-14):
 
 ## Fields
 
-| Partner Center field | Value | Source of truth |
-|---|---|---|
-| Extension name | `Leia: Read Aloud` | manifest `name` (read-only) |
-| Description | manifest `description` (read-only) + long description field | paste `store/copy/long-description.md` (plain text; avoid special characters like bullets that the certification step rejects — the file is written plain) |
-| Short name / short description | first lines of the long description | |
-| Category | Accessibility | copy.json |
-| Website / Support | repo issues page if public | |
-| Search terms | copy.json `keywords_tags` | copy.json |
+| Partner Center field           | Value                                                       | Source of truth                                                                                                                                            |
+| ------------------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extension name                 | `Leia: Read Aloud`                                          | manifest `name` (read-only)                                                                                                                                |
+| Description                    | manifest `description` (read-only) + long description field | paste `store/copy/long-description.md` (plain text; avoid special characters like bullets that the certification step rejects — the file is written plain) |
+| Short name / short description | first lines of the long description                         |                                                                                                                                                            |
+| Category                       | Accessibility                                               | copy.json                                                                                                                                                  |
+| Website / Support              | repo issues page if public                                  |                                                                                                                                                            |
+| Search terms                   | copy.json `keywords_tags`                                   | copy.json                                                                                                                                                  |
 
 ## Assets
 
-| Upload slot | File |
-|---|---|
-| Extension logo (required) | `store/icons/leia-300.png` (300x300) |
-| Small promotional tile (optional) | `store/promo/edge-small-tile-440x280.png` |
-| Large promotional tile (optional) | `store/promo/edge-large-tile-1400x560.png` |
-| Screenshots (max 6) | `store/screenshots/article-wikipedia-1280x800.png` ("A highlight follows the spoken words"), `store/screenshots/article-speech-synthesis-1280x800.png` ("Reading a real article") |
+| Upload slot                       | File                                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extension logo (required)         | `store/icons/leia-300.png` (300x300)                                                                                                                                              |
+| Small promotional tile (optional) | `store/promo/edge-small-tile-440x280.png`                                                                                                                                         |
+| Large promotional tile (optional) | `store/promo/edge-large-tile-1400x560.png`                                                                                                                                        |
+| Screenshots (max 6)               | `store/screenshots/article-wikipedia-1280x800.png` ("A highlight follows the spoken words"), `store/screenshots/article-speech-synthesis-1280x800.png` ("Reading a real article") |
 
 ## Properties, privacy, certification
 

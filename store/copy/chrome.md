@@ -10,24 +10,24 @@ Sources for every requirement below (fetched 2026-10-14):
 
 ## Fields
 
-| Dashboard field | Value | Source of truth |
-|---|---|---|
-| Item name | `Leia: Read Aloud` | manifest `name` (read-only after upload) |
-| Short description | manifest `description` (105/132 chars) | manifest (read-only) |
-| Detailed description | paste `store/copy/long-description.md` (plain text; markdown syntax does NOT render on CWS, the file is written plain on purpose) | copy.json |
-| Category | Accessibility | copy.json |
-| Language | English (en-US) | copy.json |
-| Homepage URL | none yet | copy.json `_url_note` |
-| Support URL | the repo issues page, if public by then | |
+| Dashboard field      | Value                                                                                                                             | Source of truth                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Item name            | `Leia: Read Aloud`                                                                                                                | manifest `name` (read-only after upload) |
+| Short description    | manifest `description` (105/132 chars)                                                                                            | manifest (read-only)                     |
+| Detailed description | paste `store/copy/long-description.md` (plain text; markdown syntax does NOT render on CWS, the file is written plain on purpose) | copy.json                                |
+| Category             | Accessibility                                                                                                                     | copy.json                                |
+| Language             | English (en-US)                                                                                                                   | copy.json                                |
+| Homepage URL         | none yet                                                                                                                          | copy.json `_url_note`                    |
+| Support URL          | the repo issues page, if public by then                                                                                           |                                          |
 
 ## Assets
 
-| Upload slot | File |
-|---|---|
-| Store icon (in the zip, not the dashboard) | `icons/icon128.png` (128x128, square art inside per CWS sizing guidance) |
-| Screenshots (1 to 5) | `store/screenshots/article-wikipedia-1280x800.png`, `store/screenshots/article-speech-synthesis-1280x800.png` |
-| Small promo tile (required) | `store/promo/cws-small-tile-440x280.png` |
-| Marquee promo tile (optional, needed for featuring) | `store/promo/cws-marquee-1400x560.png` |
+| Upload slot                                         | File                                                                                                          |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Store icon (in the zip, not the dashboard)          | `icons/icon128.png` (128x128, square art inside per CWS sizing guidance)                                      |
+| Screenshots (1 to 5)                                | `store/screenshots/article-wikipedia-1280x800.png`, `store/screenshots/article-speech-synthesis-1280x800.png` |
+| Small promo tile (required)                         | `store/promo/cws-small-tile-440x280.png`                                                                      |
+| Marquee promo tile (optional, needed for featuring) | `store/promo/cws-marquee-1400x560.png`                                                                        |
 
 ## Privacy tab answers
 

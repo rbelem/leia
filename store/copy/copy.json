@@ -19,7 +19,15 @@
   "long_description_soft_max": 16000,
   "long_description_limit_note": "The CWS dashboard enforces a 16,000-character detailed-description cap; the current text is ~2k so the exact cap is not load-bearing. Not encoded as a hard gate.",
   "keywords_tags": {
-    "value": ["read aloud", "text to speech", "tts", "accessibility", "dyslexia", "listening", "follow along"],
+    "value": [
+      "read aloud",
+      "text to speech",
+      "tts",
+      "accessibility",
+      "dyslexia",
+      "listening",
+      "follow along"
+    ],
     "usage": "AMO tags (Basic Information) and Edge search terms. CWS has no keyword field; keywords belong naturally in the description. 'screen reader' was deliberately excluded: Leia is follow-along TTS, not a screen reader, and stores police misleading metadata.",
     "note": "Removed 'screen reader' after review; see .audit/store-assets.tsv."
   },

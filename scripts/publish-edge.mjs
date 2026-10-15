@@ -31,12 +31,16 @@ const UPLOAD_TIMEOUT_MS = 10 * 60_000;
 const POLL_UPLOAD = { everyMs: 3_000, timeoutMs: 5 * 60_000 };
 const POLL_PUBLISH = { everyMs: 10_000, timeoutMs: 30 * 60_000 };
 const MAX_CONSECUTIVE_POLL_ERRORS = 5;
-const DEFAULT_NOTE = "Automated package update submitted by scripts/publish-edge.mjs (Leia release pipeline).";
+const DEFAULT_NOTE =
+  "Automated package update submitted by scripts/publish-edge.mjs (Leia release pipeline).";
 
-const pkgUrl = (pid) => `${API_BASE}/v1/products/${pid}/submissions/draft/package`;
-const uploadOpUrl = (pid, op) => `${API_BASE}/v1/products/${pid}/submissions/draft/package/operations/${op}`;
+const pkgUrl = (pid) =>
+  `${API_BASE}/v1/products/${pid}/submissions/draft/package`;
+const uploadOpUrl = (pid, op) =>
+  `${API_BASE}/v1/products/${pid}/submissions/draft/package/operations/${op}`;
 const publishUrl = (pid) => `${API_BASE}/v1/products/${pid}/submissions`;
-const publishOpUrl = (pid, op) => `${API_BASE}/v1/products/${pid}/submissions/operations/${op}`;
+const publishOpUrl = (pid, op) =>
+  `${API_BASE}/v1/products/${pid}/submissions/operations/${op}`;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const oneLine = (s) => String(s).replace(/\s+/g, " ").trim().slice(0, 300);
@@ -53,15 +57,24 @@ function parseArgv(argv) {
     if (a === "--dry-run") out.dryRun = true;
     else if (a === "--zip") out.zip = argv[++i];
     else if (a === "--note") out.note = argv[++i];
-    else fail(`unknown argument ${a}; usage: publish-edge.mjs --zip <path> [--note <text>] [--dry-run]`);
+    else
+      fail(
+        `unknown argument ${a}; usage: publish-edge.mjs --zip <path> [--note <text>] [--dry-run]`,
+      );
   }
-  if (out.zip === undefined || out.note === undefined) fail("--zip and --note each need a value");
-  if (!out.dryRun && !out.zip) fail("--zip <path> is required without --dry-run");
+  if (out.zip === undefined || out.note === undefined)
+    fail("--zip and --note each need a value");
+  if (!out.dryRun && !out.zip)
+    fail("--zip <path> is required without --dry-run");
   return out;
 }
 
 function parseEnv(env, live) {
-  const keySource = env.EDGE_API_KEY ? "EDGE_API_KEY" : env.EDGE_CLIENT_SECRET ? "EDGE_CLIENT_SECRET (legacy alias)" : null;
+  const keySource = env.EDGE_API_KEY
+    ? "EDGE_API_KEY"
+    : env.EDGE_CLIENT_SECRET
+      ? "EDGE_CLIENT_SECRET (legacy alias)"
+      : null;
   const v = {
     productId: env.EDGE_PRODUCT_ID ?? "",
     clientId: env.EDGE_CLIENT_ID ?? "",
@@ -70,9 +83,16 @@ function parseEnv(env, live) {
     tenantSet: env.EDGE_TENANT_ID !== undefined,
   };
   if (live) {
-    if (!v.productId) fail("EDGE_PRODUCT_ID is not set (Partner Center, Extension overview page)");
-    if (!v.clientId) fail("EDGE_CLIENT_ID is not set (Partner Center, Publish API page)");
-    if (!v.apiKey) fail("EDGE_API_KEY is not set (Partner Center, Publish API page; EDGE_CLIENT_SECRET works as a legacy alias)");
+    if (!v.productId)
+      fail(
+        "EDGE_PRODUCT_ID is not set (Partner Center, Extension overview page)",
+      );
+    if (!v.clientId)
+      fail("EDGE_CLIENT_ID is not set (Partner Center, Publish API page)");
+    if (!v.apiKey)
+      fail(
+        "EDGE_API_KEY is not set (Partner Center, Publish API page; EDGE_CLIENT_SECRET works as a legacy alias)",
+      );
   }
   return v;
 }
@@ -90,7 +110,8 @@ function readZip(path) {
   const head = Buffer.alloc(4);
   readSync(fd, head, 0, 4, 0);
   closeSync(fd);
-  if (!head.equals(Buffer.from("PK\x03\x04"))) fail(`--zip ${path} is not a zip file (bad magic bytes)`);
+  if (!head.equals(Buffer.from("PK\x03\x04")))
+    fail(`--zip ${path} is not a zip file (bad magic bytes)`);
   return { path, size: st.size };
 }
 
@@ -99,7 +120,8 @@ async function failResponse(res, what) {
   let detail = text.trim();
   try {
     const body = JSON.parse(text);
-    detail = [body.errorCode, body.message].filter(Boolean).join(": ") || text.trim();
+    detail =
+      [body.errorCode, body.message].filter(Boolean).join(": ") || text.trim();
   } catch {
     // not JSON; the raw text (possibly an HTML error page) is the best detail
   }
@@ -110,32 +132,47 @@ function operationQueryUrl(v, kind, location) {
   // The docs say the Location header carries the operation ID; accept an
   // absolute URL too in case the service starts returning one.
   if (/^https?:/i.test(location)) return location;
-  return kind === "upload" ? uploadOpUrl(v.productId, location) : publishOpUrl(v.productId, location);
+  return kind === "upload"
+    ? uploadOpUrl(v.productId, location)
+    : publishOpUrl(v.productId, location);
 }
 
 async function awaitOperation(v, kind, location) {
   const { everyMs, timeoutMs } = kind === "upload" ? POLL_UPLOAD : POLL_PUBLISH;
   const url = operationQueryUrl(v, kind, location);
-  console.log(`${kind} operation ${location}: polling every ${everyMs / 1000}s, timeout ${timeoutMs / 1000}s`);
+  console.log(
+    `${kind} operation ${location}: polling every ${everyMs / 1000}s, timeout ${timeoutMs / 1000}s`,
+  );
   const deadline = Date.now() + timeoutMs;
   let consecutiveErrors = 0;
   while (true) {
     if (Date.now() > deadline) {
-      fail(`${kind} operation ${location} is still InProgress after ${timeoutMs / 1000}s (not failed); re-check it with the curl in store/publishing/edge.md`);
+      fail(
+        `${kind} operation ${location} is still InProgress after ${timeoutMs / 1000}s (not failed); re-check it with the curl in store/publishing/edge.md`,
+      );
     }
     let res;
     try {
       res = await fetch(url, {
-        headers: { Authorization: `ApiKey ${v.apiKey}`, "X-ClientID": v.clientId },
+        headers: {
+          Authorization: `ApiKey ${v.apiKey}`,
+          "X-ClientID": v.clientId,
+        },
         signal: AbortSignal.timeout(30_000),
       });
       if (res.status === 429 || res.status >= 500) {
-        if (++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS) fail(`${kind} operation ${location}: ${consecutiveErrors} polls in a row returned HTTP ${res.status}`);
+        if (++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS)
+          fail(
+            `${kind} operation ${location}: ${consecutiveErrors} polls in a row returned HTTP ${res.status}`,
+          );
         await sleep(everyMs);
         continue;
       }
     } catch (e) {
-      if (++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS) fail(`${kind} operation ${location}: ${consecutiveErrors} polls failed in a row (last: ${e.message})`);
+      if (++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS)
+        fail(
+          `${kind} operation ${location}: ${consecutiveErrors} polls failed in a row (last: ${e.message})`,
+        );
       await sleep(everyMs);
       continue;
     }
@@ -147,45 +184,67 @@ async function awaitOperation(v, kind, location) {
       continue;
     }
     if (body?.status === "Succeeded" || body?.status === "Failed") return body;
-    fail(`${kind} operation ${location} returned an unknown status: ${JSON.stringify(body?.status ?? body)}`);
+    fail(
+      `${kind} operation ${location} returned an unknown status: ${JSON.stringify(body?.status ?? body)}`,
+    );
   }
 }
 
 async function uploadPackage(v, zip) {
   const res = await fetch(pkgUrl(v.productId), {
     method: "POST",
-    headers: { Authorization: `ApiKey ${v.apiKey}`, "X-ClientID": v.clientId, "Content-Type": "application/zip" },
+    headers: {
+      Authorization: `ApiKey ${v.apiKey}`,
+      "X-ClientID": v.clientId,
+      "Content-Type": "application/zip",
+    },
     body: readFileSync(zip.path),
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   if (res.status !== 202) await failResponse(res, "package upload");
   const op = res.headers.get("location");
-  if (!op) fail("package upload returned 202 without a Location header (cannot poll its operation)");
+  if (!op)
+    fail(
+      "package upload returned 202 without a Location header (cannot poll its operation)",
+    );
   return op;
 }
 
 async function postPublish(v, note) {
   const res = await fetch(publishUrl(v.productId), {
     method: "POST",
-    headers: { Authorization: `ApiKey ${v.apiKey}`, "X-ClientID": v.clientId, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `ApiKey ${v.apiKey}`,
+      "X-ClientID": v.clientId,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({ notes: note ?? DEFAULT_NOTE }),
     signal: AbortSignal.timeout(60_000),
   });
   if (res.status !== 202) await failResponse(res, "publish request");
   const op = res.headers.get("location");
-  if (!op) fail("publish request returned 202 without a Location header (cannot poll its operation)");
+  if (!op)
+    fail(
+      "publish request returned 202 without a Location header (cannot poll its operation)",
+    );
   return op;
 }
 
 // The API reference documents these publish failure modes verbatim; each maps
 // to one operator action instead of an if-chain at the call site.
 const PUBLISH_FAILURE_HINTS = {
-  CreateNotAllowed: "the product does not exist yet; do the first submission manually (store/copy/edge.md)",
-  NoModulesUpdated: "the package has no changes against the live version; the draft was replaced but the live listing is unchanged, so bump the version in src/manifest.json, rebuild, re-zip, and rerun",
-  InProgressSubmission: "a previous submission is still in review; wait for it to finish",
-  UnpublishInProgress: "the product is being unpublished; retry after that finishes",
-  ModuleStateUnPublishable: "the uploaded package has invalid modules; fix what Partner Center reports and rerun",
-  SubmissionValidationError: "the submission failed validation; fix the listed errors and rerun",
+  CreateNotAllowed:
+    "the product does not exist yet; do the first submission manually (store/copy/edge.md)",
+  NoModulesUpdated:
+    "the package has no changes against the live version; the draft was replaced but the live listing is unchanged, so bump the version in src/manifest.json, rebuild, re-zip, and rerun",
+  InProgressSubmission:
+    "a previous submission is still in review; wait for it to finish",
+  UnpublishInProgress:
+    "the product is being unpublished; retry after that finishes",
+  ModuleStateUnPublishable:
+    "the uploaded package has invalid modules; fix what Partner Center reports and rerun",
+  SubmissionValidationError:
+    "the submission failed validation; fix the listed errors and rerun",
 };
 
 function renderPlan(args, v, zip) {
@@ -226,21 +285,37 @@ if (args.dryRun) {
 }
 
 const zip = readZip(args.zip);
-console.log(`[1/4] uploading ${zip.path} (${zip.size} bytes) as the draft package`);
+console.log(
+  `[1/4] uploading ${zip.path} (${zip.size} bytes) as the draft package`,
+);
 const uploadLoc = await uploadPackage(v, zip);
 const uploadBody = await awaitOperation(v, "upload", uploadLoc);
 if (uploadBody.status === "Failed") {
-  fail(`package upload failed: ${uploadBody.errorCode || "Failed"}: ${uploadBody.message ?? "no message from the API"}`);
+  fail(
+    `package upload failed: ${uploadBody.errorCode || "Failed"}: ${uploadBody.message ?? "no message from the API"}`,
+  );
 }
-console.log(`[2/4] upload operation ${uploadBody.id}: Succeeded (${oneLine(uploadBody.message ?? "")})`);
+console.log(
+  `[2/4] upload operation ${uploadBody.id}: Succeeded (${oneLine(uploadBody.message ?? "")})`,
+);
 
-console.log("[3/4] issuing the publish call (submits the draft for certification)");
+console.log(
+  "[3/4] issuing the publish call (submits the draft for certification)",
+);
 const publishLoc = await postPublish(v, args.note);
 const publishBody = await awaitOperation(v, "publish", publishLoc);
 if (publishBody.status === "Failed") {
   const code = publishBody.errorCode || "unknown";
-  const hint = PUBLISH_FAILURE_HINTS[code] ?? "see store/publishing/edge.md for the failure playbook";
-  fail(`publish refused (${code}): ${publishBody.message ?? "no message from the API"}; ${hint}`);
+  const hint =
+    PUBLISH_FAILURE_HINTS[code] ??
+    "see store/publishing/edge.md for the failure playbook";
+  fail(
+    `publish refused (${code}): ${publishBody.message ?? "no message from the API"}; ${hint}`,
+  );
 }
-console.log(`[4/4] publish operation ${publishBody.id}: Succeeded (${oneLine(publishBody.message ?? "")})`);
-console.log("Synchronous confirmation ends here: the submission exists and certification has begun. The review outcome and store rollout are asynchronous and take days.");
+console.log(
+  `[4/4] publish operation ${publishBody.id}: Succeeded (${oneLine(publishBody.message ?? "")})`,
+);
+console.log(
+  "Synchronous confirmation ends here: the submission exists and certification has begun. The review outcome and store rollout are asynchronous and take days.",
+);

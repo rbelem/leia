@@ -9,23 +9,23 @@ Sources for every requirement below (fetched 2026-10-14):
 
 ## Fields
 
-| AMO field | Value | Source of truth |
-|---|---|---|
-| Add-on name | `Leia: Read Aloud` | manifest `name` |
-| Summary (≤250) | `store/copy/copy.json` `amo_summary` (155/250 chars) | copy.json |
-| Description (Markdown supported) | paste `store/copy/long-description.md` (plain text renders fine as Markdown) | copy.json |
-| Tags | copy.json `keywords_tags` | copy.json |
-| Categories (up to 2) | Accessibility + one more if it fits | copy.json |
-| Supported platforms | Linux, Mac, Windows; include Android only if you test it (build sets gecko_android min 142) | |
-| Homepage / Support | repo issues page if public | |
+| AMO field                        | Value                                                                                       | Source of truth |
+| -------------------------------- | ------------------------------------------------------------------------------------------- | --------------- |
+| Add-on name                      | `Leia: Read Aloud`                                                                          | manifest `name` |
+| Summary (≤250)                   | `store/copy/copy.json` `amo_summary` (155/250 chars)                                        | copy.json       |
+| Description (Markdown supported) | paste `store/copy/long-description.md` (plain text renders fine as Markdown)                | copy.json       |
+| Tags                             | copy.json `keywords_tags`                                                                   | copy.json       |
+| Categories (up to 2)             | Accessibility + one more if it fits                                                         | copy.json       |
+| Supported platforms              | Linux, Mac, Windows; include Android only if you test it (build sets gecko_android min 142) |                 |
+| Homepage / Support               | repo issues page if public                                                                  |                 |
 
 ## Assets
 
-| Upload slot | File |
-|---|---|
-| Icon | already in the package (`icons/icon32/48/128.png`); AMO shows it from the manifest |
-| Screenshots | `store/screenshots/article-wikipedia-1280x800.png`, `store/screenshots/article-speech-synthesis-1280x800.png` (1280x800 is AMO's recommended size) |
-| No banner needed | AMO has no promo tile upload |
+| Upload slot      | File                                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Icon             | already in the package (`icons/icon32/48/128.png`); AMO shows it from the manifest                                                                 |
+| Screenshots      | `store/screenshots/article-wikipedia-1280x800.png`, `store/screenshots/article-speech-synthesis-1280x800.png` (1280x800 is AMO's recommended size) |
+| No banner needed | AMO has no promo tile upload                                                                                                                       |
 
 ## Data disclosure
 

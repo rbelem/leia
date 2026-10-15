@@ -37,6 +37,9 @@ jobs:
       - name: Tests
         run: npm test
 
+      - name: Format check (release docs and publish scripts only)
+        run: npx prettier --check store/publishing store/copy scripts/publish-chrome.mjs scripts/publish-firefox.mjs scripts/publish-edge.mjs scripts/cdp-drive.mjs
+
       - name: Stamp release version from tag
         run: node scripts/stamp-version.mjs
 

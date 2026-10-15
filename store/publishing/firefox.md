@@ -23,11 +23,11 @@ Add `--dry-run` to print the exact requests with every secret as `***` and exit 
 
 The script reads credentials only from the environment and never prints their values, error messages included. The endpoints it calls, verbatim from the reference:
 
-| Step | Method and URL | Body | Success signal |
-|---|---|---|---|
-| Upload | `POST https://addons.mozilla.org/api/v5/addons/upload/` | multipart `upload` (the zip), `channel` (`listed` or `unlisted`) | 201 with the upload object (`uuid`, `url`); validation then runs server side |
-| Poll | `GET <url from the upload response>` every 5s, up to 15min | none | `processed: true`; `valid: false` fails the run with the linter errors, warnings are printed and do not block |
-| Version create | `POST https://addons.mozilla.org/api/v5/addons/addon/<addon id>/versions/` | multipart `upload` (the uuid), `source` (the source archive), `approval_notes` (extracted from the fenced block in `store/copy/firefox.md`) | 201 version object |
+| Step           | Method and URL                                                             | Body                                                                                                                                        | Success signal                                                                                                |
+| -------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Upload         | `POST https://addons.mozilla.org/api/v5/addons/upload/`                    | multipart `upload` (the zip), `channel` (`listed` or `unlisted`)                                                                            | 201 with the upload object (`uuid`, `url`); validation then runs server side                                  |
+| Poll           | `GET <url from the upload response>` every 5s, up to 15min                 | none                                                                                                                                        | `processed: true`; `valid: false` fails the run with the linter errors, warnings are printed and do not block |
+| Version create | `POST https://addons.mozilla.org/api/v5/addons/addon/<addon id>/versions/` | multipart `upload` (the uuid), `source` (the source archive), `approval_notes` (extracted from the fenced block in `store/copy/firefox.md`) | 201 version object                                                                                            |
 
 Every request carries `Authorization: JWT <token>`. The script mints the HS256 JWT itself with `node:crypto` (`iss` is the API key, `exp` is 60s past `iat`, well inside the 5 min the reference allows). No dependencies are added.
 
@@ -67,7 +67,7 @@ Two facts make the AMO dev hub scriptable, and both were learned the hard way:
    marionette and WebDriver refuse content operations there ("browsing
    contexts in privileged scope"). Launch the automation browser with
    `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1` (flatpak: `flatpak run
-   --env=MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 ...`) and the refusal disappears.
+--env=MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1 ...`) and the refusal disappears.
 2. The image uploader ignores file selections set through WebDriver
    (`input.files` assignment and send_keys both save nothing). Post the
    media form directly from the page instead: read the CSRF token and
