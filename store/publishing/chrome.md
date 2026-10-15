@@ -36,6 +36,70 @@ Do the manual first submission from `store/copy/chrome.md` first: the API upload
 6. The item id (`CWS_EXTENSION_ID`) is the long string in the developer dashboard URL for the item.
 7. Store the four values as GitHub Actions secrets (`CWS_EXTENSION_ID`, `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`) and, for local runs, in your shell environment. Never commit them.
 
+## Driving the dashboard over CDP (first submission)
+
+The Publish API cannot fill the privacy tab, the listing tab, or the review
+notes, so the first submission is manual. The whole flow also runs under CDP
+(Chrome DevTools Protocol) against a logged-in dashboard, which is how the
+0.1.2 submission on 2026-10-14 was produced. Facts for this item:
+`CWS_EXTENSION_ID=edaedoahpgocdflmgmjjfifpfpgdepmn`, publisher account
+`0ec818d2-d9a0-492f-8b6e-85c8a85465e3`.
+
+Launch Chrome with a dedicated profile and a debug port. A profile under the
+flatpak app directory survives reboots and is always visible to the sandbox:
+
+```
+nohup flatpak run com.google.Chrome \
+  --user-data-dir="$HOME/.var/app/com.google.Chrome/config/google-chrome/leia-cws" \
+  --remote-debugging-port=9222 \
+  --no-first-run --no-default-browser-check --start-maximized \
+  "https://chromewebstore.google.com/devconsole" >/tmp/opencode/chrome-cws.log 2>&1 &
+```
+
+Sign in inside the window (operator step; the login persists in the profile).
+Attach to the page target from `http://127.0.0.1:9222/json` over a plain
+WebSocket (Node 22+ has a native client) and drive it with
+`Runtime.evaluate`, `Page.captureScreenshot`, `DOM.setFileInputFiles` and
+`Input.dispatchMouseEvent`.
+
+Lessons that cost time, in order of pain:
+
+- The UI renders in the account's language (pt-BR here). Navigate by URL
+  (`.../edit/package`, `/edit/listing`, `/edit/privacy`, `/edit/distribution`)
+  and by DOM structure, never by label text.
+- Package upload: the upload button opens an in-page dialog that contains a
+  real `input[type=file]`. Set the file with `DOM.setFileInputFiles` (the repo
+  directory is flatpak-visible through its own permission) and dispatch
+  `input` + `change` events on the input. `Page.setInterceptFileChooserDialog`
+  never fires on this console.
+- Listing images work the same way, one slot at a time: store icon 128x128,
+  screenshots 1280x800 (a new input appears after each upload), small promo
+  tile 440x280. Re-scan and address slots by index; keyword walks over
+  ancestor sections lie once the DOM re-renders.
+- Category and language are Google jsaction dropdowns. Synthetic `.click()`
+  does nothing. `scrollIntoView` the option inside the popup (it opens upward
+  with an internal scroller), read `getBoundingClientRect`, then send
+  `mouseMoved` / `mousePressed` / `mouseReleased` via
+  `Input.dispatchMouseEvent`. Radios and checkboxes need the same trusted
+  click on the control itself, never on the label text.
+- `Runtime.evaluate` shares one global scope across calls: a top-level `const`
+  in one call breaks every later call with `SyntaxError`. Wrap every
+  expression in an IIFE.
+- Fields commit into the framework's model, not the DOM. After setting a
+  value, confirm the character counter (for example `74/2.048`), save the
+  draft, reload the page and re-read the field. The privacy-policy URL
+  silently dropped on the first save without this check.
+- Two account-level gates block any first submission: a verified publisher
+  contact email (Configurações, "Adicionar e-mail", then "Verificar endereço
+  de e-mail" sends the link) and the EEE trader declaration. Both are
+  one-time and need the operator.
+- "Por que não consigo enviar?" lists the current blockers verbatim. The
+  submit dialog carries the "publish automatically after review" checkbox;
+  keep it checked so an approval goes live on its own. The
+  broad-host-permissions warning on submit is expected for this manifest
+  (`<all_urls>` content script plus loopback host permissions) and only
+  signals a longer in-depth review.
+
 ## Re-runs and version conflicts
 
 - The zip's manifest version must be strictly higher than the live version. The store rejects a duplicate or lower version at the upload step; the script prints the store's own message and exits 1 before any publish. Fix is a new tag, per the publishing README.
