@@ -23,13 +23,13 @@ The older v1 scheme exchanged an AAD client secret (tenant id, client id, secret
 
 Secrets come only from the environment, never from flags or files. The script prints redacted placeholders only.
 
-| Variable | Meaning |
-|---|---|
-| `EDGE_PRODUCT_ID` | the product's ID GUID from Partner Center (Extension overview page) |
-| `EDGE_CLIENT_ID` | the Client ID from the Publish API page |
-| `EDGE_API_KEY` | the API key from the Publish API page |
+| Variable             | Meaning                                                                                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EDGE_PRODUCT_ID`    | the product's ID GUID from Partner Center (Extension overview page)                                                                                       |
+| `EDGE_CLIENT_ID`     | the Client ID from the Publish API page                                                                                                                   |
+| `EDGE_API_KEY`       | the API key from the Publish API page                                                                                                                     |
 | `EDGE_CLIENT_SECRET` | legacy alias for `EDGE_API_KEY`; v1-era configs named the key a client secret, and Microsoft's own samples did too. `EDGE_API_KEY` wins when both are set |
-| `EDGE_TENANT_ID` | accepted and ignored; v1.1 has no tenant |
+| `EDGE_TENANT_ID`     | accepted and ignored; v1.1 has no tenant                                                                                                                  |
 
 ## Setup (once)
 
@@ -101,8 +101,10 @@ curl -s -H "Authorization: ApiKey $EDGE_API_KEY" -H "X-ClientID: $EDGE_CLIENT_ID
 
 ## Driving Partner Center over CDP (verified 2026-10-15)
 
-The first submission was driven through Chrome DevTools Protocol against the
-signed-in Partner Center tab. Every trap, in the order it bit:
+Drive it with `node scripts/cdp-drive.mjs --tab <url-substring>` (every
+subcommand proven live against scratch tabs; usage in its header). Run
+`ping` first: a hung renderer answers the target list but times out every
+evaluate. The traps below, in the order they bit:
 
 - Partner Center renders in shadow DOM. Pierce it in every query: walk
   `querySelectorAll("*")` and recurse into each `shadowRoot`.
@@ -130,7 +132,10 @@ signed-in Partner Center tab. Every trap, in the order it bit:
   Reload rarely revives it. Close the tab (`PUT /json/close/<id>`), open a
   fresh one (`PUT /json/new?<url>`), and re-enter through the Edge home.
 - The caption editor opens one dialog per click. Opening two stacks them;
-  fill and confirm topmost-first.
+  fill and confirm topmost-first. Target `document.activeElement` (the
+  driver's `fillactive`) rather than coordinates: stacked dialogs share
+  one position, and a blind fill once landed in the disabled Extension
+  name field instead.
 - The Website field validates reachability. `https://rclb.dev` 404s,
   so Website points at the repo and support at the issues page until the
   domain serves something.

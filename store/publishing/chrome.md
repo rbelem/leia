@@ -18,11 +18,11 @@ Add `--dry-run` to print the exact requests with every secret as `***` and exit 
 
 The script reads credentials only from the environment and never prints their values, error messages included. The endpoints it calls, verbatim from the reference:
 
-| Step | Method and URL | Success signal |
-|---|---|---|
-| Token exchange | `POST https://accounts.google.com/o/oauth2/token` with `grant_type=refresh_token`, the client id, the client secret, the refresh token | response carries `access_token` (valid one hour) |
-| Upload | `PUT https://www.googleapis.com/upload/chromewebstore/v1.1/items/$ITEM_ID`, headers `Authorization: Bearer` + `x-goog-api-version: 2`, body is the zip | `uploadState` is `SUCCESS` |
-| Publish | `POST https://www.googleapis.com/chromewebstore/v1.1/items/$ITEM_ID/publish` (no `publishTarget` param, the API default, meaning public) | `status` array contains `OK` |
+| Step           | Method and URL                                                                                                                                         | Success signal                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| Token exchange | `POST https://accounts.google.com/o/oauth2/token` with `grant_type=refresh_token`, the client id, the client secret, the refresh token                 | response carries `access_token` (valid one hour) |
+| Upload         | `PUT https://www.googleapis.com/upload/chromewebstore/v1.1/items/$ITEM_ID`, headers `Authorization: Bearer` + `x-goog-api-version: 2`, body is the zip | `uploadState` is `SUCCESS`                       |
+| Publish        | `POST https://www.googleapis.com/chromewebstore/v1.1/items/$ITEM_ID/publish` (no `publishTarget` param, the API default, meaning public)               | `status` array contains `OK`                     |
 
 ## One-time setup
 
@@ -57,10 +57,14 @@ nohup flatpak run com.google.Chrome \
 ```
 
 Sign in inside the window (operator step; the login persists in the profile).
-Attach to the page target from `http://127.0.0.1:9222/json` over a plain
-WebSocket (Node 22+ has a native client) and drive it with
-`Runtime.evaluate`, `Page.captureScreenshot`, `DOM.setFileInputFiles` and
-`Input.dispatchMouseEvent`.
+Drive it with `node scripts/cdp-drive.mjs --tab <url-substring>` (subcommands
+for evaluate, screenshots, trusted clicks, fills, file uploads, and
+navigation; run `ping` first). A hung renderer answers the target list but
+times out every evaluate: if `ping` fails, close the tab (`PUT
+/json/close/<id>`), open a fresh one (`PUT /json/new?<url>`), and re-enter.
+For framework fields where typed keys land nowhere, focus the field and use
+the driver's `fillactive`, which sets the focused element through its native
+setter.
 
 Lessons that cost time, in order of pain:
 
@@ -110,17 +114,17 @@ Lessons that cost time, in order of pain:
 
 The script surfaces the API's own message in its single `error:` line. What each known message means:
 
-| Error line says | Cause and fix |
-|---|---|
-| `token exchange failed (HTTP 401): invalid_client` | Wrong client id or client secret. Check the Cloud Console values and that the secrets are mapped to the right env names. |
-| `token exchange failed ... invalid_grant` | The refresh token was revoked, expired, or belongs to another client. Mint a new one (setup step 5). Rotating the client secret also invalidates refresh tokens. |
-| `token exchange failed ... admin_policy_enforced` | The account's Google Workspace policy blocks the OAuth grant. Use a personal or unmanaged account for the publisher. |
-| `upload rejected ... version` (same or lower version) | The tag already published, or an older tag was re-pushed. Cut a new tag. |
-| `upload ... in review` | The previous version is still under store review. Wait, then rerun. |
-| `upload failed (uploadState FAILURE)` | The package itself failed validation. The `itemError` text names the problem; rebuild from a clean `npm run build` and re-zip per `store/copy/chrome.md`. |
-| `publish did not succeed (status ITEM_PENDING_REVIEW)` | The store took the submission into review instead of accepting it. Watch the dashboard; nothing is broken, but the script did not get an `OK`. |
-| `publish did not succeed (status NOT_AUTHORIZED, DEVELOPER_NO_OWNERSHIP, INVALID_DEVELOPER, ...)` | The OAuth client's account does not own the item, or the account is suspended. Check that the client and the item belong to the same Google account. |
-| `request failed: ...` | The network call itself failed (DNS, proxy, timeout). Rerun; nothing was published. |
+| Error line says                                                                                   | Cause and fix                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token exchange failed (HTTP 401): invalid_client`                                                | Wrong client id or client secret. Check the Cloud Console values and that the secrets are mapped to the right env names.                                         |
+| `token exchange failed ... invalid_grant`                                                         | The refresh token was revoked, expired, or belongs to another client. Mint a new one (setup step 5). Rotating the client secret also invalidates refresh tokens. |
+| `token exchange failed ... admin_policy_enforced`                                                 | The account's Google Workspace policy blocks the OAuth grant. Use a personal or unmanaged account for the publisher.                                             |
+| `upload rejected ... version` (same or lower version)                                             | The tag already published, or an older tag was re-pushed. Cut a new tag.                                                                                         |
+| `upload ... in review`                                                                            | The previous version is still under store review. Wait, then rerun.                                                                                              |
+| `upload failed (uploadState FAILURE)`                                                             | The package itself failed validation. The `itemError` text names the problem; rebuild from a clean `npm run build` and re-zip per `store/copy/chrome.md`.        |
+| `publish did not succeed (status ITEM_PENDING_REVIEW)`                                            | The store took the submission into review instead of accepting it. Watch the dashboard; nothing is broken, but the script did not get an `OK`.                   |
+| `publish did not succeed (status NOT_AUTHORIZED, DEVELOPER_NO_OWNERSHIP, INVALID_DEVELOPER, ...)` | The OAuth client's account does not own the item, or the account is suspended. Check that the client and the item belong to the same Google account.             |
+| `request failed: ...`                                                                             | The network call itself failed (DNS, proxy, timeout). Rerun; nothing was published.                                                                              |
 
 ## What this script deliberately does not do
 
