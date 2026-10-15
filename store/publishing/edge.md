@@ -98,3 +98,39 @@ curl -s -H "Authorization: ApiKey $EDGE_API_KEY" -H "X-ClientID: $EDGE_CLIENT_ID
 2. `npm run build`, then zip `dist/chrome` per `store/copy/edge.md` step 2.
 3. `node scripts/publish-edge.mjs --zip store/pkg/leia-edge-<version>.zip --note "<testing steps for certification>"`.
 4. Exit 0 means submitted for certification; track the review in Partner Center.
+
+## Driving Partner Center over CDP (verified 2026-10-15)
+
+The first submission was driven through Chrome DevTools Protocol against the
+signed-in Partner Center tab. Every trap, in the order it bit:
+
+- Partner Center renders in shadow DOM. Pierce it in every query: walk
+  `querySelectorAll("*")` and recurse into each `shadowRoot`.
+- Custom elements (`v6_he-button`, `v6_he-radio`, `v6_he-checkbox`) are not
+  `button`/`input` selectors. Match by text, then click the shadow `button`
+  or `input` inside via in-page `.click()`. Trusted CDP mouse also works,
+  but in-page clicks never open native dialogs.
+- Never click an "Add Image" button: it opens a native file dialog CDP
+  cannot reach. Instead enable `Page.setInterceptFileChooserDialog`, click
+  via evaluate, take the `backendNodeId` from the `Page.fileChooserOpened`
+  event, resolve it with `DOM.pushNodesByBackendIdsToFrontend` (after
+  `DOM.getDocument`), and set files with `DOM.setFileInputFiles`. This
+  Chrome build has no `Page.handleFileChooser`; the resolve-and-set path is
+  the one that works.
+- Upload slots re-render after each upload, so locate a fresh input per
+  file. The screenshots slot accepts one file per Add Image pass.
+- Textareas and inputs fill reliably through the native value setter plus
+  `input`/`change` events. When several identical fields stack (caption
+  dialogs), target `document.activeElement`, the focused one, and screenshot
+  before filling.
+- Deep links to product pages redirect to the Edge root in a fresh
+  renderer. Enter the product through the Edge home list with an in-page
+  link click (client-side routing), not `Page.navigate`.
+- A hung renderer answers the target list but times out every evaluate.
+  Reload rarely revives it. Close the tab (`PUT /json/close/<id>`), open a
+  fresh one (`PUT /json/new?<url>`), and re-enter through the Edge home.
+- The caption editor opens one dialog per click. Opening two stacks them;
+  fill and confirm topmost-first.
+- The Website field validates reachability. `https://rclb.dev` 404s,
+  so Website points at the repo and support at the issues page until the
+  domain serves something.
