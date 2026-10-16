@@ -137,6 +137,34 @@ function operationQueryUrl(v, kind, location) {
     : publishOpUrl(v.productId, location);
 }
 
+async function pollOnce(v, kind, location, url) {
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `ApiKey ${v.apiKey}`,
+        "X-ClientID": v.clientId,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    return { action: "error", http: false, message: e.message };
+  }
+  if (res.status === 429 || res.status >= 500)
+    return { action: "error", http: true, message: `HTTP ${res.status}` };
+  // The status endpoint itself can answer 202 while the operation is still
+  // being created (body carries InProgress); only fail on other codes.
+  if (res.status !== 200 && res.status !== 202)
+    await failResponse(res, `${kind} status check`);
+  const body = await res.json().catch(() => null);
+  if (body?.status === "InProgress") return { action: "wait" };
+  if (body?.status === "Succeeded" || body?.status === "Failed")
+    return { action: "done", body };
+  fail(
+    `${kind} operation ${location} returned an unknown status: ${JSON.stringify(body?.status ?? body)}`,
+  );
+}
+
 async function awaitOperation(v, kind, location) {
   const { everyMs, timeoutMs } = kind === "upload" ? POLL_UPLOAD : POLL_PUBLISH;
   const url = operationQueryUrl(v, kind, location);
@@ -151,42 +179,25 @@ async function awaitOperation(v, kind, location) {
         `${kind} operation ${location} is still InProgress after ${timeoutMs / 1000}s (not failed); re-check it with the curl in store/publishing/edge.md`,
       );
     }
-    let res;
-    try {
-      res = await fetch(url, {
-        headers: {
-          Authorization: `ApiKey ${v.apiKey}`,
-          "X-ClientID": v.clientId,
-        },
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (res.status === 429 || res.status >= 500) {
-        if (++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS)
-          fail(
-            `${kind} operation ${location}: ${consecutiveErrors} polls in a row returned HTTP ${res.status}`,
-          );
-        await sleep(everyMs);
-        continue;
-      }
-    } catch (e) {
-      if (++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS)
+    const out = await pollOnce(v, kind, location, url);
+    if (out.action === "error") {
+      consecutiveErrors++;
+      if (consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS) {
         fail(
-          `${kind} operation ${location}: ${consecutiveErrors} polls failed in a row (last: ${e.message})`,
+          out.http
+            ? `${kind} operation ${location}: ${consecutiveErrors} polls in a row returned ${out.message}`
+            : `${kind} operation ${location}: ${consecutiveErrors} polls failed in a row (last: ${out.message})`,
         );
+      }
       await sleep(everyMs);
       continue;
     }
     consecutiveErrors = 0;
-    if (res.status !== 200) await failResponse(res, `${kind} status check`);
-    const body = await res.json().catch(() => null);
-    if (body?.status === "InProgress") {
+    if (out.action === "wait") {
       await sleep(everyMs);
       continue;
     }
-    if (body?.status === "Succeeded" || body?.status === "Failed") return body;
-    fail(
-      `${kind} operation ${location} returned an unknown status: ${JSON.stringify(body?.status ?? body)}`,
-    );
+    return out.body;
   }
 }
 
