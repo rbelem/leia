@@ -17,7 +17,7 @@ Source for every requirement below (fetched 2026-10-14):
 | Description                    | manifest `description` (read-only) + long description field | paste `store/copy/long-description.md` (plain text; avoid special characters like bullets that the certification step rejects — the file is written plain) |
 | Short name / short description | first lines of the long description                         |                                                                                                                                                            |
 | Category                       | Accessibility                                               | copy.json                                                                                                                                                  |
-| Website / Support              | repo issues page if public                                  |                                                                                                                                                            |
+| Website / Support              | `https://github.com/rbelem/leia` / `https://github.com/rbelem/leia/issues` (repo is public) | copy.json                                                                                                                                                  |
 | Search terms                   | copy.json `keywords_tags`                                   | copy.json                                                                                                                                                  |
 
 ## Assets
@@ -35,7 +35,7 @@ Source for every requirement below (fetched 2026-10-14):
 - **Permission justifications**: same text as the CWS notes in `chrome.md` (Partner Center asks per permission).
 - **Remote code**: None. (ONNX wasm ships in the package; the on-device engine downloads model weights, which are data.)
 - **Data usage certification**: no data sold; no data used for unrelated purposes. Leia collects nothing; the BYO-key provider path sends page text to the provider the user chose.
-- **Privacy policy URL**: required. Host `store/privacy-policy.md` publicly and paste the URL.
+- **Privacy policy URL**: required. Paste `https://github.com/rbelem/leia/blob/main/store/privacy-policy.md` (copy.json `privacy_policy_url`).
 - **Notes for certification**: how to test (install, open any article, press Alt+Shift+L, watch the highlight; voices need at least one engine: system voices, a local server, or a provider key).
 
 ## Steps

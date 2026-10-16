@@ -17,8 +17,8 @@ Sources for every requirement below (fetched 2026-10-14):
 | Detailed description | paste `store/copy/long-description.md` (plain text; markdown syntax does NOT render on CWS, the file is written plain on purpose) | copy.json                                |
 | Category             | Accessibility                                                                                                                     | copy.json                                |
 | Language             | English (en-US)                                                                                                                   | copy.json                                |
-| Homepage URL         | none yet                                                                                                                          | copy.json `_url_note`                    |
-| Support URL          | the repo issues page, if public by then                                                                                           |                                          |
+| Homepage URL         | `https://github.com/rbelem/leia` (repo root)                                                                                      | copy.json `homepage_url`                  |
+| Support URL          | `https://github.com/rbelem/leia/issues` (repo issues; repo is public)                                                             | copy.json `support_url`                   |
 
 ## Assets
 
@@ -32,8 +32,8 @@ Sources for every requirement below (fetched 2026-10-14):
 ## Privacy tab answers
 
 - Single purpose: "Reads webpages aloud with a highlight that follows the spoken words."
-- Data usage disclosures: check "Website content" only if the wording requires it for reading page text. Leia collects nothing else: no personal data, no health, no financial, no communications, no location, no web history, no user activity, no website content storage beyond local settings.
-- Privacy policy URL: required because Leia handles website content via provider engines. Host `store/privacy-policy.md` anywhere public and paste the URL. Until hosted, the tab will not validate.
+- Data usage disclosures: check "Website content" — Leia reads page text aloud and, when you configure a provider key, sends page text to that provider for speech synthesis. Leia collects nothing else: no personal data, no health, no financial, no communications, no location, no web history, no user activity, no website content storage beyond local settings.
+- Privacy policy URL: required because Leia handles website content via provider engines. Paste `https://github.com/rbelem/leia/blob/main/store/privacy-policy.md` (copy.json `privacy_policy_url`).
 - Certification: no data sold; no data used for unrelated purposes; not used for creditworthiness/lending.
 
 ## Review notes to paste (Item review notes / permissions justification)

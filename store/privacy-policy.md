@@ -2,7 +2,7 @@
 
 Leia is a browser extension that reads webpages aloud. This policy explains what data the extension handles and where it goes. The short version: Leia has no servers, collects no analytics, and sends nothing anywhere unless you configure a voice provider yourself.
 
-Last updated: 2026-10-14. Applies to Leia 0.1.1 and later.
+Last updated: 2026-10-16. Applies to Leia 0.1.2 and later.
 
 ## What Leia stores, and where
 
@@ -43,4 +43,4 @@ It depends on the voice engine you choose. Each engine discloses its privacy cla
 
 ## Contact
 
-Questions about this policy: open an issue on the Leia repository, or use the support contact listed on the store listing where you installed Leia.
+Questions about this policy: open an issue at https://github.com/rbelem/leia/issues, or use the support contact listed on the store listing where you installed Leia.

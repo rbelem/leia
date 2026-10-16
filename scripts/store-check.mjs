@@ -50,7 +50,26 @@ if (manifest.description !== copy.short_description.value) {
   pass("manifest description matches copy.json short_description");
 }
 
-// 4. Every listing image exists at its exact store-specified dimensions.
+// 4. Keyword-spam guard (Yellow Argon strike, 2026-10-16): the listing must
+// not name third-party voice/AI brands or carry SEO superlatives. Covers
+// every file under store/copy — the detailed description is pasted verbatim
+// into CWS and review notes/captions travel with it, so a brand re-entering
+// anywhere in this directory is a resubmission risk.
+import { readdirSync } from "node:fs";
+const SPAM_PATTERNS = [
+  /elevenlabs/i, /azure/i, /openai/i, /\bchatgpt\b/i, /mistral/i,
+  /\bx\.?\s?ai\b/i, /gemini/i, /minimax/i, /\bqwen\b/i, /fish[.\s-]?audio/i,
+  /\bbest\b/i, /#1\b/, /number\s*1/i, /free\s+unlimited/i, /top[-\s]?rated/i,
+];
+for (const file of readdirSync(join(ROOT, "store/copy"))) {
+  if (!/\.(md|json)$/.test(file)) continue;
+  const text = readFileSync(join(ROOT, "store/copy", file), "utf8");
+  const hit = SPAM_PATTERNS.find((re) => re.test(text));
+  if (hit) fail(`store/copy/${file} matches spam-guard ${hit} (see Yellow Argon 2026-10-16)`);
+  else pass(`store/copy/${file} spam-guard clean`);
+}
+
+// 5. Every listing image exists at its exact store-specified dimensions.
 try {
   execFileSync(process.execPath, [join(ROOT, "scripts/render-store-art.mjs"), "--check"], { stdio: "inherit" });
 } catch {

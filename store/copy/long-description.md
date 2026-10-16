@@ -14,8 +14,8 @@ Four kinds of voice engines sit behind one picker, with their capabilities discl
 
 - Browser voices (Web Speech). Built in, no account, works offline. This is the default.
 - Built-in on-device voice (kitten). A small speech model that downloads once to your machine, then runs fully offline.
-- Local model servers. Point Leia at a local TTS server such as Kokoro-FastAPI or a Piper profile, and everything stays on your machine.
-- Provider voices. Add your own API key for ElevenLabs, Azure Speech, OpenAI, Mistral, xAI, Gemini, MiniMax, Qwen, Fish Audio, and more. Page text is sent to that provider to be spoken.
+- Local model servers. Point Leia at a TTS server running on your own machine, and everything stays on your machine.
+- Provider voices. Add your own API key for a third-party speech provider. Page text is sent to that provider to be spoken.
 
 PRIVACY
 
@@ -23,7 +23,7 @@ Leia has no servers and collects no data. Your settings and keys stay in your br
 
 MADE FOR FOLLOW-ALONG READING
 
-- Contrast-adaptive highlight themes stay legible on any page. When no color variant contrasts enough, the highlight falls back to an outline.
+- Contrast-adaptive highlight themes stay legible anywhere. When no color variant contrasts enough, the highlight falls back to an outline.
 - Multi-language reading, including CJK text.
 - Built for readers with dyslexia, low vision, or reading fatigue, and for anyone who would rather listen than scroll.
 

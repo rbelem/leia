@@ -38,8 +38,8 @@
     "note": "AMO allows up to two categories (source: create-an-appealing-listing). Verify the exact category strings in each dashboard at submission time; these are the intended picks."
   },
   "language": "en-US",
-  "homepage_url": null,
-  "support_url": null,
-  "privacy_policy_url": null,
-  "_url_note": "No public homepage, support page, or hosted privacy policy exists yet (checked PRODUCT.md and the repo). Fill these before submission if you can; every store field that takes them is optional except where the README notes otherwise. store/privacy-policy.md is written to be hosted anywhere (GitHub Pages or the repo itself) and its URL pasted into the dashboards."
+  "homepage_url": "https://github.com/rbelem/leia",
+  "support_url": "https://github.com/rbelem/leia/issues",
+  "privacy_policy_url": "https://github.com/rbelem/leia/blob/main/store/privacy-policy.md",
+  "_url_note": "Public URLs on the public repo (verified 2026-10-16 via gh: visibility PUBLIC). Homepage = repo root, support = repo issues, policy = rendered markdown blob. Paste these into every dashboard."
 }

@@ -17,7 +17,7 @@ Sources for every requirement below (fetched 2026-10-14):
 | Tags                             | copy.json `keywords_tags`                                                                   | copy.json       |
 | Categories (up to 2)             | Accessibility + one more if it fits                                                         | copy.json       |
 | Supported platforms              | Linux, Mac, Windows; include Android only if you test it (build sets gecko_android min 142) |                 |
-| Homepage / Support               | repo issues page if public                                                                  |                 |
+| Homepage / Support               | `https://github.com/rbelem/leia` / `https://github.com/rbelem/leia/issues` (repo is public) | copy.json       |
 
 ## Assets
 
