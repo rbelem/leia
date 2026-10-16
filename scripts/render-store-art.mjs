@@ -114,8 +114,8 @@ function checkOnly() {
   process.exit(failed ? 1 : 0);
 }
 
-const chromium = findChromium();
 if (process.argv.includes("--check")) checkOnly();
+const chromium = findChromium();
 let failed = 0;
 for (const asset of ASSETS) {
   try {
