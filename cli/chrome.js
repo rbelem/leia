@@ -99,6 +99,7 @@ export function makeProfileDir(flatpakAppId) {
     mkdirSync(root, { recursive: true });
     return mkdtempSync(join(root, "leia-chrome-"));
   }
+  mkdirSync("/tmp/opencode", { recursive: true });
   return mkdtempSync(join("/tmp/opencode", "leia-chrome-"));
 }
 

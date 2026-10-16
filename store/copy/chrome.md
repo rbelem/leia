@@ -17,8 +17,8 @@ Sources for every requirement below (fetched 2026-10-14):
 | Detailed description | paste `store/copy/long-description.md` (plain text; markdown syntax does NOT render on CWS, the file is written plain on purpose) | copy.json                                |
 | Category             | Accessibility                                                                                                                     | copy.json                                |
 | Language             | English (en-US)                                                                                                                   | copy.json                                |
-| Homepage URL         | `https://github.com/rbelem/leia` (repo root)                                                                                      | copy.json `homepage_url`                  |
-| Support URL          | `https://github.com/rbelem/leia/issues` (repo issues; repo is public)                                                             | copy.json `support_url`                   |
+| Homepage URL         | `https://github.com/rbelem/leia` (repo root)                                                                                      | copy.json `homepage_url`                 |
+| Support URL          | `https://github.com/rbelem/leia/issues` (repo issues; repo is public)                                                             | copy.json `support_url`                  |
 
 ## Assets
 

@@ -11,14 +11,14 @@ Source for every requirement below (fetched 2026-10-14):
 
 ## Fields
 
-| Partner Center field           | Value                                                       | Source of truth                                                                                                                                            |
-| ------------------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Extension name                 | `Leia: Read Aloud`                                          | manifest `name` (read-only)                                                                                                                                |
-| Description                    | manifest `description` (read-only) + long description field | paste `store/copy/long-description.md` (plain text; avoid special characters like bullets that the certification step rejects — the file is written plain) |
-| Short name / short description | first lines of the long description                         |                                                                                                                                                            |
-| Category                       | Accessibility                                               | copy.json                                                                                                                                                  |
+| Partner Center field           | Value                                                                                       | Source of truth                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extension name                 | `Leia: Read Aloud`                                                                          | manifest `name` (read-only)                                                                                                                                |
+| Description                    | manifest `description` (read-only) + long description field                                 | paste `store/copy/long-description.md` (plain text; avoid special characters like bullets that the certification step rejects — the file is written plain) |
+| Short name / short description | first lines of the long description                                                         |                                                                                                                                                            |
+| Category                       | Accessibility                                                                               | copy.json                                                                                                                                                  |
 | Website / Support              | `https://github.com/rbelem/leia` / `https://github.com/rbelem/leia/issues` (repo is public) | copy.json                                                                                                                                                  |
-| Search terms                   | copy.json `keywords_tags`                                   | copy.json                                                                                                                                                  |
+| Search terms                   | copy.json `keywords_tags`                                                                   | copy.json                                                                                                                                                  |
 
 ## Assets
 
