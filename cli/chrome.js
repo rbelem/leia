@@ -99,8 +99,9 @@ export function makeProfileDir(flatpakAppId) {
     mkdirSync(root, { recursive: true });
     return mkdtempSync(join(root, "leia-chrome-"));
   }
-  mkdirSync("/tmp/opencode", { recursive: true });
-  return mkdtempSync(join("/tmp/opencode", "leia-chrome-"));
+  const base = process.env.LEIA_STATE_DIR || "/tmp/opencode";
+  mkdirSync(base, { recursive: true });
+  return mkdtempSync(join(base, "leia-chrome-"));
 }
 
 export class ChromeAdapter extends BrowserAdapter {

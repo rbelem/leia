@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "chrome-webstore-release-blueprint": {
+      "source": "brianlovin/agent-config",
+      "sourceType": "github",
+      "skillPath": "skills/chrome-webstore-release-blueprint/SKILL.md",
+      "computedHash": "23d2440e5d4a4370742b501cd932901bc1277c73b8319b1ee3b2556ab3b68fe3"
+    },
+    "extension-review": {
+      "source": "quangpl/browser-extension-skills",
+      "sourceType": "github",
+      "skillPath": "skills/extension-review/SKILL.md",
+      "computedHash": "6bcb5c99a395e6775ed89ff96019455a34d3d5fdc453977621a58e22113261f9"
+    }
+  }
+}

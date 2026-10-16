@@ -26,7 +26,7 @@
  *   ClickedNotGranted     PRODUCT BUG           -> red immediately, never retried
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -166,6 +166,7 @@ describe.skipIf(!ARMED)("permission grant e2e (cua-driver)", () => {
     }
 
     // Step 2: own throwaway chromium (fresh profile, recipe arg passed by US).
+    mkdirSync("/tmp/opencode", { recursive: true });
     profile = mkdtempSync(join("/tmp/opencode", "leia-e2e-chrome-"));
     child = spawn(
       process.env.CHROME || "chromium",

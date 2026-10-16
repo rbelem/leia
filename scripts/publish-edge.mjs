@@ -4,6 +4,7 @@
 // certification) call, and poll both operations to a terminal state.
 //
 //   node scripts/publish-edge.mjs --zip store/pkg/leia-edge-<version>.zip [--note "..."] [--dry-run]
+//   node scripts/publish-edge.mjs --status [--dry-run]
 //
 // Sources (fetched 2026-10-14):
 //   https://learn.microsoft.com/en-us/microsoft-edge/extensions/update/api/using-addons-api
@@ -50,22 +51,32 @@ function fail(msg) {
   process.exit(1);
 }
 
-function parseArgv(argv) {
-  const out = { zip: null, note: null, dryRun: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--dry-run") out.dryRun = true;
-    else if (a === "--zip") out.zip = argv[++i];
-    else if (a === "--note") out.note = argv[++i];
-    else
-      fail(
-        `unknown argument ${a}; usage: publish-edge.mjs --zip <path> [--note <text>] [--dry-run]`,
-      );
-  }
+const STATUS_USAGE =
+  "publish-edge.mjs --zip <path> [--note <text>] [--dry-run] | publish-edge.mjs --status [--dry-run]";
+
+function consumeArg(out, argv, i) {
+  const a = argv[i];
+  if (a === "--dry-run") out.dryRun = true;
+  else if (a === "--status") out.status = true;
+  else if (a === "--zip" || a === "--note") {
+    out[a.slice(2)] = argv[i + 1];
+    return 1;
+  } else fail(`unknown argument ${a}; usage: ${STATUS_USAGE}`);
+  return 0;
+}
+
+function validateArgs(out) {
   if (out.zip === undefined || out.note === undefined)
     fail("--zip and --note each need a value");
-  if (!out.dryRun && !out.zip)
+  if (out.status && out.note) fail("--note has no effect with --status");
+  if (!out.status && !out.dryRun && !out.zip)
     fail("--zip <path> is required without --dry-run");
+}
+
+function parseArgv(argv) {
+  const out = { zip: null, note: null, dryRun: false, status: false };
+  for (let i = 0; i < argv.length; i++) i += consumeArg(out, argv, i);
+  validateArgs(out);
   return out;
 }
 
@@ -286,8 +297,68 @@ function renderPlan(args, v, zip) {
   console.log(lines.join("\n"));
 }
 
+function renderStatusPlan(v) {
+  const pid = v.productId || "<EDGE_PRODUCT_ID>";
+  const lines = [
+    "dry-run: no network calls were made; exit 0",
+    `auth: no token endpoint (v1.1 API-key auth; every request carries Authorization + X-ClientID)`,
+    `env: EDGE_PRODUCT_ID=${v.productId ? "set" : "<unset>"}, EDGE_CLIENT_ID=${v.clientId ? "set" : "<unset>"}, API key via ${v.keySource ?? "EDGE_API_KEY"}=${v.apiKey ? "set" : "<unset>"}, EDGE_TENANT_ID=${v.tenantSet ? "set but unused (v1.1 has no tenant)" : "<unset>"}`,
+    `step 1  GET ${publishUrl(pid)}`,
+    `        Authorization: ApiKey ${REDACTED}`,
+    `        X-ClientID: ${REDACTED} (from EDGE_CLIENT_ID)`,
+    `step 2  print id, status, updated time per submission, then exit 0 (read-only: never POSTs)`,
+  ];
+  console.log(lines.join("\n"));
+}
+
+function updatedOf(s) {
+  return (
+    s.lastUpdatedTime ??
+    s.updatedTime ??
+    s.lastUpdated ??
+    s.updated ??
+    s.lastModifiedTime ??
+    "-"
+  );
+}
+
+function renderSubmissions(list) {
+  console.log("id\tstatus\tupdated");
+  for (const s of list) {
+    console.log(`${s.id ?? "-"}\t${s.status ?? "-"}\t${updatedOf(s)}`);
+  }
+}
+
+async function fetchSubmissions(v) {
+  const res = await fetch(publishUrl(v.productId), {
+    headers: {
+      Authorization: `ApiKey ${v.apiKey}`,
+      "X-ClientID": v.clientId,
+    },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (res.status !== 200) await failResponse(res, "submissions list");
+  const body = await res.json().catch(() => null);
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.value)) return body.value;
+  if (Array.isArray(body?.submissions)) return body.submissions;
+  fail(
+    `submissions list returned an unexpected shape: ${oneLine(JSON.stringify(body))}`,
+  );
+}
+
 const args = parseArgv(process.argv.slice(2));
 const v = parseEnv(process.env, !args.dryRun);
+
+if (args.status) {
+  if (args.dryRun) {
+    renderStatusPlan(v);
+    process.exit(0);
+  }
+  const list = await fetchSubmissions(v);
+  renderSubmissions(list);
+  process.exit(0);
+}
 
 if (args.dryRun) {
   const zip = args.zip ? readZip(args.zip) : null;

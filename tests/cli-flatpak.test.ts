@@ -73,10 +73,29 @@ describe("cli/chrome flatpak lifecycle (issue #21)", () => {
     });
 
     it("plain binaries keep the /tmp/opencode profile root", () => {
+      const saved = process.env.LEIA_STATE_DIR;
+      delete process.env.LEIA_STATE_DIR;
       const dir = chrome.makeProfileDir(null);
       try {
         expect(dir.startsWith(join("/tmp/opencode", "leia-chrome-"))).toBe(true);
       } finally {
+        if (saved === undefined) delete process.env.LEIA_STATE_DIR;
+        else process.env.LEIA_STATE_DIR = saved;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("LEIA_STATE_DIR redirects the plain-mode profile root", () => {
+      const custom = join(sandbox, "custom-profiles");
+      const saved = process.env.LEIA_STATE_DIR;
+      process.env.LEIA_STATE_DIR = custom;
+      const dir = chrome.makeProfileDir(null);
+      try {
+        expect(dir.startsWith(join(custom, "leia-chrome-"))).toBe(true);
+        expect(existsSync(dir)).toBe(true);
+      } finally {
+        if (saved === undefined) delete process.env.LEIA_STATE_DIR;
+        else process.env.LEIA_STATE_DIR = saved;
         rmSync(dir, { recursive: true, force: true });
       }
     });
