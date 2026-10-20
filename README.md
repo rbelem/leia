@@ -8,8 +8,8 @@ position) is defined in CONTEXT.md; architecture decisions in docs/adr/.
 
 **Status — working product.** Select text or read the whole page; audio
 plays through the engine you pick and a marching highlight tracks the words.
-Eight provider engines, an on-device engine, and nine built-in local-server
-profiles (five self-hosted models + four GPU-model presets)
+Nine provider engines, an on-device engine, and ten built-in local-server
+profiles (six self-hosted models + four GPU-model presets)
 profiles ship in one TypeScript codebase that builds both MV3 packages.
 
 ## Layout
@@ -88,6 +88,7 @@ permission when you save the key):
 | Gemini | PCM → WAV, 30 voices, `Kore` default |
 | Fish Audio (S2) | marketplace voice ids, `s2.1-pro-free` model header, sentence-granularity highlight |
 | QwenCloud (Qwen3-TTS) | DashScope API — JSON envelope → OSS WAV download, 10 voices, `Cherry` default. Plan keys (`sk-sp-…`) instead use the token-plan WebSocket task protocol (`qwen-audio-3.0-tts-plus`, voices `longanlingxin`/`longanlufeng`), authenticated via a DNR session rule that sets the WS handshake `Authorization` header |
+| Gradium | `x-api-key` REST TTS — raw WAV; voices are the `uid`s from `/api/voices/` (flagship catalog + the voices you cloned in Gradium Studio), rate rides `padding_bonus` |
 
 **On-device** — Kitten (nano) runs entirely in the browser via ONNX Runtime
 Web, free and offline-capable. First use downloads ~25 MB of model files —
@@ -106,6 +107,7 @@ copy-pasteable run line:
 | Kittentts | 8882 | ~real-time on CPU |
 | Neutts | 8883 | LLM backbone, slowest, most expressive |
 | Edge | 8884 | free Microsoft voices — text leaves your machine |
+| Phonon | 8889 | Gradium's open-weight model (`ptts` wheel) — 31m/40m, 5 languages, Apache-2.0 weights, fully offline |
 | VoxCPM2 / Qwen3 TTS / Step Audio EditX / Voxtral TTS | 8885–8888 | GPU presets (vLLM-Omni), light up when served |
 
 Run one with **no containers** — install [uv](https://docs.astral.sh/uv),

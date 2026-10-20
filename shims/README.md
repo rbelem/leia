@@ -11,14 +11,15 @@ One process serves one model; pick with `--model`:
 | `kittentts`  | 8882 | `kittentts==0.1.3` | Apache-2.0  | ~40 MB (nano)   | Fast on CPU; nano quality is modest                       |
 | `neutts`     | 8883 | `neutts==1.4.1` | Apache-2.0    | ~1 GB (nano backbone + codec) | **Slowest** — autoregressive backbone on CPU. Synthesize per sentence, not per paragraph. |
 | `edge`       | 8884 | `edge-tts==7.2.8` | MIT         | none (network service) | Real-time-ish (streams)                          |
+| `phonon`     | 8889 | `ptts==0.4.0` | Apache-2.0 (31m) | ~64 MB (31m) | Fast — real-time or faster on a modern CPU; 100+ catalog voices in 5 languages |
 
-**Privacy:** kokoro/piper/kittentts/neutts never leave your machine.
+**Privacy:** kokoro/piper/kittentts/neutts/phonon never leave your machine.
 **`edge` is the exception** — it sends the text to Microsoft's Read-Aloud
 service and returns synthesized audio (officially an undocumented browser
 feature, not an API).
 
-**Tested here vs not** (updated 2026-09-06 — host: NixOS, rootless podman
-5.8.4, uv 0.12):
+**Tested here vs not** (updated 2026-09-06, phonon 2026-10-20 — host: NixOS,
+rootless podman 5.8.4, uv 0.12):
 
 - **Contract layer:** pytest suite green (16 tests); also verified live over
   HTTP via `--model stub` + curl.
@@ -33,6 +34,14 @@ feature, not an API).
   below); containers ship espeak-ng.
 - **edge** — verified live: bare-metal venv and container, real Microsoft
   synth (pt-BR + en-US voices) → mp3 decoded in-process → 24 kHz WAV.
+- **phonon** — verified live: bare-metal `uv run` (CPU, q8 weights), real
+  synthesis → 24 kHz mono 16-bit WAV (5.5 s of audio for a two-sentence
+  paragraph), catalog voice (`Freya`) and unknown-voice fallback both
+  answering, and the rate knob monotonic (0.5 → 3.20 s, 1.0 → 2.96 s,
+  2.0 → 2.64 s for the same sentence — the upstream `duration_delta` band
+  is deliberately small). The default model (Phonon 31m) and the
+  `gradium/phonon-voices` catalog downloaded from Hugging Face on first
+  start; the container image was not rebuilt here.
 - **neutts** — **blocked upstream, not verified end-to-end**: every
   `neuphonic/*` weights repo is HF-gated (401 anonymous; no token on the test
   machine). Adapter API verified by introspection of `neutts==1.4.1`
@@ -74,9 +83,10 @@ POST /leia/v1/synthesize    {"text": "hello", "voice": "<voice id>", "rate": 1.0
 
 - `rate` is clamped to `[0.5, 2]` server-side (same clamp as the engine).
   piper honors it via `length_scale`; kitten passes it as `speed`;
-  neutts ignores it (no speed knob).
+  neutts ignores it (no speed knob); phonon maps it onto the
+  `duration_delta` conditioner (upstream's speed knob).
 - Unknown voice ids fall back to the adapter's default voice.
-- `wordTiming` is always `false` — none of the three SDKs expose usable word
+- `wordTiming` is always `false` — none of the model SDKs expose usable word
   timestamps; the engine skips word highlighting when it is false.
 
 ## Install & run (podman)
@@ -189,6 +199,55 @@ this as a personal-use gray area, not something to rate-limit-hammer or
 re-expose publicly. Unlike the other shims, **the text you read is sent to
 Microsoft's servers.**
 
+### phonon — http://127.0.0.1:8889
+
+Gradium's open-weight on-device TTS (gradium.ai/phonon) through the `ptts`
+wheel — the Rust runtime, no PyTorch, no cloud. The default checkpoint is
+Phonon 31m (English, 31M params, ~64 MB, **Apache-2.0**); the 40m
+checkpoints add French, German, Spanish and Portuguese but are CC BY-NC
+(gated on Hugging Face).
+
+```sh
+# no containers (needs uv: https://docs.astral.sh/uv/)
+shims/run.sh phonon
+
+# containers
+podman build -t leia-shim-phonon -f Dockerfile.phonon .
+podman run --rm -p 127.0.0.1:8889:8889 -v leia-shim-phonon:/root/.cache leia-shim-phonon
+```
+
+First start downloads the model (~64 MB) into the volume. Voices: the
+checkpoint's own voice plus the `gradium/phonon-voices` catalog (102
+voices across en/fr/de/es/pt), filtered to the language the server
+speaks — one server, one language.
+
+**Your Gradium Studio voices** (the ones you designed or cloned in
+studio.gradium.ai) are not in the public Hugging Face catalog. Set
+`GRADIUM_API_KEY` (a key from Gradium Studio) and the shim lists them
+next to the catalog and downloads the voice embedding on first use. The
+key only fetches the voice list and the embedding — **the text is still
+synthesized locally and never leaves the machine.**
+
+Install hint (extension): `podman run --rm -p 127.0.0.1:8889:8889 -v leia-shim-phonon:/root/.cache leia-shim-phonon`
+
+Env vars (all optional): `PHONON_MODEL` (a local checkpoint folder or an
+`hf://owner/name` repo — the default is `gradium/phonon-31m-en`),
+`PHONON_LANG` (`en`, `fr`, `de`, `es`, `pt`, `none` — the language the text
+is normalized in), `PHONON_QUANT` (`q8` by default, `f32` for the
+un-quantized weights), `PHONON_DEVICE` (`cpu` by default), `PHONON_HOME`
+(the voice cache, default `~/.cache/leia/phonon`), `GRADIUM_API_KEY`
+(adds your Gradium Studio voices).
+
+**CPU floor:** the published `ptts` wheels are x86-64-v3 (AVX2/FMA/F16C).
+An older x86 CPU needs a source build instead of the container image.
+
+**Speed knob:** Phonon has no speed multiplier — its control is the
+`duration_delta` conditioner, which upstream documents as "-0.3 faster,
++0.3 slower, 0 is the model's own pace". The shim maps the contract's
+`rate` onto that band (1.0 → 0, 2.0 → -0.3, 0.5 → +0.3). A checkpoint
+without that conditioner rejects the condition; the shim then speaks at
+the model's own pace instead of failing the request.
+
 ### Verify any of them
 
 ```sh
@@ -224,15 +283,16 @@ python server.py --model stub    # full HTTP surface, zero model download
 smoke tests of the contract layer without a multi-GB download.
 
 Without containers, you can also run a real model bare-metal if its SDK is
-installed (`pip install piper-tts`, `kittentts`, or `neutts`):
+installed (`pip install piper-tts`, `kittentts`, `neutts`, or `ptts`):
 
 ```sh
 python server.py --model piper --port 8881   # binds 127.0.0.1 by default
 ```
 
 Model env vars (all optional): `PIPER_HOME`, `PIPER_VOICE`, `KITTEN_MODEL`,
-`NEUTTS_BACKBONE_REPO`, `NEUTTS_CODEC_REPO`, `HF_TOKEN` (neutts only — see
-the gating note). The edge shim has none — it's a pinned network client
+`NEUTTS_BACKBONE_REPO`, `NEUTTS_CODEC_REPO`, `PHONON_MODEL`,
+`PHONON_LANG`, `PHONON_QUANT`, `PHONON_DEVICE`, `HF_TOKEN` (neutts only —
+see the gating note). The edge shim has none — it's a pinned network client
 (`edge-tts==7.2.8`), not a model.
 
 NixOS bare-metal note: manylinux wheels (numpy/torch) fail to load against
@@ -250,7 +310,11 @@ nix, and espeak-ng paths for phonemizer (`PHONEMIZER_ESPEAK_LIBRARY`,
   the bare-metal `pip install piper-tts` server process) subjects the whole
   served combination to GPL-3.0. That is why piper lives in this separate
   server process and is never imported by the extension.
-- kittentts (Apache-2.0), neutts-air (Apache-2.0) and edge-tts (MIT) are
-  permissive; their images carry no additional package obligations. The edge
-  *service* itself is Microsoft's, used unofficially — see the edge section's
-  ToS note.
+- kittentts (Apache-2.0), neutts-air (Apache-2.0), edge-tts (MIT) and the
+  `ptts` wheel (MIT OR Apache-2.0) are permissive; their images carry no
+  additional package obligations. The edge *service* itself is Microsoft's,
+  used unofficially — see the edge section's ToS note.
+- The phonon model weights are **not** part of the wheel: Phonon 31m ships
+  under Apache-2.0, the 40m checkpoints under CC BY-NC 4.0 (gated on
+  Hugging Face). The shim ships no weights — it downloads the default
+  (31m, Apache-2.0) on first start.

@@ -98,6 +98,7 @@ const PROVIDER_KEY_KEYS: Record<string, string> = {
   gemini: "leia:settings:geminiKey",
   qwencloud: "leia:settings:qwencloudKey",
   fishaudio: "leia:settings:fishaudioKey",
+  gradium: "leia:settings:gradiumKey",
   azure: "leia:settings:azureKey",
 };
 const AZURE_REGION_KEY = "leia:settings:azureRegion";

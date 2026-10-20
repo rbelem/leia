@@ -456,7 +456,7 @@ async function handlePageInfo(): Promise<RouterReply> {
 // openai/xai/mistral/gemini) yields 0 voices. The service worker has working
 // storage, so every `leia:audio:*` message forwarded to the offscreen doc
 // (the ProxyEngine's runtime.sendMessage calls) is enriched here with a
-// fresh in-memory snapshot: the 7 provider keyStorage values from the
+// fresh in-memory snapshot: the provider keyStorage values from the
 // providers catalog (incl. azure's region) plus the custom local-server
 // profiles. Keys travel only inside same-extension runtime messages and are
 // applied to the in-memory keystore in the offscreen doc (src/audio/

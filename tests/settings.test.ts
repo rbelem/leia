@@ -130,6 +130,7 @@ describe("provider keys", () => {
     expect(byId.openai.keyStorage).toBe("leia:settings:openaiKey");
     expect(byId.qwencloud.keyStorage).toBe("leia:settings:qwencloudKey");
     expect(byId.fishaudio.keyStorage).toBe("leia:settings:fishaudioKey");
+    expect(byId.gradium.keyStorage).toBe("leia:settings:gradiumKey");
     expect(byId.azure.keyStorage).toBe("leia:settings:azureKey");
     expect(byId.azure.regionStorage).toBe("leia:settings:azureRegion");
   });

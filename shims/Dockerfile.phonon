@@ -1,0 +1,14 @@
+# leia local-model shim — Phonon (gradium.ai/phonon). Gradium's open-weight
+# on-device TTS: the default Phonon 31m model (English, 31M params,
+# ~64 MB, Apache-2.0) downloads from Hugging Face on first start and
+# caches in the volume. 24 kHz mono output.
+#
+# The ptts wheel ships x86-64-v3 (AVX2/FMA/F16C) manylinux builds — an
+# older x86 CPU needs a source build instead of this image.
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi uvicorn ptts==0.4.0
+COPY server.py adapters.py ./
+ENV HF_HOME=/root/.cache/huggingface
+EXPOSE 8889
+CMD ["python", "server.py", "--model", "phonon", "--host", "0.0.0.0", "--port", "8889"]

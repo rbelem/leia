@@ -6,11 +6,11 @@ whole contract layer — works on a bare venv without the multi-GB model
 stacks. That is what keeps the pytest contract suite runnable anywhere.
 
 NOTE: these adapters are written against the documented public APIs of
-piper1-gpl, KittenTTS, kokoro-onnx and neutts-air. The kokoro adapter (and
-only it) WAS executed live in the authoring environment (bare-metal CPU
-synthesis verified 2026-09-06); the others were NOT executed (no
-containers, no model downloads) — run each image once per README and
-check the curl block before trusting it.
+piper1-gpl, KittenTTS, kokoro-onnx, neutts-air and the `ptts` wheel
+(Phonon). The kokoro adapter (and only it) WAS executed live in the
+authoring environment (bare-metal CPU synthesis verified 2026-09-06);
+the others were NOT executed (no containers, no model downloads) — run
+each image once per README and check the curl block before trusting it.
 """
 
 import io
@@ -37,6 +37,8 @@ def build_model(name: str) -> TTSModel:
         return NeuTTSModel()
     if name == "edge":
         return EdgeModel()
+    if name == "phonon":
+        return PhononModel()
     raise ValueError(f"unknown model {name!r}")
 
 
@@ -271,6 +273,251 @@ class KokoroModel:
             lang=self.lang_for(used).lower(),
         )
         return native_rate, float_to_pcm16(samples)
+
+
+# --- phonon (Gradium's open-weight, on-device TTS) ---
+
+# Phonon has no speed multiplier: its rate control is the `duration_delta`
+# conditioner, which upstream documents as -0.3 = faster, +0.3 = slower,
+# 0 = the model's own pace, and "small values work best". The contract's
+# rate is a multiplier, so it is mapped onto that band piecewise through
+# the three points that matter: (0.5, +0.3), (1.0, 0), (2.0, -0.3).
+PHONON_RATE_BAND = 0.3
+
+# Gradium's own API — the same key the cloud provider engine uses. With
+# GRADIUM_API_KEY set, the shim also serves the voices you designed or
+# cloned in Gradium Studio (the public Hugging Face catalog cannot have
+# those). The text itself is never sent: only the voice list and the voice
+# embedding are fetched, once.
+GRADIUM_API = "https://api.gradium.ai/api"
+
+
+def phonon_duration_delta(rate: float) -> float:
+    """Contract rate [0.5, 2] -> a `duration_delta` conditioner value."""
+    r = min(2.0, max(0.5, float(rate)))
+    if r >= 1.0:
+        delta = -PHONON_RATE_BAND * (r - 1.0)
+    else:
+        delta = PHONON_RATE_BAND * (1.0 - r) / 0.5
+    return 0.0 if delta == 0 else delta  # no "-0.000" in the conditioner value
+
+
+class PhononModel:
+    """Phonon (gradium.ai/phonon) through the `ptts` wheel — Gradium's
+    open-weight, fully offline TTS. The default model is Phonon 31m
+    (English, 31M params, ~64 MB, Apache-2.0); it downloads from
+    Hugging Face on first use and caches in the HF cache. Output is
+    mono 24 kHz.
+
+    Two upstream quirks this adapter absorbs:
+
+    - The contract's `rate` is a multiplier, Phonon's control is the
+      duration_delta conditioner (see phonon_duration_delta).
+    - A checkpoint with no duration_delta conditioner REJECTS the
+      condition ("no conditioner named ..."), so the rate is applied
+      best-effort: such a checkpoint speaks at its own pace instead of
+      failing the request.
+
+    Voices: the checkpoint's own voices plus the gradium/phonon-voices
+    catalog (102 voices across en/fr/de/es/pt) filtered to the language
+    this server speaks — one server, one language, like the lang the
+    contract carries. With GRADIUM_API_KEY set, the voices you designed
+    or cloned in Gradium Studio join the list too.
+    """
+
+    def __init__(self) -> None:
+        import ptts
+
+        lang = os.environ.get("PHONON_LANG", "en").strip() or "en"
+        model = os.environ.get("PHONON_MODEL", "").strip() or None
+        quant = os.environ.get("PHONON_QUANT", "q8").strip() or None
+        device = os.environ.get("PHONON_DEVICE", "cpu").strip() or None
+        log.info(
+            "loading phonon model=%s lang=%s quant=%s device=%s",
+            model or "default (phonon 31m)",
+            lang,
+            quant,
+            device,
+        )
+        try:
+            self.tts = ptts.TTS(model, device=device, quant=quant, lang=lang)
+        except Exception:  # noqa: BLE001 - any load failure: retry default weights
+            if quant is None:
+                raise
+            log.warning(
+                "phonon: loading with quant=%s failed — retrying with the "
+                "checkpoint's default weights",
+                quant,
+                exc_info=True,
+            )
+            self.tts = ptts.TTS(model, device=device, lang=lang)
+        self.lang = lang
+        self.sample_rate = int(self.tts.sample_rate)
+        self.voice_ids = list(self.tts.voices)
+        self.catalog: list[Voice] | None = None
+        self.studio_key = os.environ.get("GRADIUM_API_KEY", "").strip() or None
+        self.studio: list[Voice] | None = None
+        self.voice_home = (
+            Path(os.environ.get("PHONON_HOME", "~/.cache/leia/phonon")).expanduser()
+            / "voices"
+        )
+        self._studio_names: dict[str, str] = {}  # uid -> registered voice name
+        self._studio_registered: set[str] = set()
+        self._applied_delta: float | None = None
+        self._rate_supported = True
+
+    def _catalog_voices(self) -> list[Voice]:
+        """Catalog voices (gradium/phonon-voices) in this server's language.
+
+        Fetched once per process — the popup polls capabilities and the
+        catalog is a file download. A failed fetch keeps the checkpoint's
+        own voices.
+        """
+        if self.catalog is not None:
+            return self.catalog
+        voices: list[Voice] = []
+        try:
+            import ptts
+
+            for entry in ptts.catalog_voices():
+                name = entry.get("name")
+                if not name:
+                    continue
+                lang = (entry.get("language") or self.lang).lower()
+                if self.lang.lower() != "none" and not lang.startswith(
+                    self.lang.lower()
+                ):
+                    continue
+                voices.append(Voice(name, lang, name))
+        except Exception as exc:  # noqa: BLE001 - an offline start must still serve
+            log.warning("phonon voice catalog unavailable: %s", exc)
+        self.catalog = voices
+        return voices
+
+    def _studio_voices(self) -> list[Voice]:
+        """The voices you designed or cloned in Gradium Studio.
+
+        Only with GRADIUM_API_KEY: the public Hugging Face catalog cannot
+        have your own voices, Gradium's API can. Fetched once per process;
+        a failure keeps the rest of the list intact.
+        """
+        if self.studio is not None:
+            return self.studio
+        voices: list[Voice] = []
+        if self.studio_key:
+            try:
+                for entry in self._gradium_api("/voices/"):
+                    uid = entry.get("uid")
+                    name = entry.get("name")
+                    if not uid or not name:
+                        continue
+                    if entry.get("is_catalog"):
+                        continue  # the public catalog already carries these
+                    lang = (entry.get("language") or self.lang).lower()
+                    self._studio_names[uid] = name
+                    voices.append(Voice(uid, lang, name))
+            except Exception as exc:  # noqa: BLE001 - an offline start must still serve
+                log.warning("phonon: Gradium Studio voice list failed: %s", exc)
+        self.studio = voices
+        return voices
+
+    def _gradium_api(self, path: str) -> list[dict]:
+        """GET a Gradium API collection with the Studio key."""
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"{GRADIUM_API}{path}", headers={"x-api-key": self.studio_key or ""}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - fixed https URL
+            data = json.loads(resp.read().decode("utf-8"))
+        return data if isinstance(data, list) else []
+
+    def _register_studio_voice(self, uid: str) -> str | None:
+        """Download a Studio voice embedding and register it with the model.
+
+        The picker addresses Studio voices by their uid; the model knows
+        them by the name they are registered under. Cached on disk — the
+        blob is fetched once.
+        """
+        name = self._studio_names.get(uid)
+        if not name:
+            return None
+        if uid in self._studio_registered:
+            return name
+        try:
+            import urllib.request
+
+            url = f"{GRADIUM_API}/voices/embeddings/{uid}/default/blob?as_safetensors=1"
+            req = urllib.request.Request(
+                url, headers={"x-api-key": self.studio_key or ""}
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - fixed https URL
+                blob = resp.read()
+            self.voice_home.mkdir(parents=True, exist_ok=True)
+            path = self.voice_home / f"{uid}.safetensors"
+            path.write_bytes(blob)
+            self.tts.add_voice(name, str(path))
+        except Exception as exc:  # noqa: BLE001 - one bad voice must not break the session
+            log.warning("phonon: could not load the Studio voice %s: %s", uid, exc)
+            return None
+        self._studio_registered.add(uid)
+        return name
+
+    def voices(self) -> list[Voice]:
+        out: list[Voice] = []
+        seen: set[str] = set()
+        for name in self.voice_ids:
+            if name not in seen:
+                seen.add(name)
+                out.append(Voice(name, self.lang, name))
+        for voice in [*self._catalog_voices(), *self._studio_voices()]:
+            if voice.id not in seen:
+                seen.add(voice.id)
+                out.append(voice)
+        return out
+
+    def _resolve_voice(self, voice: str) -> str | None:
+        """The name to synthesize with, or None for the checkpoint default.
+
+        A Studio voice is addressed by its uid in the picker but
+        synthesized by the name it is registered under.
+        """
+        if not voice:
+            return None
+        if voice in self._studio_names:
+            return self._register_studio_voice(voice)
+        known = set(self.voice_ids) | {v.id for v in self.catalog or []}
+        return voice if voice in known else None
+
+    def _apply_rate(self, rate: float) -> None:
+        """Apply the contract rate as Phonon's duration_delta conditioner.
+
+        Only re-applied when the delta actually changes: set_conditions
+        clears the model's primed state, so a per-request call would
+        throw away the priming every time.
+        """
+        if not self._rate_supported:
+            return
+        delta = phonon_duration_delta(rate)
+        if self._applied_delta == delta:
+            return
+        try:
+            self.tts.set_conditions({"duration_delta": f"{delta:.3f}"})
+        except Exception as exc:  # noqa: BLE001 - no conditioner in this checkpoint
+            self._rate_supported = False
+            log.warning(
+                "phonon: this checkpoint has no duration_delta conditioner (%s) "
+                "— speaking at its own pace",
+                exc,
+            )
+            return
+        self._applied_delta = delta
+
+    def synthesize(self, text: str, voice: str, rate: float) -> tuple[int, bytes]:
+        self._apply_rate(rate)
+        pcm = self.tts.synth(text, voice=self._resolve_voice(voice))
+        return self.sample_rate, float_to_pcm16(pcm)
 
 
 # --- edge (Microsoft Read-Aloud via edge-tts) ---

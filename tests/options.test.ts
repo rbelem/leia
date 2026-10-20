@@ -114,7 +114,7 @@ describe("initial render", () => {
     expect([...preset.options].map((o) => o.value)).toEqual(BUILT_IN_PROFILES.map((p) => p.id));
 
     const rows = [...q("providers").querySelectorAll<HTMLElement>(".provider")];
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
     expect(providerRow("minimax").querySelector(".provider-state")!.textContent).toBe("no key");
     // Azure renders its region as a dropdown with the default preselected.
     const azure = providerRow("azure").querySelector<HTMLSelectElement>("select.region")!;
@@ -161,6 +161,19 @@ describe("initial render", () => {
 
     expect(h.storage["leia:settings:fishaudioKey"]).toBe("fk-test-1234");
     expect(h.permissionRequests).toEqual([{ origins: ["https://api.fish.audio/*"] }]);
+  });
+
+  it("saving a gradium key requests its api.gradium.ai origin", async () => {
+    await loadOptions();
+
+    const gradium = providerRow("gradium");
+    const input = gradium.querySelector<HTMLInputElement>(".key-input")!;
+    input.value = "gd-test-1234";
+    gradium.querySelector<HTMLButtonElement>(".save")!.click();
+    await settle();
+
+    expect(h.storage["leia:settings:gradiumKey"]).toBe("gd-test-1234");
+    expect(h.permissionRequests).toEqual([{ origins: ["https://api.gradium.ai/*"] }]);
   });
 
   it("clearing a key saves the empty value without requesting permissions", async () => {

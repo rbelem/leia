@@ -43,6 +43,13 @@ export const PROVIDERS: ProviderDef[] = [
     hint: "Voices are marketplace voice ids from the Fish Audio library your account can reach; synthesis uses the free s2.1-pro-free model by default.",
   },
   {
+    id: "gradium",
+    label: "Gradium",
+    keyStorage: "leia:settings:gradiumKey",
+    originPatterns: ["https://api.gradium.ai/*"],
+    hint: "Voices are the Gradium library your key can reach — the flagship catalog plus the voices you cloned in Gradium Studio. Text is sent to Gradium's cloud.",
+  },
+  {
     id: "azure",
     label: "Azure",
     keyStorage: "leia:settings:azureKey",

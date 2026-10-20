@@ -61,6 +61,7 @@ Pick a model with the same command, different name:
 | kittentts     | `run.sh kittentts`   | 8882 | ~40 MB   | fast, quality is modest                | 8 voices                        | Apache-2.0 |
 | neutts        | `run.sh neutts`      | 8883 | ~1 GB    | **slowest** — per-sentence synthesis   | 1 (voice-cloning reference)     | Apache-2.0 |
 | edge          | `run.sh edge`        | 8884 | none     | real-time-ish                          | 20+ neural voices, 20 locales   | MIT        |
+| phonon        | `run.sh phonon`      | 8889 | ~64 MB   | fast — real-time or faster on a modern CPU | 100+ catalog voices, 5 languages (en/fr/de/es/pt) | Apache-2.0 (31m) |
 | stub          | `run.sh stub`        | 8881 | none     | instant                                | 2 beeps (pipeline testing only) | —          |
 
 ⭐ **Start with kokoro** — it is the best model that runs well without a
@@ -68,6 +69,15 @@ GPU (Elo ~1060 on the Artificial Analysis Speech Arena, #6 open-weight
 overall), with natural voices in English (`af_heart`, `am_michael`),
 Portuguese (`pf_dora`, `pm_alex`), Spanish, French, Italian, British
 English (`bf_emma`), Japanese, Hindi and Chinese.
+
+**phonon** is Gradium's open-weight model (gradium.ai/phonon) — the same
+family the Gradium cloud API serves, running fully offline here. The
+default checkpoint is Phonon 31m (English, Apache-2.0, ~64 MB); the
+40m checkpoints add French, German, Spanish and Portuguese but are
+CC BY-NC, so they need a Hugging Face token and license acceptance.
+Your own Gradium Studio voices (designed or cloned in studio.gradium.ai)
+show up too when the server has a `GRADIUM_API_KEY` — the key only fetches
+the voice list, the speech itself stays on your machine.
 
 > **`edge` is not local.** It has no model — it relays your text to
 > Microsoft's free Read-Aloud service and plays the result. Convenient,
@@ -139,7 +149,7 @@ configuration needed. For any *other* OpenAI-compatible TTS server
 
 | Path                          | Where your text goes            |
 | ----------------------------- | ------------------------------- |
-| kokoro / piper / kittentts / neutts / GPU models | Nowhere — synthesized locally |
+| kokoro / piper / kittentts / neutts / phonon / GPU models | Nowhere — synthesized locally |
 | edge                          | Microsoft's Read-Aloud service  |
 | Provider engines (OpenAI etc.)| That provider's cloud           |
 

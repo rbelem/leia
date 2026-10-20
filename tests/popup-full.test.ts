@@ -174,6 +174,7 @@ describe("pure helpers (bootstrap-gated module)", () => {
     expect(familyLabel("minimax")).toBe("MiniMax");
     expect(familyLabel("qwencloud")).toBe("QwenCloud");
     expect(familyLabel("fishaudio")).toBe("Fish Audio");
+    expect(familyLabel("gradium")).toBe("Gradium");
     expect(familyLabel("local-kokoro")).toBe("Kokoro (local)");
     expect(familyLabel("local-custom-x", new Map([["custom-x", "My Box"]]))).toBe("My Box (local)");
     expect(familyLabel("mystery")).toBe("mystery");
@@ -225,7 +226,7 @@ describe("refresh: voice picker assembly", () => {
     expect(labels).toContain("Web Speech");
     expect(labels).toContain("OpenAI — no key");
     expect(labels).toContain("ElevenLabs — key saved, no voices loaded");
-    expect(labels).toContain("Local servers — 9 offline");
+    expect(labels).toContain("Local servers — 10 offline");
     const mini = select.querySelector<HTMLOptionElement>('option[value="Mini Voice"]')!;
     expect(mini.textContent).toBe("Mini Voice (en-US)");
     expect(mini.dataset.family).toBe("minimax");
@@ -268,8 +269,8 @@ describe("refresh: voice picker assembly", () => {
 
     const labels = [...q<HTMLSelectElement>("voice").querySelectorAll("optgroup")].map((g) => g.label);
     expect(labels).toContain("Custom X (local)");
-    // Exactly one offline built-in (kokoro) → named group, not the collapsed summary.
-    expect(labels).toContain("Kokoro (local) — offline");
+    // Exactly two offline built-ins (kokoro, phonon) → the collapsed summary.
+    expect(labels).toContain("Local servers — 2 offline");
     expect(labels).not.toContain("Local servers — 1 offline");
     expect(q("sources-summary").textContent).toBe(
       "no API keys saved · Piper, Kittentts, Neutts, Edge, VoxCPM2, Qwen3 TTS, Step Audio EditX, Voxtral TTS, Custom X online",
@@ -284,6 +285,7 @@ describe("refresh: voice picker assembly", () => {
         voice("T", "local-kittentts"),
         voice("N", "local-neutts"),
         voice("E", "local-edge"),
+        voice("Ph", "local-phonon"),
         voice("Vx", "local-voxcpm2"),
         voice("Q3", "local-qwen3-tts"),
         voice("Sa", "local-step-audio-editx"),
@@ -293,7 +295,7 @@ describe("refresh: voice picker assembly", () => {
     const labels = [...q<HTMLSelectElement>("voice").querySelectorAll("optgroup")].map((g) => g.label);
     expect(labels.filter((l) => l!.includes("offline"))).toEqual([]);
     expect(q("sources-summary").textContent).toBe(
-      "no API keys saved · Kokoro, Piper, Kittentts, Neutts, Edge, VoxCPM2, Qwen3 TTS, Step Audio EditX, Voxtral TTS online",
+      "no API keys saved · Kokoro, Piper, Kittentts, Neutts, Edge, Phonon, VoxCPM2, Qwen3 TTS, Step Audio EditX, Voxtral TTS online",
     );
   });
 
@@ -336,8 +338,9 @@ describe("refresh: voice picker assembly", () => {
       "Gemini — no key",
       "QwenCloud — no key",
       "Fish Audio — no key",
+      "Gradium — no key",
       "Azure — no key",
-      "Local servers — 9 offline",
+      "Local servers — 10 offline",
     ]);
     expect(q<HTMLButtonElement>("preview-voice").disabled).toBe(true);
     expect(q("capabilities").children).toHaveLength(0); // unknown family → no caps

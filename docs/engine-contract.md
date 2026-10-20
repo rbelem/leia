@@ -141,12 +141,14 @@ toward a provider.
 | `gemini` | Google Gemini TTS (#03, `src/audio/engine-gemini.ts`) | false | false | paid | provider | current |
 | `qwencloud` | QwenCloud (`src/audio/engine-qwencloud.ts`) — `sk-…` keys: POST synth → WAV URL download; `sk-sp-…` plan keys: token-plan WS task protocol (DNR-injected handshake auth), batch-collected MP3 | false | false | paid | provider | current |
 | `fishaudio` | Fish Audio (`src/audio/engine-fishaudio.ts`) — POST /v1/tts with the `s2.1-pro-free` model header → binary MP3; voices are marketplace model ids (`reference_id`) displayed by their marketplace title | false | false | paid | provider | current |
+| `gradium` | Gradium (`src/audio/engine-gradium.ts`) — POST /api/post/speech/tts with the `x-api-key` header → binary WAV; voices are the `uid`s from GET /api/voices/ (flagship catalog + your own cloned voices) | false | false | paid | provider | current |
 | `kitten-local` | KittenTTS on-device (ticket 06, `src/audio/kitten/engine-kitten.ts`) | false | false | free | local | current |
 | `local-kokoro` | Kokoro-FastAPI (T11, #12, ADR-0004/0006, `src/audio/engine-local.ts`) | true | false | free | local | current |
 | `local-piper` | sherpa-onnx / Piper shim (T11, #12, `shims/`) | false | false | free | local | current |
 | `local-kittentts` | KittenTTS shim (`shims/`) | false | false | free | local | current |
 | `local-neutts` | NeuTTS shim (`shims/`) | false | false | free | local | current |
 | `local-edge` | Edge Read-Aloud shim (`shims/`) | false | false | free | provider | current |
+| `local-phonon` | Phonon shim (`shims/`) — Gradium's open-weight on-device model (`ptts` wheel) | false | false | free | local | current |
 
 Local server profiles map to `local-*` hub families (ADR-0004 profiles,
 ADR-0006 protocol — `src/audio/engine-local.ts` + `src/audio/local-profiles.ts`);

@@ -11,7 +11,7 @@ set -eu
 
 cd "$(dirname "$0")" # works from any cwd (repo root, shims/, elsewhere)
 
-MODEL="${1:?usage: run.sh <kokoro|piper|kittentts|neutts|edge|stub> [extra server.py args...]}"
+MODEL="${1:?usage: run.sh <kokoro|piper|kittentts|neutts|edge|phonon|stub> [extra server.py args...]}"
 shift
 # shellcheck disable=SC2086 # extra args are simple tokens (--port 8890)
 EXTRA="$*"
@@ -22,6 +22,7 @@ case "$MODEL" in
   kittentts) DEPS="kittentts==0.1.3 huggingface_hub" ;;
   neutts)    DEPS="neutts==1.4.1" ;;
   edge)      DEPS="edge-tts==7.2.8 miniaudio==1.71" ;;
+  phonon)    DEPS="ptts==0.4.0" ;;
   stub)      DEPS="" ;;
   *) echo "unknown model: $MODEL" >&2; exit 2 ;;
 esac

@@ -322,13 +322,14 @@ describe("validateBaseUrl", () => {
 });
 
 describe("built-in profiles + storage", () => {
-  it("BUILT_IN_PROFILES are the five ADR-0006 shims plus the four OpenAI-dialect open-weight servers", () => {
+  it("BUILT_IN_PROFILES are the six ADR-0006 shims plus the four OpenAI-dialect open-weight servers", () => {
     expect(BUILT_IN_PROFILES).toEqual([
       { id: "kokoro", name: "Kokoro", baseUrl: "http://127.0.0.1:8880", install: expect.any(String) },
       { id: "piper", name: "Piper", baseUrl: "http://127.0.0.1:8881", install: expect.any(String) },
       { id: "kittentts", name: "Kittentts", baseUrl: "http://127.0.0.1:8882", install: expect.any(String) },
       { id: "neutts", name: "Neutts", baseUrl: "http://127.0.0.1:8883", install: expect.any(String) },
       { id: "edge", name: "Edge", baseUrl: "http://127.0.0.1:8884", install: expect.any(String) },
+      { id: "phonon", name: "Phonon", baseUrl: "http://127.0.0.1:8889", install: expect.any(String) },
       { id: "voxcpm2", name: "VoxCPM2", baseUrl: "http://127.0.0.1:8885", kind: "openai", model: "openbmb/VoxCPM2", install: expect.any(String) },
       { id: "qwen3-tts", name: "Qwen3 TTS", baseUrl: "http://127.0.0.1:8886", kind: "openai", model: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", install: expect.any(String) },
       { id: "step-audio-editx", name: "Step Audio EditX", baseUrl: "http://127.0.0.1:8887", kind: "openai", model: "stepfun-ai/Step-Audio-EditX", install: expect.any(String) },
@@ -343,7 +344,7 @@ describe("built-in profiles + storage", () => {
     expect(byId.get("kokoro")?.install).toBe(
       "uv run --with kokoro-onnx --with onnxruntime shims/server.py --model kokoro",
     );
-    for (const id of ["piper", "kittentts", "neutts", "edge"]) {
+    for (const id of ["piper", "kittentts", "neutts", "edge", "phonon"]) {
       expect(byId.get(id)?.install).toContain("podman");
     }
     for (const p of BUILT_IN_PROFILES.filter((x) => x.kind === "openai")) {
@@ -364,6 +365,9 @@ describe("built-in profiles + storage", () => {
       "podman run --rm -p 127.0.0.1:8883:8883 -e HF_TOKEN -v leia-shim-neutts:/root/.cache leia-shim-neutts",
     );
     expect(byId.get("edge")?.install).toBe("podman run --rm -p 127.0.0.1:8884:8884 leia-shim-edge");
+    expect(byId.get("phonon")?.install).toBe(
+      "podman run --rm -p 127.0.0.1:8889:8889 -v leia-shim-phonon:/root/.cache leia-shim-phonon",
+    );
     // shim hints: host-side port matches the profile's baseUrl port
     // (kokoro is the stock published image — no host bind prefix — and the
     // OpenAI-dialect entries use `vllm serve --port`, so both are excluded)

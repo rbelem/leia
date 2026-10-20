@@ -49,8 +49,8 @@ export interface ProbeResult {
 }
 
 /**
- * Built-ins (ADR-0006, tickets 05/07): the kokoro/piper/kittentts/neutts
- * entries run the shims/ servers (Dockerfile.* or `shims/run.sh`) and
+ * Built-ins (ADR-0006, tickets 05/07): the kokoro/piper/kittentts/neutts/
+ * phonon entries run the shims/ servers (Dockerfile.* or `shims/run.sh`) and
  * their install hints mirror shims/README.md verbatim — kokoro speaks
  * the leia dialect through `shims/server.py --model kokoro` (the old
  * ghcr.io/hexgrad/kokoro-fastapi image is gone upstream and only spoke
@@ -95,6 +95,13 @@ export const BUILT_IN_PROFILES: LocalProfile[] = [
     name: "Edge",
     baseUrl: "http://127.0.0.1:8884",
     install: "podman run --rm -p 127.0.0.1:8884:8884 leia-shim-edge",
+  },
+  {
+    id: "phonon",
+    name: "Phonon",
+    baseUrl: "http://127.0.0.1:8889",
+    install:
+      "podman run --rm -p 127.0.0.1:8889:8889 -v leia-shim-phonon:/root/.cache leia-shim-phonon",
   },
   {
     id: "voxcpm2",

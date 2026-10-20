@@ -10,7 +10,9 @@ and hit it with the curl block there.
 
 import base64
 import io
+import tempfile
 import wave
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -229,6 +231,159 @@ def test_kokoro_unknown_voice_falls_back() -> None:
     model.voice_ids = sorted(fake.get_voices())
     model.synthesize("x", "does-not-exist", 1.0)
     assert fake.calls[-1][1] == "af_heart"  # first sorted voice
+
+
+# --- phonon adapter glue (network-free; the model download happens in __init__) ---
+
+
+class FakePhonon:
+    """Stands in for the `ptts` wheel's TTS object at the synthesize() boundary."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+        self.conditions: dict[str, str] = {}
+
+    def synth(self, text: str, voice: object = None) -> "object":
+        self.calls.append((text, voice))
+        import numpy as np
+
+        return np.array([0.0, 0.5, -0.5], dtype=np.float32)
+
+    def set_conditions(self, conditions: dict[str, str]) -> None:
+        self.conditions.update(conditions)
+
+
+def phonon_model(fake: FakePhonon):
+    """A PhononModel with its __init__ skipped — no model download."""
+    from adapters import PhononModel
+
+    model = PhononModel.__new__(PhononModel)
+    model.tts = fake
+    model.lang = "en"
+    model.sample_rate = SAMPLE_RATE
+    model.voice_ids = ["default"]
+    model.catalog = []
+    model.studio_key = None
+    model.studio = []
+    model.voice_home = Path(tempfile.gettempdir()) / "leia-phonon-voices"
+    model._studio_names = {}
+    model._studio_registered = set()
+    model._applied_delta = None
+    model._rate_supported = True
+    return model
+
+
+def test_phonon_duration_delta_mapping() -> None:
+    from adapters import phonon_duration_delta
+
+    # The contract rate is a multiplier; duration_delta is a conditioner:
+    # 0 is the model's own pace, negative is faster, positive is slower.
+    assert phonon_duration_delta(1.0) == 0.0
+    assert phonon_duration_delta(2.0) == pytest.approx(-0.3)
+    assert phonon_duration_delta(0.5) == pytest.approx(0.3)
+    assert phonon_duration_delta(1.5) == pytest.approx(-0.15)
+    # Out-of-contract values clamp to the band instead of running away.
+    assert phonon_duration_delta(9.0) == pytest.approx(-0.3)
+    assert phonon_duration_delta(0.0) == pytest.approx(0.3)
+
+
+def test_phonon_glue_wraps_synth() -> None:
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    rate, pcm = model.synthesize("hello there", "default", 1.0)
+    assert rate == SAMPLE_RATE
+    assert len(pcm) == 6  # 3 float32 samples -> 3 int16 frames * 2 bytes
+    assert fake.calls == [("hello there", "default")]
+    # The rate rides the duration_delta conditioner.
+    assert fake.conditions == {"duration_delta": "0.000"}
+
+
+def test_phonon_unknown_voice_falls_back() -> None:
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    model.synthesize("x", "does-not-exist", 1.0)
+    assert fake.calls[-1][1] is None  # the checkpoint's own default voice
+
+
+def test_phonon_rate_knob_moves_the_conditioner() -> None:
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    model.synthesize("x", "default", 2.0)
+    assert fake.conditions["duration_delta"] == "-0.300"
+    # An unchanged rate is not re-applied (set_conditions clears the model's
+    # primed state, so a per-request call would throw the priming away).
+    model.synthesize("x", "default", 2.0)
+    assert fake.conditions == {"duration_delta": "-0.300"}
+
+
+def test_phonon_survives_a_checkpoint_without_duration_delta() -> None:
+    class NoConditioner(FakePhonon):
+        def set_conditions(self, conditions: dict[str, str]) -> None:
+            raise RuntimeError(
+                "no conditioner named 'duration_delta' in this checkpoint"
+            )
+
+    fake = NoConditioner()
+    model = phonon_model(fake)
+    rate, pcm = model.synthesize("x", "default", 2.0)
+    assert rate == SAMPLE_RATE
+    assert len(pcm) == 6  # the request still succeeds, at the model's own pace
+
+
+def test_phonon_voices_merge_checkpoint_and_catalog() -> None:
+    from adapters import Voice
+
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    model.voice_ids = ["default"]
+    model.catalog = [Voice("Freya", "en", "Freya"), Voice("Alba", "en", "Alba")]
+    assert [(v.id, v.lang, v.name) for v in model.voices()] == [
+        ("default", "en", "default"),
+        ("Freya", "en", "Freya"),
+        ("Alba", "en", "Alba"),
+    ]
+
+
+def test_phonon_studio_voices_join_the_picker() -> None:
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    model.studio_key = "gd1"
+    model.studio = None
+    model._gradium_api = lambda path: [
+        {"uid": "clone01", "name": "My clone", "language": "en", "is_catalog": False},
+        {"uid": "cat01", "name": "Flagship", "language": "en", "is_catalog": True},
+    ]
+
+    # The Studio voice is offered by its uid; the catalog voice is not
+    # duplicated (the public catalog already carries those).
+    assert [(v.id, v.lang, v.name) for v in model.voices()] == [
+        ("default", "en", "default"),
+        ("clone01", "en", "My clone"),
+    ]
+
+
+def test_phonon_studio_voice_is_synthesized_by_its_registered_name() -> None:
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    model.studio_key = "gd1"
+    model.studio = [Voice("clone01", "en", "My clone")]
+    model._studio_names = {"clone01": "My clone"}
+    model._register_studio_voice = lambda uid: "My clone"
+
+    model.synthesize("hello", "clone01", 1.0)
+    assert fake.calls[-1] == ("hello", "My clone")
+
+
+def test_phonon_without_a_studio_key_lists_no_studio_voices() -> None:
+    fake = FakePhonon()
+    model = phonon_model(fake)
+    model.studio = None
+
+    def _boom(path: str) -> list[dict]:
+        raise AssertionError("the Gradium API must not be called without a key")
+
+    model._gradium_api = _boom
+    assert model.voices() == [Voice("default", "en", "default")]
 
 
 # --- neutts adapter glue (network-free; weights are HF-gated upstream) ---

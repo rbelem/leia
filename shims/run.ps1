@@ -22,6 +22,7 @@ $deps = switch ($Model) {
   "kittentts" { @("kittentts==0.1.3", "huggingface_hub") }
   "neutts"    { @("neutts==1.4.1") }
   "edge"      { @("edge-tts==7.2.8", "miniaudio==1.71") }
+  "phonon"    { @("ptts==0.4.0") }
   "stub"      { @() }
   default { Write-Error "unknown model: $Model"; exit 2 }
 }

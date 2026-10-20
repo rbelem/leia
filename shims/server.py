@@ -2,7 +2,7 @@
 """
 leia local-model shim server (ADR-0006, ticket 04): one FastAPI app that
 exposes the extension's local voice-server contract in front of exactly
-one TTS model at a time (--model kokoro|piper|kittentts|neutts|edge).
+one TTS model at a time (--model kokoro|piper|kittentts|neutts|edge|phonon).
 Loopback-only, keyless — the same trust model as
 src/audio/local-profiles.ts.
 
@@ -44,6 +44,7 @@ DEFAULT_PORTS = {
     "kittentts": 8882,
     "neutts": 8883,
     "edge": 8884,
+    "phonon": 8889,
     "stub": 8881,
 }
 
