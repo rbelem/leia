@@ -79,6 +79,17 @@ export function familyLabel(id: string, customNames?: ReadonlyMap<string, string
   return FAMILY_LABELS[id] ?? localFamilyLabel(id, customNames) ?? id;
 }
 
+/**
+ * Plain-language headline for a raw engine error: the engine string stays
+ * on screen as secondary detail, but the headline says what happened in
+ * reader terms instead of speaking developer.
+ */
+export function describeEngineError(raw: string): string {
+  if (/no .*voices? available|no speech voices/i.test(raw)) return "No voices are available right now.";
+  if (/key/i.test(raw)) return "The saved voice key didn't load any voices.";
+  return "Reading failed.";
+}
+
 /** Disclosure chip labels for a family's capabilities (ADR-0003). */
 export function capabilityChips(caps: EngineCapabilities): string[] {
   return [
@@ -130,7 +141,9 @@ export function saveStoredTheme(storage: StorageLike, id: ThemeId): Promise<void
 if (document.getElementById("voice")) {
   const statusEl = document.getElementById("status") as HTMLDivElement;
   const readerErrorEl = document.getElementById("reader-error") as HTMLDivElement;
-  const playbackControls = document.getElementById("playback-controls") as HTMLDivElement;
+  const transportEl = document.getElementById("transport") as HTMLDivElement;
+  const inPageNote = document.getElementById("in-page-note") as HTMLDivElement;
+  const bringBackBtn = document.getElementById("bring-back") as HTMLButtonElement;
   const playBtn = document.getElementById("pp-play") as HTMLButtonElement;
   const stopBtn = document.getElementById("pp-stop") as HTMLButtonElement;
   const backBtn = document.getElementById("pp-back") as HTMLButtonElement;
@@ -184,6 +197,34 @@ if (document.getElementById("voice")) {
     renderFamilyHint(familyEl, familyHint(family));
   }
 
+  /** T17 detail: plain-language headline, engine text as detail, one remedy. */
+  function renderReaderError(raw: string | undefined): void {
+    readerErrorEl.replaceChildren();
+    if (!raw) {
+      readerErrorEl.hidden = true;
+      return;
+    }
+    readerErrorEl.hidden = false;
+    const headline = document.createElement("p");
+    headline.textContent = describeEngineError(raw);
+    const detail = document.createElement("p");
+    detail.className = "reader-error-detail";
+    detail.textContent = raw;
+    const remedy = document.createElement("button");
+    remedy.type = "button";
+    remedy.className = "ghost";
+    if ([...voicesByFamily.values()].some((list) => list.length > 0)) {
+      remedy.textContent = "Change voice";
+      remedy.addEventListener("click", () => voiceSelect.focus());
+    } else {
+      remedy.textContent = "Open voice sources";
+      remedy.addEventListener("click", () => {
+        void browser.runtime.openOptionsPage();
+      });
+    }
+    readerErrorEl.append(headline, detail, remedy);
+  }
+
   /** Status line + T17 error + transport buttons, from currentStatus. */
   function renderReader(): void {
     const s = currentStatus;
@@ -200,14 +241,9 @@ if (document.getElementById("voice")) {
     } else {
       statusEl.textContent = "no active session";
     }
-    // T17 — surface engine failures instead of a silent pause.
-    if (s?.lastError) {
-      readerErrorEl.textContent = `engine error — ${s.lastError}`;
-      readerErrorEl.hidden = false;
-    } else {
-      readerErrorEl.hidden = true;
-      if (loading) statusEl.textContent = `${loading}…`;
-    }
+    // T17 — surface engine failures with a remedy instead of a silent pause.
+    renderReaderError(s?.lastError ?? undefined);
+    if (!s?.lastError && loading) statusEl.textContent = `${loading}…`;
     const state = s?.state ?? "stopped";
     if (loading) {
       playBtn.disabled = true;
@@ -231,9 +267,13 @@ if (document.getElementById("voice")) {
     fwdBtn.disabled = !s || !canSeekForward(s);
   }
 
-  /** Controls live in the popup only while the in-page bar is closed. */
+  /** Controls live in the popup while the in-page bar is closed; when the
+   * bar is out, the popup keeps a one-line return affordance instead of
+   * going silent — the transport's disappearance is reversible in place. */
   function applySurface(inPage: boolean): void {
-    playbackControls.hidden = inPage;
+    transportEl.hidden = inPage;
+    openInPageBtn.hidden = inPage;
+    inPageNote.hidden = !inPage;
   }
 
   /**
@@ -273,17 +313,35 @@ if (document.getElementById("voice")) {
     // stay visible in the picker with an affordance pointing at settings.
     // No voices ≠ no key: a saved-but-broken key (e.g. Mistral's getVoices
     // failing) says so instead of sending the user to re-paste it.
+    // Providers with no key at all collapse into ONE group that still names
+    // every one of them — the list is the actionable part (add a key in
+    // Voice sources). Providers with a saved-but-voiceless key keep their
+    // own group: the actionable bit there is WHICH key to check.
     const hasStoredKey = (p: (typeof PROVIDERS)[number]): boolean =>
       typeof storedKeys[p.keyStorage] === "string" && Boolean(storedKeys[p.keyStorage]);
+    const keylessNames: string[] = [];
     for (const p of PROVIDERS) {
       if (voicesByFamily.has(p.id)) continue;
-      const hasKey = hasStoredKey(p);
+      if (hasStoredKey(p)) {
+        const group = document.createElement("optgroup");
+        group.label = keylessProviderLabel(p, true);
+        group.disabled = true;
+        const opt = document.createElement("option");
+        opt.disabled = true;
+        opt.textContent = keylessProviderHint(true);
+        group.appendChild(opt);
+        voiceSelect.appendChild(group);
+      } else {
+        keylessNames.push(p.label);
+      }
+    }
+    if (keylessNames.length > 0) {
       const group = document.createElement("optgroup");
-      group.label = keylessProviderLabel(p, hasKey);
+      group.label = `More voices — no key (${keylessNames.length})`;
       group.disabled = true;
       const opt = document.createElement("option");
       opt.disabled = true;
-      opt.textContent = keylessProviderHint(hasKey);
+      opt.textContent = `${keylessNames.join(", ")} — add a key in Voice sources`;
       group.appendChild(opt);
       voiceSelect.appendChild(group);
     }
@@ -315,6 +373,9 @@ if (document.getElementById("voice")) {
     voiceSelect.value = currentStatus?.settings.voiceName ?? "";
     previewBtn.disabled = !voiceSelect.value;
     updateCapabilities();
+    // Voices arrive after the status that may carry lastError — re-render
+    // the error so its remedy sees the loaded voice list.
+    renderReaderError(currentStatus?.lastError ?? undefined);
 
     // Footer summary: keys from storage; online servers are the local
     // families the hub currently has voices for.
@@ -388,7 +449,10 @@ if (document.getElementById("voice")) {
 
   function markTheme(selected: ThemeId): void {
     for (const btn of swatchesEl.querySelectorAll<HTMLButtonElement>(".swatch")) {
-      btn.setAttribute("aria-checked", String(btn.dataset.theme === selected));
+      const on = btn.dataset.theme === selected;
+      btn.setAttribute("aria-checked", String(on));
+      // Roving tabindex: the checked radio is the group's single tab stop.
+      btn.tabIndex = on ? 0 : -1;
     }
   }
 
@@ -396,6 +460,15 @@ if (document.getElementById("voice")) {
     markTheme(id);
     await saveStoredTheme(browser.storage.local, id);
     await send({ type: "leia:theme:set", theme: id });
+  }
+
+  /** Next swatch index for a radio-group key, or null when unhandled. */
+  function themeStep(key: string, current: number, count: number): number | null {
+    if (key === "ArrowRight" || key === "ArrowDown") return (current + 1) % count;
+    if (key === "ArrowLeft" || key === "ArrowUp") return (current - 1 + count) % count;
+    if (key === "Home") return 0;
+    if (key === "End") return count - 1;
+    return null;
   }
 
   async function initThemes(): Promise<void> {
@@ -409,6 +482,7 @@ if (document.getElementById("voice")) {
       btn.dataset.theme = id;
       btn.setAttribute("role", "radio");
       btn.setAttribute("aria-checked", "false");
+      btn.tabIndex = -1;
       const chip = document.createElement("span");
       chip.className = "swatch-chip";
       const lightBg = light?.background ?? "transparent";
@@ -422,6 +496,17 @@ if (document.getElementById("voice")) {
       swatchesEl.appendChild(btn);
     }
     markTheme(await loadStoredTheme(browser.storage.local));
+    // APG radio pattern: arrows move AND select, Home/End jump.
+    swatchesEl.addEventListener("keydown", (ev) => {
+      const order = [...swatchesEl.querySelectorAll<HTMLButtonElement>(".swatch")];
+      const current = order.indexOf(document.activeElement as HTMLButtonElement);
+      if (current === -1) return;
+      const next = themeStep(ev.key, current, order.length);
+      if (next === null) return;
+      ev.preventDefault();
+      order[next]!.focus();
+      void pickTheme(order[next]!.dataset.theme as ThemeId);
+    });
   }
 
   /** Keys and local servers live on the options page — a tab survives blur. */
@@ -490,6 +575,12 @@ if (document.getElementById("voice")) {
   openInPageBtn.addEventListener("click", async () => {
     await browser.storage.local.set({ [CONTROLS_IN_PAGE_KEY]: true });
     applySurface(true);
+  });
+
+  // The way back: clear the flag so the transport returns to the popup.
+  bringBackBtn.addEventListener("click", async () => {
+    await browser.storage.local.set({ [CONTROLS_IN_PAGE_KEY]: false });
+    applySurface(false);
   });
 
   void browser.storage.local.get(CONTROLS_IN_PAGE_KEY).then((got) => {

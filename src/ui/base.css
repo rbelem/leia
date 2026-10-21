@@ -2,8 +2,8 @@
 /*
  * Leia shared chrome styles — the quiet-library world (DESIGN.md): warm
  * stone neutrals, one amber lamp, hairline structure, no shadows. Shared
- * by the popup (task surface, fixed 320px) and the options page (settings,
- * a centered reading column).
+ * by the popup (task surface, capped at 320px) and the options page
+ * (settings, a centered reading column).
  */
 :root {
   --bg: #faf9f7;
@@ -45,7 +45,7 @@ body {
   background: var(--bg);
   color: var(--ink);
 }
-body.popup { width: 320px; padding: 12px 14px 14px; }
+body.popup { max-width: 320px; min-width: 0; padding: 12px 14px 14px; }
 body.options { max-width: 600px; margin: 0 auto; padding: 28px 20px 48px; font-size: 0.875rem; } /* 14px */
 
 ::selection { background: var(--accent-soft); }
@@ -142,7 +142,7 @@ button.loading { cursor: progress; }
 .voice-row { display: flex; align-items: center; gap: 8px; }
 .voice-row select { flex: 1; min-width: 0; }
 
-.transport { display: flex; gap: 6px; margin-bottom: 6px; }
+.transport { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .transport svg { vertical-align: -0.125em; }
 #pp-play svg { margin-right: 4px; }
 .transport .primary { flex: 1; width: auto; }
@@ -153,6 +153,19 @@ button.loading { cursor: progress; }
   font-size: 0.6875rem;
   color: var(--error);
 }
+.reader-error p { margin: 0 0 4px; }
+.reader-error-detail { color: var(--muted); }
+.reader-error .ghost { margin-top: 2px; }
+.in-page-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.71875rem;
+  color: var(--muted);
+}
+.in-page-note[hidden] { display: none; }
 .resume-row {
   display: flex;
   align-items: center;
@@ -174,6 +187,7 @@ button.loading { cursor: progress; }
 }
 .field { display: flex; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); font-size: 0.71875rem; white-space: nowrap; }
+.field select { flex: 1; min-width: 0; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-height: 18px; }
 .chip {
@@ -186,7 +200,7 @@ button.loading { cursor: progress; }
   background: var(--panel);
 }
 
-.swatches { display: flex; gap: 8px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatch {
   display: flex;
   flex-direction: column;

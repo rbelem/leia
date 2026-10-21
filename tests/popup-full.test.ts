@@ -7,6 +7,8 @@
  * background, all on an in-memory browser mock.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { SessionStatus } from "../src/reader/session";
 import type { EngineCapabilities, VoiceInfo } from "../src/reader/contract";
 import { CONTROLS_IN_PAGE_KEY } from "../src/controls";
@@ -74,26 +76,12 @@ const settle = async (): Promise<void> => {
 const q = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 function buildPopupDom(): void {
-  document.body.innerHTML = `
-    <div id="playback-controls">
-      <button id="pp-back" disabled></button>
-      <button id="pp-play"></button>
-      <button id="pp-fwd" disabled></button>
-      <button id="pp-stop" disabled></button>
-      <button id="open-in-page"></button>
-    </div>
-    <div id="status"></div>
-    <div id="reader-error" hidden></div>
-    <div id="resume-row" hidden><span id="resume-label"></span><button id="resume-clear"></button></div>
-    <select id="speed"></select>
-    <select id="voice"><option value="">(default voice)</option></select>
-    <button id="preview-voice" disabled></button>
-    <div id="preview-note" hidden></div>
-    <div id="family-hint" hidden></div>
-    <div id="capabilities"></div>
-    <p id="sources-summary"></p>
-    <button id="open-settings"></button>
-    <div id="theme-swatches"></div>`;
+  // The REAL markup, not a hand-written copy: a fixture that drifts from
+  // src/popup/popup.html hides regressions from the suite (a `hidden`
+  // attribute only the fixture had once hid a whole transport bar).
+  const html = readFileSync(join(process.cwd(), "src", "popup", "popup.html"), "utf8");
+  const body = html.slice(html.indexOf("<body"), html.indexOf("</body>"));
+  document.body.innerHTML = body.slice(body.indexOf(">") + 1);
 }
 
 const makeStatus = (over: Partial<SessionStatus> = {}): SessionStatus => ({
@@ -225,8 +213,8 @@ describe("refresh: voice picker assembly", () => {
     const labels = [...select.querySelectorAll("optgroup")].map((g) => g.label);
     expect(labels).toContain("MiniMax");
     expect(labels).toContain("Web Speech");
-    expect(labels).toContain("OpenAI — no key");
     expect(labels).toContain("ElevenLabs — key saved, no voices loaded");
+    expect(labels).toContain("More voices — no key (8)");
     expect(labels).toContain("Local servers — 11 offline");
     const mini = select.querySelector<HTMLOptionElement>('option[value="Mini Voice"]')!;
     expect(mini.textContent).toBe("Mini Voice (en-US)");
@@ -235,9 +223,15 @@ describe("refresh: voice picker assembly", () => {
     const orion = select.querySelector<HTMLOptionElement>('option[value="90e65eaa"]')!;
     expect(orion.textContent).toBe("Orion (en-US)");
     expect(mini.dataset.family).toBe("minimax");
-    // Keyless groups are visibly disabled, not hidden.
+    // Keyless groups are visibly disabled, not hidden; the saved-key group
+    // keeps its own label while the keyless providers collapse into one
+    // group that still names every one of them.
     const eleven = [...select.querySelectorAll("optgroup")].find((g) => g.label!.startsWith("ElevenLabs"))!;
     expect(eleven.disabled).toBe(true);
+    const more = [...select.querySelectorAll("optgroup")].find((g) => g.label!.startsWith("More voices"))!;
+    expect(more.disabled).toBe(true);
+    expect(more.querySelector("option")!.textContent).toContain("OpenAI");
+    expect(more.querySelector("option")!.textContent).toContain("add a key in Voice sources");
 
     const chips = [...q("capabilities").querySelectorAll(".chip")].map((c) => c.textContent);
     expect(chips).toEqual(["paid", "provider", "word timing", "streaming"]);
@@ -331,20 +325,11 @@ describe("refresh: voice picker assembly", () => {
 
     const select = q<HTMLSelectElement>("voice");
     const labels = [...select.querySelectorAll("optgroup")].map((g) => g.label);
-    expect(labels).toEqual([
-      "MiniMax — no key",
-      "ElevenLabs — no key",
-      "OpenAI — no key",
-      "xAI — no key",
-      "Mistral — no key",
-      "Gemini — no key",
-      "QwenCloud — no key",
-      "Fish Audio — no key",
-      "Gradium — no key",
-      "HeyGen Voice — no key",
-      "Azure — no key",
-      "Local servers — 11 offline",
-    ]);
+    expect(labels).toEqual(["More voices — no key (11)", "Local servers — 11 offline"]);
+    const more = select.querySelector("optgroup")!;
+    expect(more.querySelector("option")!.textContent).toBe(
+      "MiniMax, ElevenLabs, OpenAI, xAI, Mistral, Gemini, QwenCloud, Fish Audio, Gradium, HeyGen Voice, Azure — add a key in Voice sources",
+    );
     expect(q<HTMLButtonElement>("preview-voice").disabled).toBe(true);
     expect(q("capabilities").children).toHaveLength(0); // unknown family → no caps
     expect(q("family-hint").hidden).toBe(true);
@@ -361,7 +346,7 @@ describe("refresh: voice picker assembly", () => {
     expect(q<HTMLButtonElement>("pp-stop").disabled).toBe(true);
   });
 
-  it("surfaces the engine failure (T17) without the family suffix for web-speech", async () => {
+  it("surfaces the engine failure (T17) with plain language plus a remedy", async () => {
     h.handlers["leia:reader:status"] = () =>
       okReply(
         makeStatus({
@@ -374,8 +359,43 @@ describe("refresh: voice picker assembly", () => {
       );
     await loadPopup();
     expect(q("status").textContent).toBe("playing · sentence 2/3");
-    expect(q("reader-error").hidden).toBe(false);
-    expect(q("reader-error").textContent).toBe("engine error — synthesis failed");
+    const err = q("reader-error");
+    expect(err.hidden).toBe(false);
+    expect(err.getAttribute("role")).toBe("alert");
+    // Plain-language headline; the engine string stays as secondary detail.
+    expect(err.textContent).toContain("Reading failed.");
+    expect(err.textContent).toContain("synthesis failed");
+    // No voices loaded → the remedy opens Voice sources.
+    const remedy = err.querySelector("button")!;
+    expect(remedy.textContent).toBe("Open voice sources");
+    remedy.click();
+    await settle();
+    expect(h.openOptionsCalls).toBe(1);
+  });
+
+  it("engine failure with voices loaded offers Change voice", async () => {
+    h.handlers["leia:reader:status"] = () =>
+      okReply(
+        makeStatus({
+          state: "playing",
+          lastError: "no speech voices available (speech-dispatcher on Linux?)",
+          settings: { voiceName: null, rate: 1, engine: "web-speech" },
+        }),
+      );
+    h.handlers["leia:reader:voices"] = () => okReply([voice("System", "web-speech")]);
+    await loadPopup();
+    const err = q("reader-error");
+    expect(err.textContent).toContain("No voices are available right now.");
+    const remedy = err.querySelector("button")!;
+    expect(remedy.textContent).toBe("Change voice");
+    remedy.click();
+    expect(document.activeElement).toBe(q("voice"));
+  });
+
+  it("describeEngineError maps known causes to plain language", async () => {
+    const { describeEngineError } = await loadPopup();
+    expect(describeEngineError("key rejected by provider")).toContain("key");
+    expect(describeEngineError("boom")).toBe("Reading failed.");
   });
 
   it("resume hint hides when the tab has no URL, the reply is empty, or tabs.query rejects", async () => {
@@ -398,18 +418,37 @@ describe("surface + settings wiring", () => {
     expect(h.openOptionsCalls).toBe(1);
   });
 
-  it("open-in-page flips the storage flag and hides the popup controls", async () => {
+  it("open-in-page swaps the transport for a return affordance", async () => {
     await loadPopup();
     q<HTMLButtonElement>("open-in-page").click();
     await settle();
     expect(h.storage[CONTROLS_IN_PAGE_KEY]).toBe(true);
-    expect(q("playback-controls").hidden).toBe(true);
+    expect(q("transport").hidden).toBe(true);
+    expect(q("open-in-page").hidden).toBe(true);
+    expect(q("in-page-note").hidden).toBe(false);
+    q<HTMLButtonElement>("bring-back").click();
+    await settle();
+    expect(h.storage[CONTROLS_IN_PAGE_KEY]).toBe(false);
+    expect(q("transport").hidden).toBe(false);
+    expect(q("open-in-page").hidden).toBe(false);
+    expect(q("in-page-note").hidden).toBe(true);
   });
 
-  it("booting with the flag already set starts with controls hidden", async () => {
+  it("booting with the flag already set shows the return affordance", async () => {
     h.storage[CONTROLS_IN_PAGE_KEY] = true;
     await loadPopup();
-    expect(q("playback-controls").hidden).toBe(true);
+    expect(q("transport").hidden).toBe(true);
+    expect(q("in-page-note").hidden).toBe(false);
+  });
+
+  it("the transport is actually on screen by default", async () => {
+    // The whole block used to live behind a `hidden` container that
+    // nothing unhid — the popup showed a status line and no controls.
+    await loadPopup();
+    expect(q("playback-controls").hidden).toBe(false);
+    expect(q("transport").hidden).toBe(false);
+    expect(q("open-in-page").hidden).toBe(false);
+    expect(q("in-page-note").hidden).toBe(true);
   });
 });
 
@@ -712,6 +751,40 @@ describe("theme swatches", () => {
     await loadPopup();
     const swatches = [...document.querySelectorAll<HTMLButtonElement>("#theme-swatches .swatch")];
     expect(swatches.find((b) => b.getAttribute("aria-checked") === "true")!.dataset.theme).toBe(ACTIVE_THEME);
+  });
+
+  it("follows the radio pattern: named group, roving tabindex, arrows select", async () => {
+    h.storage["leia:settings:theme"] = "ocean";
+    await loadPopup();
+
+    const group = q("theme-swatches");
+    expect(group.getAttribute("role")).toBe("radiogroup");
+    expect(group.getAttribute("aria-label")).toBe("Highlight theme");
+    const swatches = [...group.querySelectorAll<HTMLButtonElement>(".swatch")];
+    // Only the checked swatch is a tab stop.
+    expect(swatches.map((b) => b.tabIndex)).toEqual(swatches.map((b) => (b.dataset.theme === "ocean" ? 0 : -1)));
+
+    // ArrowRight moves focus AND selects the next theme.
+    swatches.find((b) => b.dataset.theme === "ocean")!.focus();
+    swatches
+      .find((b) => b.dataset.theme === "ocean")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    await settle();
+    expect(document.activeElement?.getAttribute("data-theme")).toBe("mint");
+    expect(h.sent).toContainEqual({ type: "leia:theme:set", theme: "mint" });
+    expect(swatches.find((b) => b.dataset.theme === "mint")!.tabIndex).toBe(0);
+    expect(swatches.find((b) => b.dataset.theme === "ocean")!.tabIndex).toBe(-1);
+
+    // Home jumps to the first theme and selects it.
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    await settle();
+    expect(document.activeElement?.getAttribute("data-theme")).toBe(ACTIVE_THEME);
+    expect(h.sent).toContainEqual({ type: "leia:theme:set", theme: ACTIVE_THEME });
+
+    // End jumps to the last theme.
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    await settle();
+    expect(document.activeElement?.getAttribute("data-theme")).toBe("paper");
   });
 });
 

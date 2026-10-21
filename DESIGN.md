@@ -168,7 +168,7 @@ The highlight layer ships five user-selectable wash themes — **sun** (default;
 
 Two fixed idioms, no grid system:
 
-- **Popup:** a single 320px column. Sections stack vertically, separated by 1px deckle-line top borders with heading-above, content-below rhythm (10px above, 12px below). Related controls group tightly (6–8px gaps); sections separate generously. Nothing in the popup is responsive — the width is a platform constant.
+- **Popup:** a single column capped at 320px (`max-width`, never a fixed width) that reflows down to narrow widths — transport and swatches wrap, selects shrink — so nothing strands off-screen at high zoom. Sections stack vertically, separated by 1px deckle-line top borders with heading-above, content-below rhythm (10px above, 12px below). Related controls group tightly (6–8px gaps); sections separate generously.
 - **Floating bar:** a horizontal pill, default-anchored 16px from the bottom-right viewport corner, `position: fixed` at the maximum z-index. The user can drag it anywhere; position clamps to the viewport on move and on window resize. A 4px movement threshold keeps drags from eating button clicks.
 - **Highlight layer:** no layout of its own — it inherits the host page's geometry and re-samples the local background every time it moves, so it adapts crossing code blocks and callouts.
 
@@ -220,7 +220,7 @@ Borders are always 1px in the current line color; selected states swap the borde
 - **Injected stylesheet discipline:** pseudo-class states live in one injected `<style>` scoped under `#leia-floating-bar`; `!important` is used *only* where the element's inline `cssText` would otherwise win (backgrounds, cursors). The popup's real stylesheet never uses `!important`.
 
 ### Theme Swatches
-- **Style:** 34×24 tiles, 6px radius, split diagonally light/dark to preview both bands of a highlight theme; radio semantics (`role="radio"`, `aria-checked`). Selected: amber border + lamp-glow background, label in ink.
+- **Style:** 34×24 tiles, 6px radius, split diagonally light/dark to preview both bands of a highlight theme; radio semantics (`role="radio"`, `aria-checked`) in a named group (`Highlight theme`). Keyboard follows the radio pattern: roving `tabindex` (only the checked swatch is a tab stop), Arrow keys move and select, Home/End jump. Selected: amber border + lamp-glow background, label in ink.
 
 ### Brand Mark
 - Flat bust of Leia — amber hair with side buns, cream face, dark reading glasses, open book — centered on a stone-panel circular badge with transparent corners. Ships at 16/32/48/128px; the glasses and buns are drawn bold enough to survive 16px.
