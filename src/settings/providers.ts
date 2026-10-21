@@ -50,6 +50,13 @@ export const PROVIDERS: ProviderDef[] = [
     hint: "Voices are the Gradium library your key can reach — the flagship catalog plus the voices you cloned in Gradium Studio. Text is sent to Gradium's cloud.",
   },
   {
+    id: "heygen",
+    label: "HeyGen Voice",
+    keyStorage: "leia:settings:heygenKey",
+    originPatterns: ["https://api.heygen.com/*", "https://files.heygen.ai/*"],
+    hint: "Voices are the public HeyGen Voice catalog; the model behind them is heygen-voice-1, with turbo and a free turbo tier (until November 30, 2026). Text is sent to HeyGen's cloud.",
+  },
+  {
     id: "azure",
     label: "Azure",
     keyStorage: "leia:settings:azureKey",

@@ -114,7 +114,7 @@ describe("initial render", () => {
     expect([...preset.options].map((o) => o.value)).toEqual(BUILT_IN_PROFILES.map((p) => p.id));
 
     const rows = [...q("providers").querySelectorAll<HTMLElement>(".provider")];
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(11);
     expect(providerRow("minimax").querySelector(".provider-state")!.textContent).toBe("no key");
     // Azure renders its region as a dropdown with the default preselected.
     const azure = providerRow("azure").querySelector<HTMLSelectElement>("select.region")!;

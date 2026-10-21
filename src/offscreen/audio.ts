@@ -20,6 +20,7 @@ import { GeminiEngine } from "../audio/engine-gemini";
 import { QwenCloudEngine } from "../audio/engine-qwencloud";
 import { FishAudioEngine } from "../audio/engine-fishaudio";
 import { GradiumEngine } from "../audio/engine-gradium";
+import { HeyGenVoiceEngine } from "../audio/engine-heygen";
 import { KittenEngine } from "../audio/kitten/engine-kitten";
 import { LocalEngine } from "../audio/engine-local";
 import { BUILT_IN_PROFILES, probeProfile } from "../audio/local-profiles";
@@ -50,6 +51,7 @@ engine.register("gemini", new GeminiEngine({ getKey: readProviderKey("leia:setti
 engine.register("qwencloud", new QwenCloudEngine({ getKey: readProviderKey("leia:settings:qwencloudKey") }));
 engine.register("fishaudio", new FishAudioEngine({ getKey: readProviderKey("leia:settings:fishaudioKey") }));
 engine.register("gradium", new GradiumEngine({ getKey: readProviderKey("leia:settings:gradiumKey") }));
+engine.register("heygen", new HeyGenVoiceEngine({ getKey: readProviderKey("leia:settings:heygenKey") }));
 // kitten-local (ticket 06): lazy — the model worker spawns on first speak.
 engine.register("kitten-local", new KittenEngine());
 

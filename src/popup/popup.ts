@@ -56,6 +56,7 @@ const FAMILY_LABELS: Record<string, string> = {
   qwencloud: "QwenCloud",
   fishaudio: "Fish Audio",
   gradium: "Gradium",
+  heygen: "HeyGen Voice",
   azure: "Azure",
   "kitten-local": "Kitten (local)",
 };

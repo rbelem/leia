@@ -175,6 +175,7 @@ describe("pure helpers (bootstrap-gated module)", () => {
     expect(familyLabel("qwencloud")).toBe("QwenCloud");
     expect(familyLabel("fishaudio")).toBe("Fish Audio");
     expect(familyLabel("gradium")).toBe("Gradium");
+    expect(familyLabel("heygen")).toBe("HeyGen Voice");
     expect(familyLabel("local-kokoro")).toBe("Kokoro (local)");
     expect(familyLabel("local-custom-x", new Map([["custom-x", "My Box"]]))).toBe("My Box (local)");
     expect(familyLabel("mystery")).toBe("mystery");
@@ -339,6 +340,7 @@ describe("refresh: voice picker assembly", () => {
       "QwenCloud — no key",
       "Fish Audio — no key",
       "Gradium — no key",
+      "HeyGen Voice — no key",
       "Azure — no key",
       "Local servers — 10 offline",
     ]);

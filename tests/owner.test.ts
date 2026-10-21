@@ -431,7 +431,7 @@ describe("resolveAudioEngine (Firefox hub)", () => {
 
     const families = hub.families().map((f) => f.family);
     expect(families).toEqual([
-      "web-speech", "minimax", "elevenlabs", "azure", "openai", "xai", "mistral", "gemini", "qwencloud", "fishaudio", "gradium", "kitten-local",
+      "web-speech", "minimax", "elevenlabs", "azure", "openai", "xai", "mistral", "gemini", "qwencloud", "fishaudio", "gradium", "heygen", "kitten-local",
     ]);
 
     hub.selectFamily("minimax");
