@@ -13,9 +13,11 @@ colors:
   umber-ink: "#1c1917"
   marginalia: "#57534e"
   deckle-line: "#e7e5e4"
+  field-line: "#948d86"
   # Neutral — warm stone, dark scheme.
   stone-panel: "#292524"
   dust-jacket: "#44403c"
+  field-line-dark: "#78716c"
   marginalia-dark: "#a8a29e"
   paper-ink: "#f5f5f4"
   chalk: "#f9fafb"
@@ -41,7 +43,7 @@ typography:
     lineHeight: 1.45
   label:
     fontFamily: "system-ui, sans-serif"
-    fontSize: "10.5px"
+    fontSize: "12px"
     fontWeight: 650
     letterSpacing: "0.08em"
   caption:
@@ -156,8 +158,8 @@ The highlight layer ships five user-selectable wash themes — **sun** (default;
 ### Hierarchy
 - **Title** (650, 17px, -0.01em tracking): the popup masthead wordmark ("Leia") — the only display moment in the system.
 - **Body** (400, 12.5px, 1.45 line-height): all popup UI text; the floating bar runs its own compact step (13px/1.4).
-- **Label** (650, 10.5px, +0.08em, UPPERCASE, marginalia): section headings in the popup — small, spaced caps that recede under the content they name.
-- **Caption** (400, 11–11.5px): hints, status lines, resume row, provider states. Status and position counters always set `font-variant-numeric: tabular-nums` so "sentence 3/12" never jitters.
+- **Label** (650, 12px, +0.08em, UPPERCASE, marginalia): section headings in the popup and field labels on the options page — small, spaced caps that recede under the content they name.
+- **Caption** (400, 11–11.5px): hints, status lines, resume row, provider states, capability chips, swatch names. Status and position counters always set `font-variant-numeric: tabular-nums` so "sentence 3/12" never jitters.
 
 ### Named Rules
 **The Native Stack Rule.** No webfonts, ever. A content script cannot afford font loading, and a toolbar popup shouldn't want it. If a surface needs character, reach for color, spacing, or the icon — not a typeface.
@@ -204,16 +206,16 @@ Borders are always 1px in the current line color; selected states swap the borde
 - **State honesty:** skip buttons disable at playlist bounds and when stopped; Play's label and icon always reflect the true session state (⏸ only while playing).
 
 ### Chips
-- **Style:** pill (999px), sheet background, deckle-line border, marginalia caption text (10.5px), 3px 7px padding — engine capability disclosure ("free · on-device · word timing").
+- **Style:** pill (999px), sheet background, deckle-line border, marginalia caption text (11px), 3px 7px padding — engine capability disclosure ("free · on-device · word timing").
 
 ### Inputs / Fields
-- **Style:** sheet background, 1px deckle-line border, 8px radius, 6px 8px padding; labeled by visible text or `aria-label`, never placeholder-only.
+- **Style:** sheet background, 1px field-line border (a deeper stone that holds 3:1 on the page ground per WCAG 1.4.11 — dividers keep the lighter deckle hairline), 8px radius, 6px 8px padding; labeled by visible text or `aria-label`, never placeholder-only.
 - **Focus:** the universal 2px amber ring. Password API-key fields pair with a ghost show/hide toggle.
 
 ### Floating Bar (signature)
-- **Style:** stone-panel pill, chalk text, the system's only shadow; controls are glass-tinted pills (white at 10–25% alpha) that brighten to 22% on hover.
-- **Drag:** `grab` cursor at rest, `grabbing` while moving; `mousedown` is always prevented so the bar never steals the page's text selection or focus.
-- **Status line:** marginalia-dark caption, ellipsized at 180px with a `title` tooltip mirroring the full text — long engine errors stay readable.
+- **Style:** stone-panel pill, chalk text, the system's only shadow; controls are glass-tinted pills (white at 10–25% alpha) that brighten to 22% on hover. Below a 380px viewport the pill tightens its own gaps/padding (button height, font and labels untouched) so every control stays inside the pill.
+- **Drag:** `grab` cursor at rest, `grabbing` while moving; `pointerdown` is always prevented so the bar never steals the page's text selection or focus. Pointer capture + `touch-action: none` make the drag work for touch, and `pointercancel`/`blur` release a latched drag.
+- **Status line:** marginalia-dark caption, ellipsized at 180px with a `title` tooltip mirroring the full text — long engine errors stay readable. It is a live region (`role="status"`, polite; `role="alert"` for engine failures) so state and errors announce.
 - **Scheme-locked:** the bar is always dark. It floats over unknown pages; a fixed dark pill is the only scheme-safe answer.
 - **Injected stylesheet discipline:** pseudo-class states live in one injected `<style>` scoped under `#leia-floating-bar`; `!important` is used *only* where the element's inline `cssText` would otherwise win (backgrounds, cursors). The popup's real stylesheet never uses `!important`.
 

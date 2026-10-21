@@ -3,7 +3,7 @@
  * Floating bar (page context): one Play/Pause button (Play from stopped
  * starts a fresh read of the selection/page), Stop, sentence Back/Forward,
  * speed, Close. Draggable anywhere in the viewport (4px movement threshold
- * keeps plain clicks working; `mousedown` is prevented so the bar never
+ * keeps plain clicks working; `pointerdown` is prevented so the bar never
  * steals the page's selection or focus).
  *
  * The bar captures the page scope itself (T2 item 6 — the bar lives in the
@@ -71,7 +71,10 @@ function ensureBarStyle(doc: Document): void {
     "#leia-floating-bar .leia-spin{display:inline-block;width:10px;height:10px;margin-right:5px;" +
     "vertical-align:-1px;border:2px solid rgb(255 255 255 / .35);border-top-color:#f9fafb;" +
     "border-radius:50%;animation:leia-spin-rot .8s linear infinite;}" +
-    "@keyframes leia-spin-rot{to{transform:rotate(360deg)}}";
+    "@keyframes leia-spin-rot{to{transform:rotate(360deg)}}" +
+    "@media (prefers-reduced-motion:reduce){#leia-floating-bar .leia-spin{animation:none}}" +
+    "@media (max-width:380px){#leia-floating-bar{gap:4px!important;padding:8px 10px!important;}" +
+    "#leia-floating-bar button{padding-left:7px!important;padding-right:7px!important;}}";
   doc.documentElement.appendChild(style);
 }
 ensureBarStyle(document);
@@ -128,6 +131,9 @@ function stripHash(url: string): string {
  * render() before anyone can read it — this channel survives renders and is
  * cleared by the next read click. */
 let staleNotice: string | null = null;
+/** Whether the current staleNotice is a failure (announced assertively)
+ * rather than a plain state notice (announced politely). */
+let staleAlert = false;
 /** Play-button pending state: set on start/resume, cleared when audio
  * actually begins (first highlight), on error/stop/reply-failure, or by the
  * failsafe timer. state "playing" arrives BEFORE synthesis — never trust
@@ -156,6 +162,7 @@ function clearLoading(): void {
 function handleScopeStale(): void {
   march.disarm();
   staleNotice = "page changed — select text";
+  staleAlert = false;
   render();
   void browser.runtime.sendMessage({ type: "leia:reader:stop" }).catch(() => {});
 }
@@ -204,6 +211,10 @@ function render(): void {
         ? `${loading}…`
         : base);
   els.status.title = els.status.textContent;
+  // Failures interrupt; progress and idle state do not.
+  const isError = staleAlert || (staleNotice === null && view.lastError != null);
+  els.status.setAttribute("role", isError ? "alert" : "status");
+  els.status.setAttribute("aria-live", isError ? "assertive" : "polite");
 }
 
 // --- Drag ---------------------------------------------------------------
@@ -219,7 +230,7 @@ interface DragState {
 }
 const drag: DragState = { startX: 0, startY: 0, baseX: 0, baseY: 0, active: false, moved: false, suppressClick: false };
 
-window.addEventListener("mousemove", (e) => {
+window.addEventListener("pointermove", (e) => {
   if (!drag.active || !els) return;
   const dx = e.clientX - drag.startX;
   const dy = e.clientY - drag.startY;
@@ -237,13 +248,13 @@ window.addEventListener("mousemove", (e) => {
   els.root.style.left = `${p.x}px`;
   els.root.style.top = `${p.y}px`;
 });
-window.addEventListener("mouseup", () => {
+window.addEventListener("pointerup", () => {
   if (!drag.active) return;
   drag.active = false;
   els?.root.classList.remove("dragging");
   if (drag.moved) {
     // Swallow the click that follows a drag (pointer may end on a button);
-    // click dispatches right after mouseup, before this timeout runs.
+    // click dispatches right after pointerup, before this timeout runs.
     drag.suppressClick = true;
     setTimeout(() => {
       drag.suppressClick = false;
@@ -251,6 +262,16 @@ window.addEventListener("mouseup", () => {
   }
   drag.moved = false;
 });
+/** A cancelled gesture (or a lost window) must never leave the bar latched
+ * to the pointer — reset silently, with no click to swallow. */
+function cancelDrag(): void {
+  if (!drag.active) return;
+  drag.active = false;
+  drag.moved = false;
+  els?.root.classList.remove("dragging");
+}
+window.addEventListener("pointercancel", cancelDrag);
+window.addEventListener("blur", cancelDrag);
 window.addEventListener("resize", () => {
   if (!els) return;
   const r = els.root.getBoundingClientRect();
@@ -268,9 +289,10 @@ function buildBar(): BarElements {
   root.id = BAR_ID;
   root.style.cssText =
     "position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;gap:6px;align-items:center;" +
+    "max-width:calc(100vw - 32px);box-sizing:border-box;touch-action:none;" +
     "padding:8px 12px;border-radius:999px;background:#292524;color:#f9fafb;cursor:grab;" +
     "font:13px/1.4 system-ui,sans-serif;box-shadow:0 2px 8px rgb(0 0 0 / .35);user-select:none;";
-  root.addEventListener("mousedown", (e) => {
+  root.addEventListener("pointerdown", (e) => {
     e.preventDefault(); // keep page selection/focus; also starts a drag
     const r = root.getBoundingClientRect();
     // Anchor by left/top from the first drag so right/bottom don't fight it.
@@ -278,6 +300,11 @@ function buildBar(): BarElements {
     root.style.top = `${r.top}px`;
     root.style.right = "auto";
     root.style.bottom = "auto";
+    try {
+      root.setPointerCapture?.(e.pointerId);
+    } catch {
+      // Capture is best-effort (jsdom, non-primary pointers).
+    }
     drag.startX = e.clientX;
     drag.startY = e.clientY;
     drag.baseX = r.left;
@@ -304,7 +331,7 @@ function buildBar(): BarElements {
     b.setAttribute("aria-label", title);
     b.style.cssText =
       "border:1px solid rgb(255 255 255 / .25);background:rgb(255 255 255 / .1);color:inherit;" +
-      "border-radius:999px;padding:3px 10px;font:inherit;cursor:pointer;";
+      "border-radius:999px;padding:3px 10px;font:inherit;cursor:pointer;flex:none;";
     return b;
   };
 
@@ -324,7 +351,7 @@ function buildBar(): BarElements {
   speed.id = "leia-speed";
   speed.title = "Speed";
   speed.setAttribute("aria-label", "Speed");
-  speed.style.cssText = "border-radius:999px;padding:2px 4px;font:inherit;background:#44403c;color:inherit;border:0;";
+  speed.style.cssText = "border-radius:999px;padding:2px 4px;font:inherit;background:#44403c;color:inherit;border:0;flex:none;";
   for (const v of SPEED_OPTIONS) {
     const opt = document.createElement("option");
     opt.value = String(v);
@@ -335,7 +362,14 @@ function buildBar(): BarElements {
 
   const statusSpan = document.createElement("span");
   statusSpan.id = "leia-bar-status";
-  statusSpan.style.cssText = "color:#a8a29e;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+  // Live region: progress announces politely; render() swaps the role to
+  // alert (assertive) for engine failures. min-width:0 lets this span — and
+  // only this span — shrink below its content width on narrow viewports so
+  // the buttons and select stay reachable.
+  statusSpan.setAttribute("role", "status");
+  statusSpan.setAttribute("aria-live", "polite");
+  statusSpan.setAttribute("aria-atomic", "true");
+  statusSpan.style.cssText = "color:#a8a29e;font-size:11px;flex:0 1 auto;min-width:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
 
   root.append(back, play, fwd, stop, speed, statusSpan, close);
   document.documentElement.appendChild(root);
@@ -344,12 +378,14 @@ function buildBar(): BarElements {
 
 function startReading(): void {
   staleNotice = null;
+  staleAlert = false;
   const scope = captureScope(window);
   if (!scope) {
     clearLoading();
     // Persistent channel: a direct textContent write would be wiped by the
     // next session broadcast's render() before anyone can read it.
     staleNotice = "no readable article — select text";
+    staleAlert = false;
     render();
     return;
   }
@@ -363,6 +399,7 @@ function startReading(): void {
       } else if (r && shouldClearLoading({ type: "reply", ok: r.ok })) {
         clearLoading();
         staleNotice = `failed: ${String(r.error ?? "?").slice(0, 80)}`;
+        staleAlert = true;
         render();
       }
       // ok reply: stay pending — the first leia:highlight:set clears it.
@@ -370,6 +407,7 @@ function startReading(): void {
     .catch(() => {
       clearLoading();
       staleNotice = "start failed";
+      staleAlert = true;
       render();
     });
 }
@@ -397,12 +435,14 @@ function mount(): void {
             if (reply && shouldClearLoading({ type: "reply", ok: reply.ok })) {
               clearLoading();
               staleNotice = `failed: ${String(reply.error ?? "?").slice(0, 80)}`;
+              staleAlert = true;
               render();
             }
           })
           .catch(() => {
             clearLoading();
             staleNotice = "resume failed";
+            staleAlert = true;
             render();
           });
         break;
@@ -505,6 +545,7 @@ function handleBarSessionError(msg: RouterMessage): undefined {
   if (loading && shouldClearLoading({ type: "error" })) clearLoading();
   if (!sessionIsMine()) return undefined; // another page's engine failure
   staleNotice = `engine: ${(msg as unknown as { message: string }).message}`;
+  staleAlert = true;
   render();
   return undefined;
 }

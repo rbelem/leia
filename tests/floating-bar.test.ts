@@ -142,6 +142,28 @@ describe("mount / unmount", () => {
     expect(q<HTMLSelectElement>("leia-speed").options).toHaveLength(7);
   });
 
+  it("status is a live region, errors announce assertively, and the bar fits the viewport", async () => {
+    h.storage[CONTROLS_IN_PAGE_KEY] = true;
+    await loadBar();
+    const statusEl = q("leia-bar-status");
+    expect(statusEl.getAttribute("role")).toBe("status");
+    expect(statusEl.getAttribute("aria-live")).toBe("polite");
+    expect(statusEl.getAttribute("aria-atomic")).toBe("true");
+    // Narrow-viewport fit: the bar caps to the viewport and only the
+    // status span may shrink below its content width.
+    expect(bar().style.maxWidth).toBe("calc(100vw - 32px)");
+    expect(bar().style.touchAction).toBe("none");
+    expect(statusEl.style.minWidth).toBe("0px");
+    // Below 380px the pill tightens its own rhythm (gaps/padding only —
+    // button height, font and labels are untouched) so the last control
+    // never hangs off the pill's edge.
+    expect(document.getElementById("leia-floating-bar-style")?.textContent).toContain("max-width:380px");
+    broadcast({ type: "leia:session:error", sessionId: "s1", message: "boom" });
+    await settle();
+    expect(q("leia-bar-status").getAttribute("role")).toBe("alert");
+    expect(q("leia-bar-status").getAttribute("aria-live")).toBe("assertive");
+  });
+
   it("stays unmounted by default (flag unset or false)", async () => {
     delete h.storage[CONTROLS_IN_PAGE_KEY];
     await loadBar();
@@ -639,8 +661,8 @@ describe("reply-listener cases", () => {
 });
 
 describe("dragging and click suppression", () => {
-  const mouse = (type: string, x: number, y: number): MouseEvent =>
-    new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true });
+  const pointer = (type: string, x: number, y: number): PointerEvent =>
+    new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true });
 
   async function mountedBar(): Promise<HTMLElement> {
     h.storage[CONTROLS_IN_PAGE_KEY] = true;
@@ -653,34 +675,34 @@ describe("dragging and click suppression", () => {
     const docSpy = vi.fn();
     document.addEventListener("click", docSpy);
 
-    root.dispatchEvent(mouse("mousedown", 100, 100));
+    root.dispatchEvent(pointer("pointerdown", 100, 100));
     expect(root.style.left).toBe("0px"); // anchored by top-left on drag start
     expect(root.style.right).toBe("auto");
 
     // Below the 4px threshold: not a drag yet.
-    window.dispatchEvent(mouse("mousemove", 102, 102));
+    window.dispatchEvent(pointer("pointermove", 102, 102));
     expect(root.classList.contains("dragging")).toBe(false);
 
-    window.dispatchEvent(mouse("mousemove", 104, 104));
+    window.dispatchEvent(pointer("pointermove", 104, 104));
     expect(root.classList.contains("dragging")).toBe(true);
     expect(root.style.left).toBe("4px");
     expect(root.style.top).toBe("4px");
 
     // Subsequent moves keep tracking without re-adding the class.
-    window.dispatchEvent(mouse("mousemove", 110, 112));
+    window.dispatchEvent(pointer("pointermove", 110, 112));
     expect(root.classList.contains("dragging")).toBe(true);
     expect(root.style.left).toBe("10px");
     expect(root.style.top).toBe("12px");
 
-    window.dispatchEvent(mouse("mouseup", 110, 112));
+    window.dispatchEvent(pointer("pointerup", 110, 112));
     expect(root.classList.contains("dragging")).toBe(false);
 
     // The click that follows a drag is swallowed (pointer may end on a button).
-    root.dispatchEvent(mouse("click", 104, 104));
+    root.dispatchEvent(pointer("click", 104, 104));
     expect(docSpy).not.toHaveBeenCalled();
 
     await waitMs(10); // suppressClick resets on a timeout
-    root.dispatchEvent(mouse("click", 104, 104));
+    root.dispatchEvent(pointer("click", 104, 104));
     expect(docSpy).toHaveBeenCalledTimes(1);
     document.removeEventListener("click", docSpy);
   });
@@ -689,19 +711,45 @@ describe("dragging and click suppression", () => {
     const root = await mountedBar();
     const docSpy = vi.fn();
     document.addEventListener("click", docSpy);
-    root.dispatchEvent(mouse("mousedown", 10, 10));
-    window.dispatchEvent(mouse("mouseup", 10, 10));
-    root.dispatchEvent(mouse("click", 10, 10));
+    root.dispatchEvent(pointer("pointerdown", 10, 10));
+    window.dispatchEvent(pointer("pointerup", 10, 10));
+    root.dispatchEvent(pointer("click", 10, 10));
     expect(docSpy).toHaveBeenCalledTimes(1);
     document.removeEventListener("click", docSpy);
   });
 
-  it("mousemove/mouseup without an active drag are ignored", async () => {
+  it("pointermove/pointerup without an active drag are ignored", async () => {
     const root = await mountedBar();
-    window.dispatchEvent(mouse("mousemove", 500, 500));
-    window.dispatchEvent(mouse("mouseup", 500, 500));
+    window.dispatchEvent(pointer("pointermove", 500, 500));
+    window.dispatchEvent(pointer("pointerup", 500, 500));
     expect(root.style.left).toBe("");
     expect(root.classList.contains("dragging")).toBe(false);
+  });
+
+  it("pointercancel and blur release a latched drag without swallowing the next click", async () => {
+    const root = await mountedBar();
+    const docSpy = vi.fn();
+    document.addEventListener("click", docSpy);
+
+    root.dispatchEvent(pointer("pointerdown", 50, 50));
+    window.dispatchEvent(pointer("pointermove", 60, 60));
+    expect(root.classList.contains("dragging")).toBe(true);
+    window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true }));
+    expect(root.classList.contains("dragging")).toBe(false);
+    // No click follows a cancel, so nothing is swallowed.
+    root.dispatchEvent(pointer("click", 60, 60));
+    expect(docSpy).toHaveBeenCalledTimes(1);
+
+    root.dispatchEvent(pointer("pointerdown", 50, 50));
+    window.dispatchEvent(pointer("pointermove", 60, 60));
+    expect(root.classList.contains("dragging")).toBe(true);
+    window.dispatchEvent(new Event("blur"));
+    expect(root.classList.contains("dragging")).toBe(false);
+    // The latched drag is gone: a later move must not move the bar.
+    const left = root.style.left;
+    window.dispatchEvent(pointer("pointermove", 200, 200));
+    expect(root.style.left).toBe(left);
+    document.removeEventListener("click", docSpy);
   });
 
   it("resize re-clamps the bar position; it is a no-op when unmounted", async () => {

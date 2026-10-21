@@ -11,6 +11,9 @@
   --ink: #1c1917;
   --muted: #57534e;
   --line: #e7e5e4;
+  /* Field boundary: a deeper stone that holds ≥3:1 on the page ground
+     (WCAG 1.4.11) while staying a 1px hairline. Dividers keep --line. */
+  --field-line: #948d86;
   --accent: #b45309;
   --accent-soft: rgba(180, 83, 9, 0.12);
   --ok: #15803d;
@@ -24,6 +27,7 @@
     --ink: #f5f5f4;
     --muted: #a8a29e;
     --line: #44403c;
+    --field-line: #78716c;
     --accent: #fbbf24;
     --accent-soft: rgba(251, 191, 36, 0.14);
     --ok: #4ade80;
@@ -56,7 +60,7 @@ section { border-top: 1px solid var(--line); padding: 10px 0 12px; }
 body.options section { padding: 16px 0 20px; }
 section > h2 {
   margin: 0 0 8px;
-  font-size: 0.65625rem;
+  font-size: 0.75rem;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -72,7 +76,7 @@ select, input {
   font: inherit;
   color: var(--ink);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--field-line);
   border-radius: var(--radius);
 }
 select:focus, input:focus, button:focus-visible {
@@ -129,6 +133,11 @@ button.loading { cursor: progress; }
   .pp-spin { border-color: rgba(28, 25, 23, 0.35); border-top-color: #1c1917; }
 }
 @keyframes leia-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  /* The word beside the ring ("starting…"/"resuming…") already says what is
+     happening, so the ring goes static instead of spinning forever. */
+  .pp-spin { animation: none; }
+}
 
 .voice-row { display: flex; align-items: center; gap: 8px; }
 .voice-row select { flex: 1; min-width: 0; }
@@ -168,7 +177,7 @@ button.loading { cursor: progress; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; min-height: 18px; }
 .chip {
-  font-size: 0.65625rem;
+  font-size: 0.6875rem;
   line-height: 1;
   padding: 3px 7px;
   border: 1px solid var(--line);
@@ -193,7 +202,7 @@ button.loading { cursor: progress; }
   border-radius: 6px;
   border: 1px solid var(--line);
 }
-.swatch-label { font-size: 0.625rem; color: var(--muted); }
+.swatch-label { font-size: 0.6875rem; color: var(--muted); }
 .swatch[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .swatch[aria-checked="true"] .swatch-label { color: var(--ink); font-weight: 600; }
 
@@ -201,7 +210,7 @@ button.loading { cursor: progress; }
 .provider { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px; margin-bottom: 8px; }
 .provider-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; gap: 8px; }
 .provider-name { font-weight: 600; }
-.provider-state { font-size: 0.65625rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.provider-state { font-size: 0.6875rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .provider-state.ok { color: var(--ok); }
 .provider-fields { display: flex; gap: 6px; }
 .provider-fields .key-input { flex: 1; min-width: 0; }
@@ -231,6 +240,6 @@ button.loading { cursor: progress; }
 .custom-form .form-row { display: flex; gap: 6px; margin-bottom: 6px; }
 .custom-form .form-row:last-child { margin-bottom: 0; }
 .custom-form label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.custom-form label > span { color: var(--muted); font-size: 0.65625rem; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+.custom-form label > span { color: var(--muted); font-size: 0.75rem; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
 .custom-form .install-hint { margin-top: 0; }
 .custom-form .form-actions { display: flex; justify-content: flex-end; }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACTIVE_THEME,
   THEMES,
@@ -215,5 +215,53 @@ describe("highlight.ts theme engine (jsdom)", () => {
     expect(rule).not.toContain("background-color");
     // The word layer always carries its emphasis, independent of the theme wash.
     expect(rule).toContain("::highlight(leia-word)");
+  });
+
+  it("does not rewrite the rule when the wash covers the same text again", () => {
+    // The wash is re-sent per spoken word; rewriting the rule invalidates
+    // every style in the page, so an unchanged range set must be a no-op.
+    document.body.innerHTML = '<p id="s">Um trecho.</p><p id="d" style="background-color:#111111">Escuro.</p>';
+    ensureHighlightStyle(document);
+    const style = document.getElementById("leia-highlight-style")!;
+    const p = document.getElementById("s")!;
+
+    const first = document.createRange();
+    first.selectNodeContents(p);
+    setHighlight([first]);
+    const written = style.firstChild;
+
+    const again = document.createRange(); // a fresh Range over the same text
+    again.selectNodeContents(p);
+    setHighlight([again]);
+    expect(style.firstChild).toBe(written); // not replaced → no repaint
+
+    // A different ground → a different variant → the rule is rewritten.
+    const dark = document.createRange();
+    dark.selectNodeContents(document.getElementById("d")!);
+    setHighlight([dark]);
+    expect(style.firstChild).not.toBe(written);
+  });
+
+  it("keeps the theme across the page's two content bundles", async () => {
+    // The reader (content/index.js) and the floating bar (floating-bar/index.js)
+    // are separate bundles: each has its own copy of this module, and the bar
+    // never sees the theme-switch message. The shared <style> element is the
+    // channel, so the bar's next repaint cannot rewrite the old theme back.
+    const reader = await import("../src/content/highlight");
+    vi.resetModules(); // a reset makes the next import a second copy
+    const bar = await import("../src/content/highlight");
+
+    document.body.innerHTML = '<p id="s">Um trecho.</p>';
+    reader.ensureHighlightStyle(document);
+    bar.ensureHighlightStyle(document);
+    reader.setTheme("berry");
+
+    const p = document.getElementById("s")!;
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    bar.setHighlight([range]); // the bar's repaint
+
+    const rule = document.getElementById("leia-highlight-style")!.textContent ?? "";
+    expect(rule).toContain("#6d0f38"); // berry's ink, not the default theme's
   });
 });

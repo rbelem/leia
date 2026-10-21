@@ -26,6 +26,7 @@
 import {
   ACTIVE_THEME,
   THEMES,
+  THEME_IDS,
   composite,
   parseColor,
   pickVariant,
@@ -52,11 +53,17 @@ export function getTheme(): ThemeId {
 /** Swap the active theme; the current highlight re-styles instantly. */
 export function setTheme(id: ThemeId): void {
   activeTheme = id;
+  // The page runs TWO content bundles (the reader and the floating bar), each
+  // with its own copy of this module. The injected <style> element is the one
+  // thing they share, so the theme lives on it: without this, the bar's stale
+  // copy rewrites the rule with the old theme on its next highlight repaint.
+  const style = styleDoc?.getElementById(STYLE_ID);
+  if (style) style.setAttribute("data-theme", id);
   applyStyle();
 }
 
 /** Pick the active theme's variant against the highlight's current ground. */
-export function pickVariantForCurrent(theme: ThemeId = activeTheme): Variant {
+function pickVariantForCurrent(theme: ThemeId): Variant {
   return pickVariant(THEMES[theme], sampleBackground());
 }
 
@@ -67,11 +74,33 @@ function highlights(): HighlightRegistry | null {
 
 /** Highlight the given sentence ranges (must be ≤ MAX_RANGES). */
 export function setHighlight(ranges: Range[]): void {
-  currentRanges = ranges.slice(0, MAX_RANGES);
+  const next = ranges.slice(0, MAX_RANGES);
+  // The wash is re-sent for every spoken word, but the sentence it covers
+  // rarely changes — and re-setting it repaints the whole document (the
+  // rule rewrite invalidates every style in the page). Skip the work when
+  // the range set is the same one already on screen.
+  if (sameRanges(next, currentRanges)) return;
+  currentRanges = next;
   highlights()?.set(HIGHLIGHT_NAME, new Highlight(...currentRanges));
   // Always re-adapt — even without a registry (jsdom) the theme rule tracks
   // the ranges' ground so first real use is styled correctly.
   applyStyle();
+}
+
+/** Same range set? Compared by DOM position, not identity — the caller
+ * builds fresh Range objects for the same text on every word. */
+function sameRanges(a: Range[], b: Range[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((r, i) => {
+    const o = b[i];
+    return (
+      o !== undefined &&
+      r.startContainer === o.startContainer &&
+      r.startOffset === o.startOffset &&
+      r.endContainer === o.endContainer &&
+      r.endOffset === o.endOffset
+    );
+  });
 }
 
 /** Show/move the spoken-word highlight. Empty range removes it. */
@@ -142,6 +171,17 @@ function wordRuleFor(v: Variant): string {
 function applyStyle(): void {
   const style = styleDoc?.getElementById(STYLE_ID);
   if (!style) return;
-  const v = pickVariantForCurrent();
-  style.textContent = `${ruleFor(v)}\n${wordRuleFor(v)}`;
+  const v = pickVariantForCurrent(sharedTheme(style));
+  const css = `${ruleFor(v)}\n${wordRuleFor(v)}`;
+  // Rewrite only on change — a same-text write still re-parses the rule and
+  // invalidates every style in the page.
+  if (style.textContent !== css) style.textContent = css;
+}
+
+/** The theme this page is using: the one the shared style element carries
+ * (the reader owns theme changes), else this bundle's own. */
+function sharedTheme(style: HTMLElement): ThemeId {
+  const stored = style.getAttribute("data-theme");
+  if (stored && (THEME_IDS as string[]).includes(stored)) return stored as ThemeId;
+  return activeTheme;
 }
