@@ -149,6 +149,7 @@ toward a provider.
 | `local-neutts` | NeuTTS shim (`shims/`) | false | false | free | local | current |
 | `local-edge` | Edge Read-Aloud shim (`shims/`) | false | false | free | provider | current |
 | `local-phonon` | Phonon shim (`shims/`) — Gradium's open-weight on-device model (`ptts` wheel) | false | false | free | local | current |
+| `local-ming-3.0-tts` | Ming 3.0 TTS (vLLM-Omni, `src/audio/engine-local.ts`) — Ant Group's open-weight model, 55 built-in voices | false | false | free | local | current |
 
 Local server profiles map to `local-*` hub families (ADR-0004 profiles,
 ADR-0006 protocol — `src/audio/engine-local.ts` + `src/audio/local-profiles.ts`);
@@ -157,6 +158,19 @@ mid-session server death marks it offline immediately. A `local-*` row's
 `wordTiming` is whatever the server declares in its capabilities probe (the
 `shims/` servers always report `false`; Kokoro-FastAPI reports `true`).
 † `local-edge` proxies the Microsoft Edge Read-Aloud service — audio leaves the machine.
+
+Two OpenAI-dialect profile fields shape the request beyond the standard
+`{input, voice, model, response_format}` body (`src/audio/local-profiles.ts`):
+
+- **`voices`** — a catalog the profile declares. Servers that cannot
+  enumerate their speakers (vLLM-Omni's Ming models expose only a synthetic
+  `default`) get the declared list instead; the probe merges it over the
+  server's answer, so a declared catalog wins.
+- **`voiceChannel: "instructions"`** — the server picks the speaker from
+  `instructions` (`{"IP": "<name>"}`) rather than the `voice` field, and
+  rejects a request that carries a `voice` it cannot resolve. The selected
+  voice is sent only when the user picked one; otherwise the request
+  carries no speaker at all and the model uses its own default.
 
 ## Chunking contract
 

@@ -113,6 +113,27 @@ serves a standard OpenAI-style API that leia speaks natively:
 | Qwen3 TTS (1.7B)     | ~1090          | Apache-2.0 | `vllm serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --omni --port 8886` | 8886 |
 | Step Audio EditX     | ~1102          | Apache-2.0 | `vllm serve stepfun-ai/Step-Audio-EditX --omni --port 8887` | 8887 |
 | Voxtral TTS (4B)     | ~1082          | CC-BY-NC   | `vllm serve mistralai/Voxtral-4B-TTS-2603 --omni --port 8888` | 8888 |
+| Ming 3.0 TTS (tiny)  | see below      | MIT        | `vllm serve inclusionAI/Ming-3.0-tts-tiny --omni --port 8890` | 8890 |
+
+**Ming 3.0 TTS** ([Ant Group's open-weight model](https://github.com/inclusionAI/Ming-3.0-tts),
+MIT) is the newest entry and the one with the most built-in voices: 55 of
+them (50 Chinese, 5 English) ship inside the checkpoint, and leia lists
+them all — pick one in the voice picker and it travels to the server as the
+model's `IP` caption, which is how Ming selects a speaker.
+
+The profile serves the **tiny** checkpoint (7.9B total, 1.3B active) because
+that is the Ming-3.0 family member vLLM-Omni documents (recipe
+`recipes/inclusionAI/Ming-3.0-TTS.md`); it wants a big GPU. The **0.5B**
+dense checkpoint — the one Artificial Analysis scored (Elo 1069 on
+Controlled Voice, 1st among open-weights; 1188 on Provider Voice) — rides
+the same dense pipeline vLLM-Omni documents for `Ming-omni-tts-0.5B`
+(both checkpoints report `model_type: "dense"`), so you can serve it
+yourself and add it as a custom profile:
+
+```sh
+vllm serve inclusionAI/Ming-3.0-tts-0.5B \
+  --deploy-config vllm_omni/deploy/ming_tts.yaml --omni --port 8890
+```
 
 Install vLLM-Omni once (`pip install vllm-omni` on Linux/WSL2 with
 CUDA 12.x — see the vLLM docs), run the serve command, and the matching

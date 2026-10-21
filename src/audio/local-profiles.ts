@@ -17,6 +17,7 @@
  *               plugs in without a shim.
  */
 import browser from "webextension-polyfill";
+import { MING_VOICES } from "./ming-voices";
 
 export type LocalProfileKind = "leia" | "openai";
 
@@ -30,6 +31,22 @@ export interface LocalProfile {
   model?: string;
   /** One-line podman/pip hint for the settings UI (built-ins only). */
   install?: string;
+  /**
+   * Voice catalog declared by the profile (built-ins only). Some servers
+   * cannot enumerate their speakers — vLLM-Omni's Ming models expose only a
+   * synthetic "default" — so the profile ships the catalog and the probe
+   * merges it over the server's answer.
+   */
+  voices?: LocalVoice[];
+  /**
+   * How an OpenAI-dialect server receives the selected voice:
+   *  - "voice"       — the OpenAI-standard `voice` field (default).
+   *  - "instructions" — the server picks the speaker from `instructions`
+   *                    ({"IP": "<name>"}); its `voice` field is not a speaker
+   *                    selector there and a request carrying one is
+   *                    rejected.
+   */
+  voiceChannel?: "voice" | "instructions";
 }
 
 export interface LocalVoice {
@@ -134,6 +151,18 @@ export const BUILT_IN_PROFILES: LocalProfile[] = [
     kind: "openai",
     model: "mistralai/Voxtral-4B-TTS-2603",
     install: "vllm serve mistralai/Voxtral-4B-TTS-2603 --omni --port 8888",
+  },
+  {
+    id: "ming-3.0-tts",
+    name: "Ming 3.0 TTS",
+    baseUrl: "http://127.0.0.1:8890",
+    kind: "openai",
+    model: "inclusionAI/Ming-3.0-tts-tiny",
+    // Ming selects the speaker from `instructions` and rejects a request
+    // that carries a `voice` it cannot resolve.
+    voiceChannel: "instructions",
+    voices: MING_VOICES,
+    install: "vllm serve inclusionAI/Ming-3.0-tts-tiny --omni --port 8890",
   },
 ];
 
@@ -246,7 +275,7 @@ async function doProbe(profile: LocalProfile, fetchImpl: typeof fetch): Promise<
       // speaking OpenAI-compatible server.
       const data = (body as { data?: unknown } | null)?.data;
       if (!Array.isArray(data)) return { online: false, caps: DEGRADED_CAPS };
-      return { online: true, caps: await probeOpenAiCaps(base, fetchImpl) };
+      return { online: true, caps: await probeOpenAiCaps(base, fetchImpl, profile) };
     }
     if (typeof body !== "object" || body === null || (body as { ok?: unknown }).ok !== true) {
       return { online: false, caps: DEGRADED_CAPS };
@@ -262,22 +291,39 @@ async function doProbe(profile: LocalProfile, fetchImpl: typeof fetch): Promise<
  * `{voices: ["af_heart", …]}`; vLLM-Omni and most single-model servers 404,
  * which degrades to the synthetic default voice. Word timing never comes
  * from the OpenAI speech API, so it is always false here.
+ *
+ * A profile that declares `voices` owns the catalog: the servers that need
+ * one (vLLM-Omni's Ming models) expose only a synthetic "default" rather
+ * than speakers, so the declared list replaces it.
  */
-async function probeOpenAiCaps(base: string, fetchImpl: typeof fetch): Promise<LocalCapabilities> {
+async function probeOpenAiCaps(
+  base: string,
+  fetchImpl: typeof fetch,
+  profile: LocalProfile,
+): Promise<LocalCapabilities> {
+  const declared = profile.voices;
+  const fallback: LocalCapabilities = declared?.length
+    ? { wordTiming: false, voices: declared }
+    : DEGRADED_CAPS;
   try {
     const resp = await fetchWithTimeout(`${base}/v1/audio/voices`, fetchImpl);
-    if (!resp.ok) return DEGRADED_CAPS;
+    if (!resp.ok) return fallback;
     const data: unknown = await resp.json();
     const raw = (data as { voices?: unknown } | null)?.voices;
-    if (!Array.isArray(raw)) return DEGRADED_CAPS;
+    if (!Array.isArray(raw)) return fallback;
     const voices: LocalVoice[] = [];
     for (const v of raw) {
       if (typeof v === "string" && v.length > 0) voices.push({ id: v, lang: "en", name: v });
     }
-    if (voices.length === 0) return DEGRADED_CAPS;
-    return { wordTiming: false, voices };
+    if (voices.length === 0) return fallback;
+    if (!declared?.length) return { wordTiming: false, voices };
+    // Declared voices win; the server's "default" is a placeholder, not a
+    // speaker, so it never joins a declared catalog.
+    const ids = new Set(declared.map((v) => v.id));
+    const extra = voices.filter((v) => v.id !== "default" && !ids.has(v.id));
+    return { wordTiming: false, voices: [...declared, ...extra] };
   } catch {
-    return DEGRADED_CAPS;
+    return fallback;
   }
 }
 

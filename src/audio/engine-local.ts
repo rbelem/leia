@@ -168,17 +168,25 @@ export class LocalEngine implements TextEngine {
       // (mp3 by default — vLLM-Omni, LocalAI and Kokoro-FastAPI all encode
       // it). No word timing exists on this API; the media-clock poll the
       // reader arms for timing-less engines keeps the highlight marching.
+      const body: Record<string, unknown> = {
+        input: text,
+        response_format: "mp3",
+        ...(this.profile.model ? { model: this.profile.model } : {}),
+      };
+      if (this.profile.voiceChannel === "instructions") {
+        // The server picks the speaker from `instructions` ({"IP": "<name>"})
+        // and rejects a request that carries a `voice` it cannot resolve.
+        // Nothing picked → no instruction → the model's own default voice.
+        if (options.voiceName) body.instructions = JSON.stringify({ IP: options.voiceName });
+      } else {
+        body.voice = voice;
+      }
       let resp: Response;
       try {
         resp = await this.fetchImpl(`${this.profile.baseUrl}/v1/audio/speech`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            input: text,
-            voice,
-            response_format: "mp3",
-            ...(this.profile.model ? { model: this.profile.model } : {}),
-          }),
+          body: JSON.stringify(body),
         });
       } catch (err) {
         // Server died mid-session — mark offline NOW so the picker reacts.

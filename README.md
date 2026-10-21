@@ -108,6 +108,7 @@ copy-pasteable run line:
 | Neutts | 8883 | LLM backbone, slowest, most expressive |
 | Edge | 8884 | free Microsoft voices — text leaves your machine |
 | Phonon | 8889 | Gradium's open-weight model (`ptts` wheel) — 31m/40m, 5 languages, Apache-2.0 weights, fully offline |
+| Ming 3.0 TTS | 8890 | Ant Group's open-weight model (MIT) via vLLM-Omni — 55 built-in voices, 7 languages, needs a big GPU |
 | VoxCPM2 / Qwen3 TTS / Step Audio EditX / Voxtral TTS | 8885–8888 | GPU presets (vLLM-Omni), light up when served |
 
 Run one with **no containers** — install [uv](https://docs.astral.sh/uv),

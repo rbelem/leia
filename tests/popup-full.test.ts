@@ -227,7 +227,7 @@ describe("refresh: voice picker assembly", () => {
     expect(labels).toContain("Web Speech");
     expect(labels).toContain("OpenAI — no key");
     expect(labels).toContain("ElevenLabs — key saved, no voices loaded");
-    expect(labels).toContain("Local servers — 10 offline");
+    expect(labels).toContain("Local servers — 11 offline");
     const mini = select.querySelector<HTMLOptionElement>('option[value="Mini Voice"]')!;
     expect(mini.textContent).toBe("Mini Voice (en-US)");
     expect(mini.dataset.family).toBe("minimax");
@@ -270,8 +270,8 @@ describe("refresh: voice picker assembly", () => {
 
     const labels = [...q<HTMLSelectElement>("voice").querySelectorAll("optgroup")].map((g) => g.label);
     expect(labels).toContain("Custom X (local)");
-    // Exactly two offline built-ins (kokoro, phonon) → the collapsed summary.
-    expect(labels).toContain("Local servers — 2 offline");
+    // Exactly three offline built-ins (kokoro, phonon, ming) → the collapsed summary.
+    expect(labels).toContain("Local servers — 3 offline");
     expect(labels).not.toContain("Local servers — 1 offline");
     expect(q("sources-summary").textContent).toBe(
       "no API keys saved · Piper, Kittentts, Neutts, Edge, VoxCPM2, Qwen3 TTS, Step Audio EditX, Voxtral TTS, Custom X online",
@@ -291,12 +291,13 @@ describe("refresh: voice picker assembly", () => {
         voice("Q3", "local-qwen3-tts"),
         voice("Sa", "local-step-audio-editx"),
         voice("Vt", "local-voxtral-tts"),
+        voice("Ming", "local-ming-3.0-tts"),
       ]);
     await loadPopup();
     const labels = [...q<HTMLSelectElement>("voice").querySelectorAll("optgroup")].map((g) => g.label);
     expect(labels.filter((l) => l!.includes("offline"))).toEqual([]);
     expect(q("sources-summary").textContent).toBe(
-      "no API keys saved · Kokoro, Piper, Kittentts, Neutts, Edge, Phonon, VoxCPM2, Qwen3 TTS, Step Audio EditX, Voxtral TTS online",
+      "no API keys saved · Kokoro, Piper, Kittentts, Neutts, Edge, Phonon, VoxCPM2, Qwen3 TTS, Step Audio EditX, Voxtral TTS, Ming 3.0 TTS online",
     );
   });
 
@@ -342,7 +343,7 @@ describe("refresh: voice picker assembly", () => {
       "Gradium — no key",
       "HeyGen Voice — no key",
       "Azure — no key",
-      "Local servers — 10 offline",
+      "Local servers — 11 offline",
     ]);
     expect(q<HTMLButtonElement>("preview-voice").disabled).toBe(true);
     expect(q("capabilities").children).toHaveLength(0); // unknown family → no caps

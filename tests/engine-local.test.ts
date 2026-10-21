@@ -612,6 +612,70 @@ describe("LocalEngine — openai dialect", () => {
     expect(speechBodies[0]).toEqual({ input: "Hi.", voice: "default", response_format: "mp3" });
   });
 
+  it("voiceChannel 'instructions' sends the speaker in instructions, never in voice", async () => {
+    const { fetchImpl, speechBodies } = makeOpenAiFetch({
+      speech: () => bytesResponse(new Uint8Array([1, 2, 3]), "audio/mpeg"),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(
+      {
+        id: "ming",
+        name: "Ming",
+        baseUrl: "http://127.0.0.1:8891",
+        kind: "openai",
+        model: "inclusionAI/Ming-3.0-tts-tiny",
+        voiceChannel: "instructions",
+      },
+      DEGRADED,
+      { fetchImpl, audioHost: host },
+    );
+
+    const events = collect(engine.speak("Hello.", 1, { voiceName: "US_James", rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events;
+
+    expect(speechBodies[0]).toEqual({
+      input: "Hello.",
+      response_format: "mp3",
+      model: "inclusionAI/Ming-3.0-tts-tiny",
+      instructions: JSON.stringify({ IP: "US_James" }),
+    });
+    expect("voice" in (speechBodies[0] as Record<string, unknown>)).toBe(false);
+  });
+
+  it("voiceChannel 'instructions' with nothing picked → no instructions and no voice (model default)", async () => {
+    const { fetchImpl, speechBodies } = makeOpenAiFetch({
+      speech: () => bytesResponse(new Uint8Array([1, 2, 3]), "audio/mpeg"),
+    });
+    const host = makeHost();
+    const engine = new LocalEngine(
+      {
+        id: "ming",
+        name: "Ming",
+        baseUrl: "http://127.0.0.1:8892",
+        kind: "openai",
+        model: "inclusionAI/Ming-3.0-tts-tiny",
+        voiceChannel: "instructions",
+      },
+      DEGRADED,
+      { fetchImpl, audioHost: host },
+    );
+
+    const events = collect(engine.speak("Hi.", 1, { voiceName: null, rate: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    host.playbacks[0].finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await events;
+
+    expect(speechBodies[0]).toEqual({
+      input: "Hi.",
+      response_format: "mp3",
+      model: "inclusionAI/Ming-3.0-tts-tiny",
+    });
+  });
+
   it("speech error status → error event, no audio played", async () => {
     const { fetchImpl } = makeOpenAiFetch({
       speech: () => jsonResponse({ error: { message: "model not loaded" } }, 500),

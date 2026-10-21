@@ -12,6 +12,7 @@ import {
   validateBaseUrl,
   writeLocalProfiles,
 } from "../src/audio/local-profiles";
+import { MING_VOICES } from "../src/audio/ming-voices";
 
 // local-profiles imports the polyfill; storage is stubbed per test, but the
 // module must load in node (mirrors settings.test.ts).
@@ -292,6 +293,52 @@ describe("probeProfile — openai dialect", () => {
     );
     expect(junkVoices).toEqual({ online: true, caps: DEGRADED_CAPS });
   });
+
+  it("a profile-declared voice catalog replaces the server's synthetic 'default'", async () => {
+    // vLLM-Omni's Ming models expose no speakers: /v1/audio/voices answers
+    // with a placeholder, and the real catalog lives in the checkpoint.
+    const declared = [{ id: "US_James", lang: "en", name: "US_James" }];
+    const profile: LocalProfile = {
+      id: "ming",
+      name: "Ming",
+      baseUrl: "http://127.0.0.1:9207",
+      kind: "openai",
+      model: "inclusionAI/Ming-3.0-tts-tiny",
+      voices: declared,
+    };
+    const r = await probeProfile(
+      profile,
+      openAiFetch(() => jsonResponse({ data: [{ id: "m" }] }), () => jsonResponse({ voices: ["default"] })),
+    );
+    expect(r).toEqual({ online: true, caps: { wordTiming: false, voices: declared } });
+  });
+
+  it("a profile-declared voice catalog survives a failing voices probe", async () => {
+    const declared = [{ id: "US_James", lang: "en", name: "US_James" }];
+    const r = await probeProfile(
+      { id: "ming", name: "Ming", baseUrl: "http://127.0.0.1:9208", kind: "openai", voices: declared },
+      openAiFetch(() => jsonResponse({ data: [{ id: "m" }] }), () => Promise.reject(new Error("ECONNRESET"))),
+    );
+    expect(r).toEqual({ online: true, caps: { wordTiming: false, voices: declared } });
+  });
+
+  it("server voices that are not the placeholder join a declared catalog", async () => {
+    const declared = [{ id: "US_James", lang: "en", name: "US_James" }];
+    const r = await probeProfile(
+      {
+        id: "ming",
+        name: "Ming",
+        baseUrl: "http://127.0.0.1:9209",
+        kind: "openai",
+        voices: declared,
+      },
+      openAiFetch(() => jsonResponse({ data: [{ id: "m" }] }), () => jsonResponse({ voices: ["default", "cloned"] })),
+    );
+    expect(r.caps.voices).toEqual([
+      { id: "US_James", lang: "en", name: "US_James" },
+      { id: "cloned", lang: "en", name: "cloned" },
+    ]);
+  });
 });
 
 describe("validateBaseUrl", () => {
@@ -322,7 +369,7 @@ describe("validateBaseUrl", () => {
 });
 
 describe("built-in profiles + storage", () => {
-  it("BUILT_IN_PROFILES are the six ADR-0006 shims plus the four OpenAI-dialect open-weight servers", () => {
+  it("BUILT_IN_PROFILES are the six ADR-0006 shims plus the five OpenAI-dialect open-weight servers", () => {
     expect(BUILT_IN_PROFILES).toEqual([
       { id: "kokoro", name: "Kokoro", baseUrl: "http://127.0.0.1:8880", install: expect.any(String) },
       { id: "piper", name: "Piper", baseUrl: "http://127.0.0.1:8881", install: expect.any(String) },
@@ -334,6 +381,16 @@ describe("built-in profiles + storage", () => {
       { id: "qwen3-tts", name: "Qwen3 TTS", baseUrl: "http://127.0.0.1:8886", kind: "openai", model: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", install: expect.any(String) },
       { id: "step-audio-editx", name: "Step Audio EditX", baseUrl: "http://127.0.0.1:8887", kind: "openai", model: "stepfun-ai/Step-Audio-EditX", install: expect.any(String) },
       { id: "voxtral-tts", name: "Voxtral TTS", baseUrl: "http://127.0.0.1:8888", kind: "openai", model: "mistralai/Voxtral-4B-TTS-2603", install: expect.any(String) },
+      {
+        id: "ming-3.0-tts",
+        name: "Ming 3.0 TTS",
+        baseUrl: "http://127.0.0.1:8890",
+        kind: "openai",
+        model: "inclusionAI/Ming-3.0-tts-tiny",
+        voiceChannel: "instructions",
+        voices: MING_VOICES,
+        install: expect.any(String),
+      },
     ]);
   });
 
