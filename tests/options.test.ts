@@ -176,6 +176,21 @@ describe("initial render", () => {
     expect(h.permissionRequests).toEqual([{ origins: ["https://api.gradium.ai/*"] }]);
   });
 
+  it("saving a heygen key requests its api.heygen.com and files.heygen.ai origins", async () => {
+    await loadOptions();
+
+    const heygen = providerRow("heygen");
+    const input = heygen.querySelector<HTMLInputElement>(".key-input")!;
+    input.value = "hg-test-1234";
+    heygen.querySelector<HTMLButtonElement>(".save")!.click();
+    await settle();
+
+    expect(h.storage["leia:settings:heygenKey"]).toBe("hg-test-1234");
+    expect(h.permissionRequests).toEqual([
+      { origins: ["https://api.heygen.com/*", "https://files.heygen.ai/*"] },
+    ]);
+  });
+
   it("clearing a key saves the empty value without requesting permissions", async () => {
     h.storage["leia:settings:minimaxKey"] = "sk-abcd1234";
     await loadOptions();

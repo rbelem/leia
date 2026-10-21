@@ -89,6 +89,8 @@
     "https://maas.qwencloudapi.com/*",
     "https://api.fish.audio/*",
     "https://api.gradium.ai/*",
+    "https://api.heygen.com/*",
+    "https://files.heygen.ai/*",
     "https://*.aliyuncs.com/*",
     "wss://token-plan.ap-southeast-1.maas.aliyuncs.com/*"
   ]
