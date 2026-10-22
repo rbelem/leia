@@ -10,21 +10,25 @@
  * rather than a regex over minified HTML).
  *
  * Usage:
- *   node scripts/dump-fixture.mjs <url-substring> [--port 9224] [--out path]
+ *   node scripts/dump-fixture.mjs <url-substring> [--port 9224] [--out path] [--force]
  *
  * The target must already be open (the capture is a reproduction step, so the
  * page is the one that showed the bug). Output defaults to
  * tests/fixtures/<slug>.html and the file is written only when it is smaller
- * than the raw DOM, so a failed strip is visible immediately.
+ * than the raw DOM, so a failed strip is visible immediately. Refuses to
+ * overwrite an existing fixture unless --force is passed: a re-dump silently
+ * replacing the pinned regression input is how a passing suite stops proving
+ * anything.
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const PORT = flag("--port") ?? "9224";
 const OUT = flag("--out");
+const FORCE = process.argv.includes("--force");
 const needle = process.argv.slice(2).find((a) => !a.startsWith("--") && a !== PORT && a !== OUT);
 if (!needle) {
-  console.error("usage: node scripts/dump-fixture.mjs <url-substring> [--port 9224] [--out path]");
+  console.error("usage: node scripts/dump-fixture.mjs <url-substring> [--port 9224] [--out path] [--force]");
   process.exit(2);
 }
 
@@ -81,6 +85,10 @@ if (typeof html !== "string" || html.length === 0) {
 const slug =
   (tab.url ?? "page").split("?")[0].replace(/\/+$/, "").split("/").pop()?.replace(/\.html?$/i, "") || "page";
 const outPath = OUT ?? join("tests", "fixtures", `${slug}.html`);
+if (existsSync(outPath) && !FORCE) {
+  console.error(`refusing to overwrite ${outPath} — pass --force to re-dump a pinned fixture`);
+  process.exit(1);
+}
 writeFileSync(outPath, html);
 const saved = rawLen === 0 ? 0 : 100 - Math.round((html.length / rawLen) * 100);
 console.log(`${outPath} ${(html.length / 1024).toFixed(0)} KB (${saved}% smaller than the raw DOM)`);

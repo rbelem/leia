@@ -25,6 +25,15 @@ nohup flatpak run org.mozilla.firefox --marionette --remote-debugging-port=9222 
   `flatpak kill <instanceId>` + port verification. Set `LEIA_STATE_DIR` when
   running parallel leia sessions (the state file is otherwise global).
 
+## Code lookup
+
+A repo with `graphify-out/` or `.codegraph/` gets a graph query before grep:
+`graphify query "<question>"`, or `codebase explore "<symbols or question>"`.
+Graphify returns the scoped subgraph, usually much smaller than raw files.
+After untracking indexed paths (`.gitignore` a vendored or generated tree),
+delete `.codegraph/` and let it re-index, then re-run one query and confirm
+no removed paths appear in the results.
+
 ## a11y recipe (chromium + AT-SPI)
 
 - cli/chrome.js forces the a11y activation recipe by default (session-bus
