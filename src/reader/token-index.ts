@@ -72,10 +72,14 @@ function isHeadingTag(el: Element | null): boolean {
 
 /** Never readable: markup/data containers, plus TABLES by product decision
  * (a data table read aloud is noise — cells, headers and their CSS don't
- * survive linearization). Explicit selections *inside* a table still work:
- * the walk only skips when it can enter the element itself. */
+ * survive linearization). ASIDE joins them: it marks complementary content
+ * (related-links rails, author cards), and on pages whose article container
+ * has no body-only element the covering heuristic necessarily includes the
+ * rail, so reading it would open mid-page chrome instead of the article.
+ * Explicit selections *inside* a table or aside still work: the walk only
+ * skips when it can enter the element itself. */
 const SKIP_TAGS = new Set([
-  "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "TABLE",
+  "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "TABLE", "ASIDE",
 ]);
 
 /**
