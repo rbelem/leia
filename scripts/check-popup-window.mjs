@@ -60,6 +60,9 @@ const child = spawn(bin, [
   "--headless=new",
   "--no-sandbox",
   "--disable-gpu",
+  // Newer Chrome blocks unpacked loads without this; older builds ignore
+  // unknown flags, so it is safe unconditionally.
+  "--enable-unsafe-extension-debugging",
   `--remote-debugging-port=${PORT}`,
   `--user-data-dir=${profile}`,
   `--load-extension=${DIST}`,
@@ -117,7 +120,7 @@ try {
 } catch {
   swPath = null;
 }
-for (let i = 0; i < 40 && !extensionId; i++) {
+for (let i = 0; i < 120 && !extensionId; i++) {
   const targets = await list();
   const sw = targets.find(
     (t) =>
@@ -129,9 +132,17 @@ for (let i = 0; i < 40 && !extensionId; i++) {
   else await sleep(250);
 }
 if (!extensionId) {
-  const anySw = (await list()).some((t) => t.type === "service_worker");
+  const targets = await list();
+  const anySw = targets.some((t) => t.type === "service_worker");
+  let version = "unknown";
+  try {
+    version = execFileSync(bin, ["--version"], { encoding: "utf8" }).trim();
+  } catch {
+    // version is best-effort context, not load-bearing
+  }
   fail(
-    "could not discover the unpacked extension id — is dist/chrome loadable?" +
+    `could not discover the unpacked extension id after 30s (browser: ${version}) — is dist/chrome loadable? ` +
+      `Targets seen: ${JSON.stringify(targets.map((t) => `${t.type}:${(t.url ?? "").slice(0, 60)}`))}` +
       (anySw
         ? " (the browser runs extensions, but not this one: branded Google Chrome ignores --load-extension — use unbranded Chromium)"
         : ""),
