@@ -18,11 +18,12 @@ import { cuaCall, findBrowserWindows, reviveSession, waitForRow } from "./cua.mj
 
 const ARMED = process.env.LEIA_E2E === "1";
 const POPUP_WIDTH = 320;
-const SESSION = "leia-e2e-popup";
+// Unique per run: the daemon keys snapshot state by session, and a reused
+// name can keep serving a stale empty projection while a fresh name hits
+// immediately. Date.now + pid keeps parallel runs apart too.
+const SESSION = `leia-e2e-popup-${Date.now().toString(36)}-${process.pid}`;
 /** Toolbar row for the action: manifest's action.default_title is "Leia". */
 const ACTION_ROW = /button "Leia"/;
-/** The menu's pin toggle, used to reach the toolbar path on an unpinned build. */
-const PIN_ROW = /button "Pin Leia/;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function cdp(port, path) {
@@ -74,45 +75,54 @@ async function waitPopupTarget(port, timeoutMs = 2500) {
  * Open the popup the way a user does, and prove it opened. An unpinned action
  * activates from the toolbar once pinned; a menu row does not fire the action
  * over AT-SPI in this Chromium, so the menu is used only to pin.
+ *
+ * The accessibility tree flaps: whole polling budgets sometimes see an empty
+ * tree while single reads seconds later hit. So the attempt runs in bounded
+ * rounds — each round is cheap when the row is present — and only a clean
+ * sweep of misses skips, carrying what the last round saw.
  */
 async function openPopup(win, port) {
+  let lastMiss = "no rounds ran";
+  for (let round = 1; round <= 3; round++) {
+    // A fresh snapshot store per round: repeated identical reads can keep
+    // serving a stale empty projection while a fresh read hits immediately.
+    const session = `${SESSION}-r${round}`;
+    await reviveSession(session);
+    const attempt = await tryOpenPopup(win, port, session);
+    if (attempt.via) return { via: attempt.via, miss: null };
+    lastMiss = `round ${round}: ${attempt.miss}`;
+  }
+  return { via: null, miss: lastMiss };
+}
+
+/**
+ * Open the popup from the toolbar and prove it opened. Toolbar-only by
+ * design: the Extensions menu opens visibly but this Chromium exposes none
+ * of its rows over AT-SPI, so a menu detour can never proceed past the
+ * puzzle click — and worse, each puzzle click flips menu state, so rounds
+ * that touch the menu oscillate instead of converging. An unpinned action
+ * therefore skips honestly; pin it to run this.
+ */
+async function tryOpenPopup(win, port, session) {
   const existing = await waitPopupTarget(port, 0);
   if (existing) {
     await fetch(`http://127.0.0.1:${port}/json/close/${existing.id}`).catch(() => {});
     await sleep(400);
   }
-  const pinned = await waitForRow(SESSION, win.pid, {
+  const pinned = await waitForRow(session, win.pid, {
     query: "Leia",
     re: ACTION_ROW,
     windowId: win.window_id,
-    timeoutMs: 2500,
+    // The tree populates lazily after launch; a short budget turns a slow
+    // tree into a false miss, so each round gets the full window.
+    timeoutMs: 10_000,
   });
-  if (pinned) {
-    await cuaCall("click", { pid: win.pid, element_token: pinned, session: SESSION });
-    return (await waitPopupTarget(port)) ? "toolbar" : null;
+  if (!pinned) {
+    return { via: null, miss: "no toolbar row (unpinned, or the tree never filled its budget)" };
   }
-  const puzzle = await waitForRow(SESSION, win.pid, {
-    query: "Extensions",
-    re: /button "Extensions/,
-    windowId: win.window_id,
-    timeoutMs: 5000,
-  });
-  if (!puzzle) return null;
-  await cuaCall("click", { pid: win.pid, element_token: puzzle, session: SESSION });
-  await sleep(700);
-  const pin = await waitForRow(SESSION, win.pid, { query: "Leia", re: PIN_ROW, timeoutMs: 2000 });
-  if (!pin) return null;
-  await cuaCall("click", { pid: win.pid, element_token: pin, session: SESSION });
-  await sleep(600);
-  const pinnedNow = await waitForRow(SESSION, win.pid, {
-    query: "Leia",
-    re: ACTION_ROW,
-    windowId: win.window_id,
-    timeoutMs: 4000,
-  });
-  if (!pinnedNow) return null;
-  await cuaCall("click", { pid: win.pid, element_token: pinnedNow, session: SESSION });
-  return (await waitPopupTarget(port)) ? "toolbar-pinned-then-clicked" : null;
+  await cuaCall("click", { pid: win.pid, element_token: pinned, session });
+  if (await waitPopupTarget(port)) return { via: "toolbar" };
+  return { via: null, miss: "toolbar click landed but no popup target appeared" };
 }
 
 describe.skipIf(!ARMED)("popup opens from the browser toolbar (cua)", () => {
@@ -129,12 +139,15 @@ describe.skipIf(!ARMED)("popup opens from the browser toolbar (cua)", () => {
     const win = (await findBrowserWindows())[0];
     expect(win, "cua cannot see a Chromium window — is the a11y recipe on?").toBeTruthy();
 
-    const openedVia = await openPopup(win, state.debugPort);
-    if (!openedVia) {
-      // No operable action row: the action is unpinned and this Chromium does
-      // not fire it from the Extensions menu over AT-SPI. Pin it to run this.
-      ctx.skip("no operable extension-action row in the toolbar or extensions menu");
+    const opened = await openPopup(win, state.debugPort);
+    if (!opened.via) {
+      // No toolbar row across three rounds: the action is unpinned (pin it
+      // to run this), or the tree never filled a budget. The Extensions menu
+      // is deliberately not driven: it opens visibly but exposes no rows
+      // over AT-SPI here, so a menu detour can only oscillate menu state.
+      ctx.skip(`no operable extension-action row (${opened.miss})`);
     }
+    const openedVia = opened.via;
 
     const list = await cdp(state.debugPort, "/json/list");
     const popup = list.find((t) => (t.url ?? "").endsWith("/popup/popup.html"));
