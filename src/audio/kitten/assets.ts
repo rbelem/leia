@@ -48,8 +48,16 @@ export const KITTEN_LANG = "en-US";
  * shape", verified live — 2 sentences ≈ 350 phonemes pass). Chunks must
  * stay safely under it: 350 text chars ≈ ~350 phonemes for normal prose,
  * leaving headroom for expansion-heavy text (numbers, symbols).
+ *
+ * The cap also bounds the between-chunk gap. On-device synthesis runs slower
+ * than realtime for long chunks, so a chunk longer than the previous one's
+ * playback outruns the one-chunk-ahead prefetch: measured live, a 309-char
+ * chunk took ~36 s to synthesize against a 11 s playback budget and opened a
+ * 25 s silence. Chunks up to 187 chars stayed hidden (11-14 ms gaps). 200
+ * keeps the syllable expansion math above intact and stays inside the
+ * measured hidable range.
  */
-export const KITTEN_MAX_UTTERANCE_CHARS = 350;
+export const KITTEN_MAX_UTTERANCE_CHARS = 200;
 
 /**
  * The 8 real voices.json keys (verified live against the demo asset), girls

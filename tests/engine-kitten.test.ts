@@ -5,7 +5,8 @@
  * halves (voice mapping, Float32→PCM16→WAV encoding, cache keys/validation,
  * phoneme encoding) and the engine's contract behavior against a scripted
  * worker double: start/end delivery, preemption, cancel, init/synth failures,
- * stale-result discard.
+ * stale-result discard, and prefetch pipelining (cache hit, key mismatch,
+ * cancel discard).
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -47,13 +48,13 @@ describe("kitten voice mapping", () => {
     }
   });
 
-  it("declares free/local, no word timing, 350-char utterance cap", () => {
+  it("declares free/local, no word timing, 200-char utterance cap", () => {
     expect(KITTEN_CAPABILITIES).toEqual({
       wordTiming: false,
       streaming: false,
       costClass: "free",
       privacyClass: "local",
-      maxUtteranceChars: 350,
+      maxUtteranceChars: 200,
     });
   });
 
@@ -420,5 +421,89 @@ describe("KittenEngine contract behavior", () => {
     await tick();
     h.worker().reply({ type: "audio", reqId: 1, audio: Float32Array.of(0).buffer });
     expect(await events).toEqual([{ type: "error", speakId: 1, message: expect.stringContaining("audio host down") }]);
+  });
+});
+
+// --- pipelining (ADR-0003 prefetch) ----------------------------------------
+
+/** Run a prefetch through init + synth, returning once its audio has landed. */
+async function prefetchThrough(h: Harness, text: string, voiceName: string | null): Promise<FakeKittenWorker> {
+  const pre = h.engine.prefetch(text, { voiceName, rate: 1 });
+  await tick();
+  expect(h.worker().sent[0].type).toBe("init");
+  h.worker().reply({ type: "ready", inputNames: [] });
+  await tick();
+  const synth = h.worker().sent[1];
+  expect(synth).toMatchObject({ type: "synth", text, voice: voiceName ?? "expr-voice-2-f" });
+  h.worker().reply({ type: "audio", reqId: synth.type === "synth" ? synth.reqId : -1, audio: Float32Array.of(0.5).buffer });
+  await pre;
+  return h.worker();
+}
+
+const synthCount = (w: FakeKittenWorker): number => w.sent.filter((m) => m.type === "synth").length;
+
+describe("KittenEngine prefetch pipelining", () => {
+  it("plays a prefetched chunk without a second synthesis call", async () => {
+    const h = makeHarness();
+    await prefetchThrough(h, "hello", "expr-voice-3-f");
+    expect(h.playCalls).toHaveLength(0); // prefetch synthesizes, never plays
+
+    const events = collect(h.engine.speak("hello", 1, { voiceName: "expr-voice-3-f", rate: 1 }));
+    await tick();
+    expect(await events).toEqual([
+      { type: "start", speakId: 1 },
+      { type: "end", speakId: 1 },
+    ]);
+    // The cache holds finished WAV, so playback needed no worker round trip.
+    expect(synthCount(h.worker())).toBe(1);
+    expect(h.playCalls).toHaveLength(1);
+    const { bytes, mime } = h.playCalls[0];
+    expect(mime).toBe("audio/wav");
+    expect(String.fromCharCode(...bytes.slice(0, 4))).toBe("RIFF");
+    expect(new DataView(bytes.buffer).getUint32(24, true)).toBe(KITTEN_SAMPLE_RATE);
+  });
+
+  it("re-synthesizes when the speak's voice differs from the prefetch key", async () => {
+    const h = makeHarness();
+    await prefetchThrough(h, "hello", "expr-voice-3-f");
+
+    const events = collect(h.engine.speak("hello", 2, { voiceName: "expr-voice-2-f", rate: 1 }));
+    await tick();
+    // A mismatching key discards the entry instead of serving stale audio.
+    expect(synthCount(h.worker())).toBe(2);
+    expect(h.worker().sent[2]).toMatchObject({ type: "synth", text: "hello", voice: "expr-voice-2-f" });
+    expect(h.playCalls).toHaveLength(0); // waits for the fresh synthesis
+
+    h.worker().reply({ type: "audio", reqId: 2, audio: Float32Array.of(0).buffer });
+    expect(await events).toEqual([
+      { type: "start", speakId: 2 },
+      { type: "end", speakId: 2 },
+    ]);
+    expect(h.playCalls).toHaveLength(1);
+  });
+
+  it("cancel() discards an in-flight prefetch so a later speak re-synthesizes", async () => {
+    const h = makeHarness();
+    const pre = h.engine.prefetch("hello", { voiceName: null, rate: 1 });
+    await tick();
+    h.worker().reply({ type: "ready", inputNames: [] });
+    await tick();
+    expect(h.worker().sent[1]).toMatchObject({ type: "synth", reqId: 1 });
+
+    h.engine.cancel();
+    h.worker().reply({ type: "audio", reqId: 1, audio: Float32Array.of(0).buffer }); // lands after cancel
+    await pre;
+    await tick();
+
+    const events = collect(h.engine.speak("hello", 2, { voiceName: null, rate: 1 }));
+    await tick();
+    expect(synthCount(h.worker())).toBe(2); // the cancelled prefetch never populated the cache
+    expect(h.playCalls).toHaveLength(0);
+
+    h.worker().reply({ type: "audio", reqId: 2, audio: Float32Array.of(0).buffer });
+    expect(await events).toEqual([
+      { type: "start", speakId: 2 },
+      { type: "end", speakId: 2 },
+    ]);
   });
 });

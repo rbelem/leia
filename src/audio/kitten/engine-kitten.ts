@@ -12,6 +12,14 @@
  * on the first speak/preview (IndexedDB-cached afterwards); the popup shows
  * a family hint (FAMILY_HINTS) so the download is never discovered by
  * silence. The worker is lazy: getVoices() is static and costs nothing.
+ *
+ * Implements prefetch() (pipelining, ADR-0003 — ElevenLabs pattern): a
+ * single-entry cache of the finished WAV — the latest prefetch wins — that a
+ * later speak() with identical text+options plays without touching the
+ * worker; a mismatching speak() or cancel() discards it. On-device inference
+ * is the slow path (0.5–3 s per sentence), so pipelining hides the
+ * between-chunks gap. The worker stays one-inference-at-a-time: a prefetch
+ * queues behind the active speak's synth and runs during its playback.
  */
 import { EventStream } from "../../reader/event-stream";
 import type { EngineCapabilities, EngineEvent, SpeakOptions, TextEngine, VoiceInfo } from "../../reader/contract";
@@ -77,6 +85,11 @@ export class KittenEngine implements TextEngine {
   private rejectReady: ((err: Error) => void) | null = null;
   private reqId = 0;
   private pending = new Map<number, Pending>();
+  /** Finished WAV for chunk pipelining (ADR-0003): one entry, latest
+   * prefetch wins; cancel() discards it. The key pins text+voice+rate so a
+   * mismatching speak() can never serve stale audio. */
+  private cache: { cacheKey: string; wav: Uint8Array } | null = null;
+  private cacheEpoch = 0;
 
   constructor(opts: KittenEngineOptions = {}) {
     this.workerFactory = opts.workerFactory ?? defaultWorkerFactory;
@@ -103,6 +116,23 @@ export class KittenEngine implements TextEngine {
     return stream;
   }
 
+  /**
+   * Synthesize ahead for a FUTURE speak() with identical text+options
+   * (pipelining, ADR-0003). Best-effort: a failed synthesis stores nothing
+   * and the later speak() synthesizes on demand.
+   */
+  async prefetch(text: string, options: SpeakOptions): Promise<void> {
+    const epoch = this.cacheEpoch;
+    try {
+      await this.ensureWorker();
+      const samples = await this.requestSynth(text, this.voiceName(options), clampRate(options.rate));
+      if (this.cacheEpoch !== epoch) return;
+      this.cache = { cacheKey: this.cacheKey(text, options), wav: toWav(samples) };
+    } catch {
+      // best-effort — a later speak() synthesizes on demand
+    }
+  }
+
   cancel(): void {
     const active = this.active;
     this.active = null;
@@ -110,6 +140,8 @@ export class KittenEngine implements TextEngine {
       active.stream.closeCancelled({ type: "cancelled", speakId: active.speakId });
       active.playback?.stop();
     }
+    this.cacheEpoch += 1; // discard in-flight prefetch results too
+    this.cache = null;
   }
 
   // --- internals ---
@@ -126,22 +158,36 @@ export class KittenEngine implements TextEngine {
       if (this.active?.speakId === speakId) this.active = null;
     };
 
+    const cached = this.cachedFor(text, options);
+    if (cached) {
+      await this.deliver(cached, speakId, stream, fail);
+      return;
+    }
+
     let samples: Float32Array;
     try {
       await this.ensureWorker();
       if (!this.isCurrent(speakId)) return;
-      const voice = options.voiceName ?? KITTEN_DEFAULT_VOICE;
-      samples = await this.requestSynth(text, voice, clampRate(options.rate));
+      samples = await this.requestSynth(text, this.voiceName(options), clampRate(options.rate));
     } catch (err) {
       if (!this.isCurrent(speakId)) return;
       fail(`kitten-local: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     if (!this.isCurrent(speakId)) return;
+    await this.deliver(toWav(samples), speakId, stream, fail);
+  }
 
+  /** Shared playback tail: play a finished WAV, emit start/end, close. */
+  private async deliver(
+    wav: Uint8Array,
+    speakId: number,
+    stream: EventStream<EngineEvent>,
+    fail: (message: string) => void,
+  ): Promise<void> {
     let playback: Playback;
     try {
-      playback = this.audioHost.play(pcmToWav(float32ToPcm16(samples), KITTEN_SAMPLE_RATE), "audio/wav");
+      playback = this.audioHost.play(wav, "audio/wav");
     } catch (err) {
       // AudioHost failed to start (e.g. no Audio element) — contract says the
       // stream must still terminate with an error event.
@@ -225,9 +271,35 @@ export class KittenEngine implements TextEngine {
     this.rejectReady = null;
   }
 
+  private voiceName(options: SpeakOptions): string {
+    return options.voiceName ?? KITTEN_DEFAULT_VOICE;
+  }
+
+  private cacheKey(text: string, options: SpeakOptions): string {
+    return `${text}|${this.voiceName(options)}|${clampRate(options.rate)}`;
+  }
+
+  /**
+   * Serve the pipelining cache when text+options match (ElevenLabs pattern).
+   * A mismatching speak() discards the entry (ADR-0003 — latest prefetch
+   * wins; nothing stale survives to a later speak). A matching speak()
+   * keeps it: the next prefetch overwrites it and cancel() clears it.
+   */
+  private cachedFor(text: string, options: SpeakOptions): Uint8Array | null {
+    const entry = this.cache;
+    if (!entry) return null;
+    const match = entry.cacheKey === this.cacheKey(text, options);
+    if (!match) this.cache = null;
+    return match ? entry.wav : null;
+  }
+
   private isCurrent(speakId: number): boolean {
     return this.active?.speakId === speakId;
   }
+}
+
+function toWav(samples: Float32Array): Uint8Array {
+  return pcmToWav(float32ToPcm16(samples), KITTEN_SAMPLE_RATE);
 }
 
 function clampRate(rate: number): number {
