@@ -30,3 +30,35 @@ jobs:
 
       - name: Store-kit gate (text limits, manifest agreement, asset dimensions)
         run: node scripts/store-check.mjs
+
+  popup-window:
+    # The 114px popup shipped because no check rendered the popup AS a popup
+    # window: jsdom has no layout, and viewport emulation cannot see this bug
+    # (an emulator sets the viewport, so a width-less body fills it). This job
+    # opens the real popup headless via chrome.action.openPopup() and asserts
+    # it lands at 320px with nothing overflowing. Needs no desktop or display.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install pinned dependencies
+        run: npm ci
+
+      - name: Build both targets
+        run: npm run build
+
+      - name: Install unbranded Chromium
+        # Must be Chromium, not branded Chrome: Google Chrome ignores
+        # --load-extension entirely ("--load-extension is not allowed in
+        # Google Chrome, ignoring" — verified live on Chrome 156), so the
+        # extension under test would never load there.
+        uses: browser-actions/setup-chromium@latest
+
+      - name: Popup opens as a popup window at 320px
+        run: node scripts/check-popup-window.mjs
