@@ -14,3 +14,17 @@ ff-research/
 store/pkg/*.zip
 .audit/
 store/pkg/*.sha256
+
+# Per-tool copies of the agent skills. They stay on disk for the tool that
+# reads them, but 8 mirrors of the same files (1.2k files, ~27 MB, 8x src)
+# duplicated every search result and inflated the code index.
+.claude/
+.gemini/
+.grok/
+.hermes/
+.pi/
+.qoder/
+.rovodev/
+.vibe/
+# Analysis output, not source: .impeccable/config.json and design.json stay.
+.impeccable/critique/
