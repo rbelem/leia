@@ -788,6 +788,41 @@ describe("theme swatches", () => {
   });
 });
 
+describe("help disclosure", () => {
+  it("tagline states the scope rule: selection, or the whole page", async () => {
+    await loadPopup();
+    expect(document.querySelector("header.masthead .tagline")?.textContent).toBe(
+      "Select text, or play the whole page.",
+    );
+  });
+
+  it("help costs one closed row naming scope, shortcut default, and voice sources", async () => {
+    await loadPopup();
+    const help = document.querySelector("details.help")!;
+    expect(help.hasAttribute("open")).toBe(false);
+    expect(help.querySelector("summary")?.textContent).toBe("How to use Leia");
+    const lines = [...help.querySelectorAll(".help-body p")].map((p) => p.textContent);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("selected text");
+    expect(lines[0]).toContain("whole page");
+    // The manifest declares Alt+Shift+L as the suggested key: a default
+    // the user can remap, never a hard binding.
+    expect(lines[1]).toContain("Alt+Shift+L");
+    expect(lines[1]).toMatch(/change/i);
+    expect(lines[2]).toContain("Voice sources");
+  });
+
+  it("summary toggles the disclosure open and closed", async () => {
+    await loadPopup();
+    const help = document.querySelector("details.help") as HTMLDetailsElement;
+    const summary = help.querySelector("summary")!;
+    summary.click();
+    expect(help.hasAttribute("open")).toBe(true);
+    summary.click();
+    expect(help.hasAttribute("open")).toBe(false);
+  });
+});
+
 describe("live broadcasts", () => {
   it("session:state refreshes status, speed and clears pending on stop", async () => {
     h.handlers["leia:reader:start"] = () => okReply(makeStatus({ state: "playing" }));
