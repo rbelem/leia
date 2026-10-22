@@ -60,7 +60,7 @@ function cuaCli(args, timeoutMs = 15_000) {
 }
 
 /** One `cua-driver call <tool> --arguments <json>`; resolves parsed JSON or null on failure. */
-async function cuaCall(tool, args) {
+export async function cuaCall(tool, args) {
   const { code, stdout, stderr } = await cuaCli(["call", tool, "--arguments", JSON.stringify(args)]);
   if (code !== 0) {
     if (process.env.LEIA_E2E_DEBUG) {
@@ -260,4 +260,58 @@ export async function clickAllow(browserPid) {
 /** Best-effort session teardown so the daemon's snapshot store does not leak. */
 export async function endSession() {
   await cuaCall("end_session", { session: CUA_SESSION });
+}
+
+// --- Primitives for a NEW cua e2e -----------------------------------------
+// Five environment traps cost a fresh author about ten round trips. The
+// primitives that absorb them live here; docs/cua-e2e.md carries the table.
+
+/**
+ * Revive a named session before use. A leftover end_session tombstone, or a
+ * daemon restart, makes every session-scoped call fail with "session has
+ * ended"; start_session is idempotent and clears it. Call from beforeAll.
+ */
+export async function reviveSession(session = CUA_SESSION) {
+  return (await cuaCall("start_session", { session })) !== null;
+}
+
+/**
+ * Browser windows as AT-SPI reports them, widest first. Match on app_name,
+ * never on the browser's pid: a flatpak Chromium's windows are attributed to
+ * its xdg-dbus-proxy pid, so a pid filter finds nothing.
+ */
+export async function findBrowserWindows(pid) {
+  const res = await cuaCall("list_windows", pid ? { pid } : {});
+  return (res?.windows ?? [])
+    .filter((w) => /chrom/i.test(w.app_name ?? ""))
+    .sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
+}
+
+/** First `[N]` row whose tree text matches `re`, as `<snapshot>:<N>`. */
+export function firstRow(snapshot, re) {
+  const snapshotId = snapshot?.snapshot_id;
+  if (!snapshotId) return null;
+  for (const line of (snapshot?.tree_markdown ?? "").split("\n")) {
+    const row = /^\s*-?\s*\[(\d+)\]\s+(.*)$/.exec(line);
+    if (row && re.test(row[2])) return `${snapshotId}:${row[1]}`;
+  }
+  return null;
+}
+
+/**
+ * Poll for a row. Chromium publishes its accessibility tree lazily after a
+ * launch, so an immediate read finds an empty or shallow tree. Pass
+ * `windowId` for a specific window, or omit it to walk whatever popup the pid
+ * has open (a menu is its own toplevel, not the browser frame).
+ */
+export async function waitForRow(session, pid, { query, re, windowId, timeoutMs = 10_000 }) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const args = { pid, include_screenshot: false, query, session };
+    if (windowId != null) args.window_id = windowId;
+    const token = firstRow(await cuaCall("get_window_state", args), re);
+    if (token) return token;
+    await sleep(400);
+  }
+  return null;
 }

@@ -115,3 +115,19 @@ xvfb-run -a dbus-run-session -- bash -c 'LEIA_E2E=1 npm run test:e2e'
 - **Process-group teardown**: kill the browser's whole process group
   (`detached: true` + `process.kill(-pid)`); killing only the leader leaves
   at-spi launcher/registry children behind.
+
+## Writing a new cua e2e
+
+Five environment traps cost a fresh author about ten round trips to
+rediscover. `tests/e2e/cua.mjs` now exports the primitives that absorb them:
+`reviveSession` for the tombstone, `findBrowserWindows` for attribution,
+`waitForRow` and `firstRow` for the lazy tree, and `cuaCall` for the CLI
+shape. Prefer those over a second copy.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| every session-scoped call fails with `session has ended` | a named session carries an `end_session` tombstone, or the daemon restarted | `reviveSession(session)` in `beforeAll`; `start_session` is idempotent |
+| `list_windows {pid: <chrome pid>}` returns nothing while the browser is visibly running | a flatpak Chromium's AT-SPI windows are attributed to its `xdg-dbus-proxy` pid, not the browser process | `findBrowserWindows()` and filter on `app_name`; never filter on the browser pid |
+| first snapshot after launch is empty or shallow (a few dozen nodes) | Chromium publishes its accessibility tree lazily | `waitForRow`, which polls on a bounded budget instead of reading once |
+| a click on an Extensions-menu row closes the menu and nothing opens | that row does not fire the action over AT-SPI in Chromium 152 | pin the action, then click the toolbar row; the menu is only a route to the pin toggle |
+| `press_key` refuses with `background_unavailable` | Wayland has no per-window background keyboard route | do not send keys; drive the target by `element_token`. `delivery_mode: "foreground"` is a user-visible takeover and needs explicit authorization |
