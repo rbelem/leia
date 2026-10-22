@@ -45,7 +45,11 @@ body {
   background: var(--bg);
   color: var(--ink);
 }
-body.popup { max-width: 320px; min-width: 0; padding: 12px 14px 14px; }
+/* Definite width, clamped by the viewport: without one the browser sizes the
+   extension popup window to the content's min-content width (~114px live,
+   selects collapse to 18px), and max-width alone never applies. The clamp
+   keeps the high-zoom reflow: at a 160px CSS viewport this resolves to 160. */
+body.popup { width: 320px; max-width: 100%; min-width: 0; padding: 12px 14px 14px; }
 body.options { max-width: 600px; margin: 0 auto; padding: 28px 20px 48px; font-size: 0.875rem; } /* 14px */
 
 ::selection { background: var(--accent-soft); }

@@ -168,7 +168,7 @@ The highlight layer ships five user-selectable wash themes — **sun** (default;
 
 Two fixed idioms, no grid system:
 
-- **Popup:** a single column capped at 320px (`max-width`, never a fixed width) that reflows down to narrow widths — transport and swatches wrap, selects shrink — so nothing strands off-screen at high zoom. Sections stack vertically, separated by 1px deckle-line top borders with heading-above, content-below rhythm (10px above, 12px below). Related controls group tightly (6–8px gaps); sections separate generously.
+- **Popup:** a single column at a definite 320px (`width`, clamped by `max-width: 100%`) that reflows down to narrow widths — transport and swatches wrap, selects shrink — so nothing strands off-screen at high zoom. The width must be definite: the browser sizes an extension popup window to the document's content width, and `max-width` alone lets it collapse to the narrowest control. Sections stack vertically, separated by 1px deckle-line top borders with heading-above, content-below rhythm (10px above, 12px below). Related controls group tightly (6–8px gaps); sections separate generously.
 - **Floating bar:** a horizontal pill, default-anchored 16px from the bottom-right viewport corner, `position: fixed` at the maximum z-index. The user can drag it anywhere; position clamps to the viewport on move and on window resize. A 4px movement threshold keeps drags from eating button clicks.
 - **Highlight layer:** no layout of its own — it inherits the host page's geometry and re-samples the local background every time it moves, so it adapts crossing code blocks and callouts.
 
