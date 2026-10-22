@@ -16,7 +16,7 @@
  * Exit 0: the popup opened at EXPECTED_WIDTH with nothing overflowing.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, openSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -51,6 +51,11 @@ if (!existsSync(join(DIST, "manifest.json"))) {
 }
 
 const profile = mkdtempSync(join(tmpdir(), "leia-popup-check-"));
+// The browser's stderr is the only witness when CDP never answers (missing
+// system libraries on a fresh runner, a crashing profile dir). Keep it and
+// print the tail on every early exit instead of failing blind.
+const childLog = join(tmpdir(), `leia-popup-check-${process.pid}.log`);
+const logFd = openSync(childLog, "w");
 const child = spawn(bin, [
   "--headless=new",
   "--no-sandbox",
@@ -59,7 +64,24 @@ const child = spawn(bin, [
   `--user-data-dir=${profile}`,
   `--load-extension=${DIST}`,
   "about:blank",
-], { stdio: "ignore" });
+], { stdio: ["ignore", "ignore", logFd] });
+child.on("error", () => {});
+child.on("exit", () => {});
+
+/** Kill the browser and fail, showing what it said before dying. */
+function fail(message) {
+  let tail = "";
+  try {
+    const lines = readFileSync(childLog, "utf8").trim().split("\n");
+    tail = lines.slice(-15).join("\n");
+  } catch {
+    tail = "(no browser log captured)";
+  }
+  child.kill();
+  console.error(message);
+  if (tail) console.error(`--- browser stderr (tail) ---\n${tail}`);
+  process.exit(1);
+}
 
 const list = async () => {
   try {
@@ -80,9 +102,7 @@ for (let i = 0; i < 60; i++) {
   await sleep(250);
 }
 if (!ready) {
-  console.error("browser never answered CDP");
-  child.kill();
-  process.exit(1);
+  fail("browser never answered CDP");
 }
 
 // Leia is MV3, so its id rides the service_worker target — but a fresh
@@ -110,14 +130,12 @@ for (let i = 0; i < 40 && !extensionId; i++) {
 }
 if (!extensionId) {
   const anySw = (await list()).some((t) => t.type === "service_worker");
-  console.error(
+  fail(
     "could not discover the unpacked extension id — is dist/chrome loadable?" +
       (anySw
         ? " (the browser runs extensions, but not this one: branded Google Chrome ignores --load-extension — use unbranded Chromium)"
         : ""),
   );
-  child.kill();
-  process.exit(1);
 }
 // Open an extension page so chrome.action is callable. The APIs are injected
 // asynchronously, so poll for the surface instead of assuming a delay.
@@ -158,9 +176,7 @@ if (!actionReady) {
     pageTarget,
     `JSON.stringify({ href: location.href, hasChrome: typeof chrome, hasAction: typeof chrome?.action, openPopup: typeof chrome?.action?.openPopup })`,
   ).catch(() => "evaluate failed");
-  console.error(`chrome.action.openPopup never became callable. url=${pageTarget.url} surface=${surface}`);
-  child.kill();
-  process.exit(1);
+  fail(`chrome.action.openPopup never became callable. url=${pageTarget.url} surface=${surface}`);
 }
 
 const opened = await evaluate(
@@ -198,8 +214,7 @@ const measured = popup
 
 child.kill();
 if (!popup) {
-  console.error(`popup did not open (chrome.action.openPopup -> ${opened})`);
-  process.exit(1);
+  fail(`popup did not open (chrome.action.openPopup -> ${opened})`);
 }
 const ok = measured.innerWidth === EXPECTED_WIDTH && measured.overflow === 0;
 console.log(
