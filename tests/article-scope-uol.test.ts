@@ -5,9 +5,15 @@
 // died with "extracted article produced no readable tokens". The fixture
 // is the live DOM (script/link/svg/iframes stripped, <style> kept — it is
 // the trigger) dumped via CDP from the real page.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { captureScopeDetailed } from "../src/content/scope";
 import fixtureHtml from "./fixtures/uol-fachin.html?raw";
+
+// These cases parse a 400-900 KB HTML fixture with Readability in jsdom.
+// Warm that is ~1.7s; under parallel suite load it exceeds the 5s default
+// and reddens the suite intermittently. Bound it here, not globally, so a
+// genuinely hanging test elsewhere still fails fast.
+vi.setConfig({ testTimeout: 30_000 });
 
 function loadFixture(): void {
   const parsed = new DOMParser().parseFromString(fixtureHtml, "text/html");

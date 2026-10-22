@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { captureArticle, captureScope, captureScopeDetailed } from "../src/content/scope";
+
+// These cases parse a 400-900 KB HTML fixture with Readability in jsdom.
+// Warm that is ~1.7s; under parallel suite load it exceeds the 5s default
+// and reddens the suite intermittently. Bound it here, not globally, so a
+// genuinely hanging test elsewhere still fails fast.
+vi.setConfig({ testTimeout: 30_000 });
 
 /** Article with global noise OUTSIDE the article root (nav/aside/footer). */
 function articleFixture(): void {

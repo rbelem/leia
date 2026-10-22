@@ -6,9 +6,15 @@
 // the page opened with the "Política" section eyebrow instead of the h1,
 // followed by byline and sibling-chunk junk. The fixture is the live DOM
 // (scripts/iframes/links stripped) dumped via CDP from the real page.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { captureScopeDetailed } from "../src/content/scope";
 import fixtureHtml from "./fixtures/uol-title-cover.html?raw";
+
+// These cases parse a 400-900 KB HTML fixture with Readability in jsdom.
+// Warm that is ~1.7s; under parallel suite load it exceeds the 5s default
+// and reddens the suite intermittently. Bound it here, not globally, so a
+// genuinely hanging test elsewhere still fails fast.
+vi.setConfig({ testTimeout: 30_000 });
 
 const H1 = "Caso Master: Fachin pede explicações a Moraes, Mendonça, Gonet e Andrei";
 
