@@ -72,6 +72,3 @@ jobs:
         run: node scripts/check-popup-window.mjs
         env:
           CHROME_BIN: ${{ steps.setup-chromium.outputs.chrome-path }}
-
-      - name: Popup opens as a popup window at 320px
-        run: node scripts/check-popup-window.mjs

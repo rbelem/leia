@@ -45,6 +45,21 @@ if (!bin) {
   console.error("no Chrome/Chromium binary found — set CHROME_BIN");
   process.exit(2);
 }
+let browserVersion = "unknown";
+try {
+  browserVersion = execFileSync(bin, ["--version"], { encoding: "utf8" }).trim();
+} catch {
+  // version is context, not load-bearing
+}
+console.log(`browser: ${bin} (${browserVersion})`);
+if (/^Google Chrome\b/.test(browserVersion)) {
+  console.error(
+    "refusing to run against branded Google Chrome: it ignores --load-extension, " +
+      "so the extension under test would never load. Use unbranded Chromium " +
+      "(CI installs a pinned Chromium snapshot and passes it as CHROME_BIN).",
+  );
+  process.exit(2);
+}
 if (!existsSync(join(DIST, "manifest.json"))) {
   console.error("dist/chrome missing — run `npm run build` first");
   process.exit(2);
