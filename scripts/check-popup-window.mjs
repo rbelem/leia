@@ -16,7 +16,7 @@
  * Exit 0: the popup opened at EXPECTED_WIDTH with nothing overflowing.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,7 +25,7 @@ const PORT = Number(process.env.POPUP_CHECK_PORT ?? 9445);
 const DIST = join(process.cwd(), "dist", "chrome");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** CHROME_BIN wins (CI points it at Chrome for Testing); else the usual names. */
+/** CHROME_BIN wins (CI passes the setup-chrome chrome-path output); else the usual names. */
 function chromeBinary() {
   const explicit = process.env.CHROME_BIN;
   if (explicit) return existsSync(explicit) ? explicit : null;
@@ -85,14 +85,25 @@ if (!ready) {
   process.exit(1);
 }
 
-// Leia is MV3, so its id rides the service_worker target
-// (background_page targets belong to component extensions — taking the first
-// chrome-extension:// target grabs the wrong id). Poll until it registers.
+// Leia is MV3, so its id rides the service_worker target — but a fresh
+// profile also registers component-extension service workers, so matching any
+// service_worker grabs the wrong id (observed in CI: an options page that
+// 404s as chrome-error://). Match the worker path the manifest declares.
 let extensionId = null;
+let swPath = null;
+try {
+  const manifest = JSON.parse(readFileSync(join(DIST, "manifest.json"), "utf8"));
+  swPath = manifest?.background?.service_worker ?? null;
+} catch {
+  swPath = null;
+}
 for (let i = 0; i < 40 && !extensionId; i++) {
   const targets = await list();
   const sw = targets.find(
-    (t) => t.type === "service_worker" && (t.url ?? "").startsWith("chrome-extension://"),
+    (t) =>
+      t.type === "service_worker" &&
+      (t.url ?? "").startsWith("chrome-extension://") &&
+      (!swPath || (t.url ?? "").endsWith(`/${swPath}`)),
   );
   if (sw) extensionId = new URL(sw.url).host;
   else await sleep(250);

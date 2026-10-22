@@ -54,11 +54,21 @@ jobs:
         run: npm run build
 
       - name: Install unbranded Chromium
-        # Must be Chromium, not branded Chrome: Google Chrome ignores
-        # --load-extension entirely ("--load-extension is not allowed in
-        # Google Chrome, ignoring" — verified live on Chrome 156), so the
-        # extension under test would never load there.
-        uses: browser-actions/setup-chromium@latest
+        id: setup-chromium
+        # Pinned SHA of setup-chrome v2.2.0. chrome-version latest means the
+        # latest Chromium snapshot (unbranded); default stable would be Chrome
+        # for Testing, and branded Google Chrome ignores --load-extension
+        # entirely ("not allowed in Google Chrome", verified live on Chrome
+        # 156), so the extension under test would never load there.
+        uses: browser-actions/setup-chrome@48ad923757ca736639badbdf9fef4c7e9982 # v2.2.0
+        with:
+          chrome-version: latest
+
+      - name: Popup opens as a popup window at 320px
+        timeout-minutes: 5
+        run: node scripts/check-popup-window.mjs
+        env:
+          CHROME_BIN: ${{ steps.setup-chromium.outputs.chrome-path }}
 
       - name: Popup opens as a popup window at 320px
         run: node scripts/check-popup-window.mjs
