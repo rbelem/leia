@@ -84,8 +84,12 @@ async function waitPopupTarget(port, timeoutMs = 2500) {
 async function openPopup(win, port) {
   let lastMiss = "no rounds ran";
   for (let round = 1; round <= 3; round++) {
-    // A fresh snapshot store per round: repeated identical reads can keep
-    // serving a stale empty projection while a fresh read hits immediately.
+    // A fresh snapshot store per round. Observed, not fully explained:
+    // repeated identical reads kept missing for a full 10s budget while a
+    // single fresh read hit immediately seconds apart, in both directions
+    // across runs — consistent with stale daemon-side state keyed by
+    // session, but never proven. So each round starts clean instead of
+    // trusting the previous round's store.
     const session = `${SESSION}-r${round}`;
     await reviveSession(session);
     const attempt = await tryOpenPopup(win, port, session);
